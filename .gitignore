@@ -34,3 +34,5 @@
 # Crash reports de Unity
 sysinfo.txt
 crashlytics-build.properties
+
+/tmp

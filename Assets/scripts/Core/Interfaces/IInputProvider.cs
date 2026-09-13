@@ -1,18 +1,38 @@
 using UnityEngine;
 
 /// <summary>
-/// Interface defining the contract for input providers, decoupling input sources from movement logic.
-/// Follows the Interface Segregation and Dependency Inversion principles.
+/// Defines the contract for input delivery in a 2.5D action-platformer.
+/// Follows Interface Segregation and Dependency Inversion principles.
 /// </summary>
 public interface IInputProvider
 {
     /// <summary>
-    /// Normalized or raw 2D input direction (X = horizontal, Y = vertical).
+    /// Horizontal axis input (-1f to 1f: left/right).
     /// </summary>
-    Vector2 MoveInput { get; }
+    float HorizontalMove { get; }
 
     /// <summary>
-    /// Indicates whether active movement input is being received.
+    /// Indicates whether sprint button/key is held down.
     /// </summary>
-    bool HasMoveInput { get; }
+    bool IsSprintPressed { get; }
+
+    /// <summary>
+    /// Indicates whether jump input was pressed this cycle.
+    /// </summary>
+    bool IsJumpTriggered { get; }
+
+    /// <summary>
+    /// Indicates whether slide input was pressed this cycle.
+    /// </summary>
+    bool IsSlideTriggered { get; }
+
+    /// <summary>
+    /// Consumes the pending jump trigger to prevent repeated executions across physics steps.
+    /// </summary>
+    bool ConsumeJumpTrigger();
+
+    /// <summary>
+    /// Consumes the pending slide trigger to prevent repeated executions.
+    /// </summary>
+    bool ConsumeSlideTrigger();
 }

@@ -1,67 +1,93 @@
 using UnityEngine;
 
 /// <summary>
-/// Controls smooth camera tracking of the player ball across the horizontal plane (X and Z axes),
-/// while maintaining a fixed vertical height (Y axis) and orthographic projection framing.
-/// Adheres to Single Responsibility Principle (SRP) and avoids GC allocations in the update loop.
+/// Controls 2.5D side-scroller camera tracking.
+/// Follows the player along the horizontal X axis, provides damped tracking along the vertical Y axis
+/// to accommodate high platforms without jitter during small jumps, and locks depth distance along Z.
+/// Generates zero GC allocations per frame in LateUpdate.
 /// </summary>
 public class CameraFollow : MonoBehaviour
 {
     [Header("Target Tracking")]
-    [Tooltip("Target transform to track. If unassigned, automatically detects the Player.")]
+    [Tooltip("Target transform to follow. Automatically finds Player if left unassigned.")]
     [SerializeField] private Transform target;
 
-    [Tooltip("Automatically finds the Player GameObject on Awake if target is null.")]
+    [Tooltip("Automatically searches for the Player GameObject on Awake.")]
     [SerializeField] private bool autoDetectTarget = true;
 
-    [Header("Offset Configuration")]
-    [Tooltip("Offset distance relative to the target.")]
-    [SerializeField] private Vector3 offset;
+    [Header("Offset & Depth")]
+    [Tooltip("Camera offset relative to target. Z controls the lateral viewing distance.")]
+    [SerializeField] private Vector3 offset = new Vector3(0f, 2f, -10f);
 
-    [Tooltip("Automatically calculates offset from the initial scene position.")]
+    [Tooltip("Automatically computes offset from initial scene placement.")]
     [SerializeField] private bool autoCalculateOffset = true;
 
-    [Header("Smoothing Settings")]
-    [Tooltip("Approximate time it takes to reach the target position (lower is faster/snappier).")]
-    [SerializeField] private float smoothTime = 0.2f;
+    [Header("Smoothing")]
+    [Tooltip("Horizontal tracking responsiveness (lower is snappier).")]
+    [SerializeField] private float smoothTimeX = 0.15f;
 
-    [Header("Axis Constraints")]
-    [Tooltip("Locks the vertical Y position to preserve top-down camera height.")]
-    [SerializeField] private bool lockY = true;
+    [Tooltip("Vertical tracking responsiveness. Higher value cushions small jumps while following tall platforms.")]
+    [SerializeField] private float smoothTimeY = 0.35f;
 
-    private Vector3 _currentVelocity;
-    private float _fixedY;
+    [Tooltip("Vertical distance the player can move before camera begins vertical tracking.")]
+    [SerializeField] private float verticalDeadZone = 1.2f;
+
+    [Header("Framing & Zoom")]
+    [Tooltip("If true and camera is orthographic, applies an expanded framing size for vertical visibility.")]
+    [SerializeField] private bool adjustOrthographicSize = true;
+
+    [Tooltip("Target orthographic size (6.5 gives optimal visibility for elevated platforms).")]
+    [SerializeField] private float targetOrthographicSize = 6.5f;
+
+    private Camera _camera;
+    private float _velocityX;
+    private float _velocityY;
+    private float _currentCameraY;
 
     private void Awake()
     {
+        _camera = GetComponent<Camera>();
+        if (_camera != null && _camera.orthographic && adjustOrthographicSize)
+        {
+            _camera.orthographicSize = targetOrthographicSize;
+        }
+
         InitializeTarget();
         InitializeOffset();
+
+        _currentCameraY = transform.position.y;
     }
 
     private void LateUpdate()
     {
         if (target == null) return;
 
-        // Calculate target destination combining player position and horizontal offset
-        Vector3 targetPosition = target.position + offset;
+        Vector3 targetPos = target.position;
 
-        if (lockY)
+        // 1. Horizontal Tracking (X)
+        float targetX = targetPos.x + offset.x;
+        float newX = Mathf.SmoothDamp(transform.position.x, targetX, ref _velocityX, smoothTimeX);
+
+        // 2. Vertical Tracking (Y) with deadzone to cushion jumps
+        float targetY = targetPos.y + offset.y;
+        float deltaY = targetY - _currentCameraY;
+
+        if (Mathf.Abs(deltaY) > verticalDeadZone)
         {
-            targetPosition.y = _fixedY;
+            float desiredY = targetY - Mathf.Sign(deltaY) * verticalDeadZone;
+            _currentCameraY = Mathf.SmoothDamp(_currentCameraY, desiredY, ref _velocityY, smoothTimeY);
+        }
+        else
+        {
+            _currentCameraY = Mathf.SmoothDamp(_currentCameraY, targetY, ref _velocityY, smoothTimeY * 1.5f);
         }
 
-        // Smoothly damp towards destination without memory allocations
-        transform.position = Vector3.SmoothDamp(
-            transform.position,
-            targetPosition,
-            ref _currentVelocity,
-            smoothTime
-        );
+        // 3. Fixed Depth (Z)
+        float fixedZ = offset.z;
+
+        transform.position = new Vector3(newX, _currentCameraY, fixedZ);
     }
 
-    /// <summary>
-    /// Discovers the player target if not manually assigned in the Inspector.
-    /// </summary>
     private void InitializeTarget()
     {
         if (target != null || !autoDetectTarget) return;
@@ -73,29 +99,23 @@ public class CameraFollow : MonoBehaviour
         }
         else
         {
-            GameObject playerObject = GameObject.FindGameObjectWithTag("Player");
-            if (playerObject != null)
+            GameObject playerObj = GameObject.FindGameObjectWithTag("Player");
+            if (playerObj != null)
             {
-                target = playerObject.transform;
+                target = playerObj.transform;
             }
         }
     }
 
-    /// <summary>
-    /// Configures the initial offset between camera and player.
-    /// </summary>
     private void InitializeOffset()
     {
-        _fixedY = transform.position.y;
-
         if (autoCalculateOffset && target != null)
         {
             offset = transform.position - target.position;
         }
-        else if (offset == Vector3.zero)
+        else if (offset.z >= 0f)
         {
-            // Default pinball camera offset based on scene setup (Y: 13.6, Z: -4.1)
-            offset = new Vector3(0f, 13.6f, -4.1f);
+            offset.z = -10f; // Ensure standard side-view depth
         }
     }
 }

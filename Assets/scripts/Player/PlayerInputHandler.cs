@@ -2,75 +2,125 @@ using UnityEngine;
 using UnityEngine.InputSystem;
 
 /// <summary>
-/// Component responsible solely for capturing and exposing player input through the New Input System.
-/// Adheres to Single Responsibility Principle (SRP) and implements IInputProvider.
-/// Generates zero GC allocations per frame during the update loop.
+/// Handles player input capture for 2.5D movement using Unity's New Input System with keyboard fallbacks.
+/// Adheres to Single Responsibility Principle (SRP) and generates zero GC allocations per frame.
 /// </summary>
 public class PlayerInputHandler : MonoBehaviour, IInputProvider
 {
-    [Header("Input Configuration")]
-    [Tooltip("Optional reference to an InputAction in an .inputactions asset. If not assigned, attempts to find 'Move' action or falls back to direct Keyboard polling.")]
+    [Header("Optional Input Actions")]
+    [Tooltip("Optional reference to a move action (Vector2 or Axis).")]
     [SerializeField] private InputActionReference moveActionReference;
 
-    private InputAction _activeAction;
-    private Vector2 _moveInput;
-    private bool _hasMoveInput;
+    [Tooltip("Optional reference to jump action.")]
+    [SerializeField] private InputActionReference jumpActionReference;
 
-    public Vector2 MoveInput => _moveInput;
-    public bool HasMoveInput => _hasMoveInput;
+    [Tooltip("Optional reference to sprint action.")]
+    [SerializeField] private InputActionReference sprintActionReference;
 
-    private void Awake()
-    {
-        InitializeAction();
-    }
+    [Tooltip("Optional reference to slide action.")]
+    [SerializeField] private InputActionReference slideActionReference;
+
+    private float _horizontalMove;
+    private bool _isSprintPressed;
+    private bool _isJumpTriggered;
+    private bool _isSlideTriggered;
+
+    public float HorizontalMove => _horizontalMove;
+    public bool IsSprintPressed => _isSprintPressed;
+    public bool IsJumpTriggered => _isJumpTriggered;
+    public bool IsSlideTriggered => _isSlideTriggered;
 
     private void OnEnable()
     {
-        _activeAction?.Enable();
+        moveActionReference?.action?.Enable();
+        jumpActionReference?.action?.Enable();
+        sprintActionReference?.action?.Enable();
+        slideActionReference?.action?.Enable();
     }
 
     private void OnDisable()
     {
-        _activeAction?.Disable();
+        moveActionReference?.action?.Disable();
+        jumpActionReference?.action?.Disable();
+        sprintActionReference?.action?.Disable();
+        slideActionReference?.action?.Disable();
     }
 
     private void Update()
     {
-        if (_activeAction != null)
+        ReadInput();
+    }
+
+    private void ReadInput()
+    {
+        // 1. Horizontal Movement
+        if (moveActionReference != null && moveActionReference.action != null)
         {
-            // Reading Vector2 from InputAction generates zero garbage allocations
-            _moveInput = _activeAction.ReadValue<Vector2>();
+            Vector2 moveVec = moveActionReference.action.ReadValue<Vector2>();
+            _horizontalMove = moveVec.x;
         }
         else if (Keyboard.current != null)
         {
-            // Zero-allocation fallback for instant playability without manual Inspector binding
-            float x = 0f;
-            float y = 0f;
-
             var keyboard = Keyboard.current;
-            if (keyboard.wKey.isPressed || keyboard.upArrowKey.isPressed) y += 1f;
-            if (keyboard.sKey.isPressed || keyboard.downArrowKey.isPressed) y -= 1f;
-            if (keyboard.aKey.isPressed || keyboard.leftArrowKey.isPressed) x -= 1f;
-            if (keyboard.dKey.isPressed || keyboard.rightArrowKey.isPressed) x += 1f;
-
-            _moveInput = new Vector2(x, y);
+            float move = 0f;
+            if (keyboard.dKey.isPressed || keyboard.rightArrowKey.isPressed) move += 1f;
+            if (keyboard.aKey.isPressed || keyboard.leftArrowKey.isPressed) move -= 1f;
+            _horizontalMove = move;
         }
 
-        _hasMoveInput = _moveInput.sqrMagnitude > 0.001f;
+        // 2. Sprint Input
+        if (sprintActionReference != null && sprintActionReference.action != null)
+        {
+            _isSprintPressed = sprintActionReference.action.IsPressed();
+        }
+        else if (Keyboard.current != null)
+        {
+            var keyboard = Keyboard.current;
+            _isSprintPressed = keyboard.leftShiftKey.isPressed || keyboard.rightShiftKey.isPressed;
+        }
+
+        // 3. Jump Trigger
+        if (jumpActionReference != null && jumpActionReference.action != null)
+        {
+            if (jumpActionReference.action.WasPressedThisFrame())
+            {
+                _isJumpTriggered = true;
+            }
+        }
+        else if (Keyboard.current != null && Keyboard.current.spaceKey.wasPressedThisFrame)
+        {
+            _isJumpTriggered = true;
+        }
+
+        // 4. Slide Trigger
+        if (slideActionReference != null && slideActionReference.action != null)
+        {
+            if (slideActionReference.action.WasPressedThisFrame())
+            {
+                _isSlideTriggered = true;
+            }
+        }
+        else if (Keyboard.current != null)
+        {
+            var keyboard = Keyboard.current;
+            if (keyboard.leftCtrlKey.wasPressedThisFrame || keyboard.rightCtrlKey.wasPressedThisFrame)
+            {
+                _isSlideTriggered = true;
+            }
+        }
     }
 
-    /// <summary>
-    /// Configures the active input action from the assigned reference or searches for a default action.
-    /// </summary>
-    private void InitializeAction()
+    public bool ConsumeJumpTrigger()
     {
-        if (moveActionReference != null && moveActionReference.action != null)
-        {
-            _activeAction = moveActionReference.action;
-        }
-        else
-        {
-            _activeAction = InputSystem.actions?.FindAction("Move");
-        }
+        bool triggered = _isJumpTriggered;
+        _isJumpTriggered = false;
+        return triggered;
+    }
+
+    public bool ConsumeSlideTrigger()
+    {
+        bool triggered = _isSlideTriggered;
+        _isSlideTriggered = false;
+        return triggered;
     }
 }

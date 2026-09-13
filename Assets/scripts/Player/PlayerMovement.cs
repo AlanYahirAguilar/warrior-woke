@@ -1,151 +1,195 @@
+using System.Collections;
 using UnityEngine;
 
 /// <summary>
-/// Handles physics-based movement and velocity management on the Rigidbody.
-/// Follows Single Responsibility Principle (SRP) by focusing strictly on movement dynamics.
-/// Optimized according to project best practices: cached references, zero GC allocations, and FixedUpdate execution.
+/// Controls 2.5D platformer physical movement for Kael (Fase 1).
+/// Enforces Z-axis and full rotation constraints, handles sprinting, jumping, and sliding.
+/// Complies with SOLID principles: delegates ground checking to IGroundChecker (DIP/SRP)
+/// and structures logic into cohesive, single-responsibility methods.
 /// </summary>
 [RequireComponent(typeof(Rigidbody))]
 public class PlayerMovement : MonoBehaviour
 {
-    [Header("Movement Dynamics")]
-    [Tooltip("Force applied in world X and Z coordinates.")]
-    [SerializeField] private float moveForce = 25f;
+[Header("Movement Velocities")]
+    [Tooltip("Base horizontal movement speed.")]
+    [SerializeField] private float speed = 8f; 
 
-    [Tooltip("Maximum allowed horizontal velocity on the plane.")]
-    [SerializeField] private float maxSpeed = 12f;
+    [Tooltip("Sprint horizontal movement speed.")]
+    [SerializeField] private float sprintSpeed = 11.5f;
 
-    [Tooltip("Rate at which the sphere decelerates horizontally when no movement input is provided.")]
-    [SerializeField] private float decelerationRate = 6f;
+    [Tooltip("Slide horizontal boost speed.")]
+    [SerializeField] private float slideSpeed = 14f;
 
-    [Tooltip("Type of force applied to the Rigidbody.")]
-    [SerializeField] private ForceMode forceMode = ForceMode.Force;
+    [Header("Jumping")]
+    [Tooltip("Vertical speed applied when jumping.")]
+    [SerializeField] private float jumpSpeed = 7f;
 
-    [Header("Rolling Animation")]
-    [Tooltip("Enables never-slip procedural rolling rotation synchronized with displacement.")]
-    [SerializeField] private bool enableRollingRotation = true;
+    [Header("Sliding Configuration")]
+    [Tooltip("Duration of the slide maneuver in seconds.")]
+    [SerializeField] private float slideDuration = 0.7f;
+
+    [Tooltip("Layer mask checked to prevent standing up under low ceilings.")]
+    [SerializeField] private LayerMask ceilingLayer = ~0;
+
+    [Header("Facing Direction")]
+    [Tooltip("Rotates the transform to face the horizontal direction of movement.")]
+    [SerializeField] private bool faceMovementDirection = true;
 
     private Rigidbody _rigidbody;
-    private float _sphereRadius;
+    private CapsuleCollider _capsuleCollider;
+    private IGroundChecker _groundChecker;
+    private WaitForSeconds _slideWait;
 
-    public float MoveForce
-    {
-        get => moveForce;
-        set => moveForce = Mathf.Max(0f, value);
-    }
+    private bool _isSliding;
+    private float _originalColliderHeight;
+    private Vector3 _originalColliderCenter;
+    private float _facingDirection = 1f;
 
-    public float MaxSpeed
-    {
-        get => maxSpeed;
-        set => maxSpeed = Mathf.Max(0f, value);
-    }
-
-    public float DecelerationRate
-    {
-        get => decelerationRate;
-        set => decelerationRate = Mathf.Max(0f, value);
-    }
-
-    public bool EnableRollingRotation
-    {
-        get => enableRollingRotation;
-        set => enableRollingRotation = value;
-    }
+    public bool IsGrounded => _groundChecker != null && _groundChecker.IsGrounded;
+    public bool IsSliding => _isSliding;
 
     private void Awake()
     {
-        // Cache Rigidbody component once during initialization to avoid lookups in the loop
-        _rigidbody = GetComponent<Rigidbody>();
-
-        // Calculate effective world radius of the sphere for accurate rolling speed (v = omega * r)
-        SphereCollider sphereCollider = GetComponent<SphereCollider>();
-        if (sphereCollider != null)
-        {
-            Vector3 scale = transform.lossyScale;
-            float maxScale = Mathf.Max(scale.x, Mathf.Max(scale.y, scale.z));
-            _sphereRadius = sphereCollider.radius * maxScale;
-        }
-        else
-        {
-            _sphereRadius = 0.75f;
-        }
+        InitializeComponents();
+        ConfigurePhysicsConstraints();
+        CacheSlideConfiguration();
     }
 
     /// <summary>
-    /// Processes physical movement based on a given 2D input vector.
-    /// Should be called during FixedUpdate to maintain timestep synchronization.
+    /// Master physics processing loop called each FixedUpdate.
     /// </summary>
-    /// <param name="inputDirection">2D direction vector (X = left/right, Y = forward/back).</param>
-    public void ProcessMovement(Vector2 inputDirection)
+    public void ProcessMovement(float horizontalInput, bool isSprint, bool jumpTriggered, bool slideTriggered)
     {
         if (_rigidbody == null) return;
 
-        Vector3 currentVelocity = _rigidbody.linearVelocity;
-        Vector3 horizontalVelocity = new Vector3(currentVelocity.x, 0f, currentVelocity.z);
+        UpdateGroundStatus();
+        HandleSlide(slideTriggered, horizontalInput);
 
-        if (inputDirection.sqrMagnitude > 0.001f)
+        // Calculate target velocity once to avoid overriding physics engine state mid-frame
+        Vector3 targetVelocity = _rigidbody.linearVelocity;
+        targetVelocity.z = 0f; // Enforce 2.5D constraint
+
+        ApplyHorizontalVelocity(ref targetVelocity, horizontalInput, isSprint);
+        HandleJump(ref targetVelocity, jumpTriggered);
+
+        // Apply final velocity
+        _rigidbody.linearVelocity = targetVelocity;
+
+        UpdateFacingDirection(horizontalInput);
+    }
+
+    private void InitializeComponents()
+    {
+        _rigidbody = GetComponent<Rigidbody>();
+        _capsuleCollider = GetComponent<CapsuleCollider>();
+
+        // Dependency Inversion: resolve IGroundChecker or fallback safely
+        _groundChecker = GetComponent<IGroundChecker>();
+        if (_groundChecker == null)
         {
-            // Normalize direction if magnitude exceeds 1 to prevent diagonal speed boosting
-            Vector2 direction = inputDirection.sqrMagnitude > 1f ? inputDirection.normalized : inputDirection;
-            Vector3 force = new Vector3(direction.x, 0f, direction.y) * moveForce;
-
-            _rigidbody.AddForce(force, forceMode);
-
-            // Clamp maximum horizontal speed while preserving vertical (gravity/bounce) velocity
-            if (horizontalVelocity.sqrMagnitude > maxSpeed * maxSpeed)
-            {
-                horizontalVelocity = horizontalVelocity.normalized * maxSpeed;
-                _rigidbody.linearVelocity = new Vector3(horizontalVelocity.x, currentVelocity.y, horizontalVelocity.z);
-            }
-        }
-        else
-        {
-            // Apply controlled horizontal deceleration when no movement keys are pressed
-            if (horizontalVelocity.sqrMagnitude > 0.0001f)
-            {
-                Vector3 dampedHorizontalVelocity = Vector3.MoveTowards(
-                    horizontalVelocity,
-                    Vector3.zero,
-                    decelerationRate * Time.fixedDeltaTime
-                );
-
-                _rigidbody.linearVelocity = new Vector3(
-                    dampedHorizontalVelocity.x,
-                    currentVelocity.y,
-                    dampedHorizontalVelocity.z
-                );
-            }
-        }
-
-        // Apply synchronized angular velocity for realistic, slip-free ball rolling
-        if (enableRollingRotation)
-        {
-            ApplyRollingRotation();
+            _groundChecker = gameObject.AddComponent<GroundChecker>();
         }
     }
 
-    /// <summary>
-    /// Synchronizes angular velocity with horizontal linear displacement (v = omega * r).
-    /// Ensures ball texture rotates precisely without sliding or slipping across the surface.
-    /// </summary>
-    private void ApplyRollingRotation()
+    private void ConfigurePhysicsConstraints()
     {
-        Vector3 currentVelocity = _rigidbody.linearVelocity;
-        Vector3 horizontalVelocity = new Vector3(currentVelocity.x, 0f, currentVelocity.z);
-        float speed = horizontalVelocity.magnitude;
+        // Enforce strict 2.5D physics constraints: freeze depth (Z) and all rotations
+        _rigidbody.constraints = RigidbodyConstraints.FreezePositionZ | RigidbodyConstraints.FreezeRotation;
+    }
 
-        if (speed > 0.05f && _sphereRadius > 0.001f)
-        {
-            // Rolling axis is perpendicular to movement on the horizontal plane
-            Vector3 rollAxis = Vector3.Cross(Vector3.up, horizontalVelocity / speed);
-            float angularSpeed = speed / _sphereRadius;
+    private void CacheSlideConfiguration()
+    {
+        // Cache coroutine wait object to eliminate GC pressure per best practices
+        _slideWait = new WaitForSeconds(slideDuration);
 
-            _rigidbody.angularVelocity = rollAxis * angularSpeed;
-        }
-        else
+        if (_capsuleCollider != null)
         {
-            // Stop rotational drift when the ball comes to a halt
-            _rigidbody.angularVelocity = Vector3.zero;
+            _originalColliderHeight = _capsuleCollider.height;
+            _originalColliderCenter = _capsuleCollider.center;
         }
+    }
+
+    private void UpdateGroundStatus()
+    {
+        _groundChecker?.CheckGrounded();
+    }
+
+    private void HandleJump(ref Vector3 currentVelocity, bool jumpTriggered)
+    {
+        if (jumpTriggered)
+        {
+            if (IsGrounded && !_isSliding)
+            {
+                currentVelocity.y = jumpSpeed;
+                Debug.Log($"[PlayerMovement] Salto ejecutado! Velocidad Y: {jumpSpeed}");
+            }
+            else
+            {
+                Debug.Log($"[PlayerMovement] Salto denegado -> IsGrounded: {IsGrounded} | IsSliding: {_isSliding}");
+            }
+        }
+    }
+
+    private void HandleSlide(bool slideTriggered, float horizontalInput)
+    {
+        if (slideTriggered && IsGrounded && !_isSliding && Mathf.Abs(horizontalInput) > 0.1f)
+        {
+            StartCoroutine(SlideRoutine());
+        }
+    }
+
+    private void ApplyHorizontalVelocity(ref Vector3 currentVelocity, float horizontalInput, bool isSprint)
+    {
+        float currentSpeed = speed;
+
+        if (_isSliding)
+        {
+            currentSpeed = slideSpeed;
+            horizontalInput = _facingDirection; // Preserve slide momentum forward
+        }
+        else if (isSprint)
+        {
+            currentSpeed = sprintSpeed;
+        }
+
+        currentVelocity.x = horizontalInput * currentSpeed;
+    }
+
+    private void UpdateFacingDirection(float horizontalInput)
+    {
+        if (!faceMovementDirection || _isSliding || Mathf.Abs(horizontalInput) <= 0.05f) return;
+
+        _facingDirection = Mathf.Sign(horizontalInput);
+        transform.rotation = Quaternion.Euler(0f, _facingDirection > 0 ? 90f : -90f, 0f);
+    }
+
+    private IEnumerator SlideRoutine()
+    {
+        _isSliding = true;
+
+        if (_capsuleCollider != null)
+        {
+            // Halve the collider height and drop center towards the floor
+            _capsuleCollider.height = _originalColliderHeight * 0.5f;
+            _capsuleCollider.center = new Vector3(_originalColliderCenter.x, _originalColliderCenter.y * 0.5f, _originalColliderCenter.z);
+        }
+
+        yield return _slideWait;
+
+        // Ceiling raycast: stay crouched if an overhead obstacle prevents standing
+        if (_capsuleCollider != null)
+        {
+            float ceilingRayLength = _originalColliderHeight * 0.8f;
+            while (Physics.Raycast(transform.position, Vector3.up, ceilingRayLength, ceilingLayer))
+            {
+                yield return null;
+            }
+
+            // Restore normal collider boundaries
+            _capsuleCollider.height = _originalColliderHeight;
+            _capsuleCollider.center = _originalColliderCenter;
+        }
+
+        _isSliding = false;
     }
 }
