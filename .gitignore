@@ -8,6 +8,7 @@
 /[Ll]ogs/
 /[Uu]serSettings/
 /[Mm]emoryCaptures/
+/[Uu]IElementsSchema/
 
 # Archivos de soluciones e IDEs (Visual Studio, Rider, VS Code)
 *.csproj
