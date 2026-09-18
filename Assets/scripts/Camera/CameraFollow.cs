@@ -9,10 +9,10 @@ using UnityEngine;
 public class CameraFollow : MonoBehaviour
 {
     [Header("Target Tracking")]
-    [Tooltip("Target transform to follow. Automatically finds Player if left unassigned.")]
+    [Tooltip("Target transform to follow. If autoDetectTarget is disabled, assign manually here.")]
     [SerializeField] private Transform target;
 
-    [Tooltip("Automatically searches for the Player GameObject on Awake.")]
+    [Tooltip("Automatically detects the Player via events or scene search when true. If false, uses the manual Target assigned above.")]
     [SerializeField] private bool autoDetectTarget = true;
 
     [Header("Offset & Depth")]
@@ -44,6 +44,16 @@ public class CameraFollow : MonoBehaviour
     private float _velocityY;
     private float _currentCameraY;
 
+    private void OnEnable()
+    {
+        Player.OnPlayerSpawned += HandlePlayerSpawned;
+    }
+
+    private void OnDisable()
+    {
+        Player.OnPlayerSpawned -= HandlePlayerSpawned;
+    }
+
     private void Awake()
     {
         _camera = GetComponent<Camera>();
@@ -56,6 +66,15 @@ public class CameraFollow : MonoBehaviour
         InitializeOffset();
 
         _currentCameraY = transform.position.y;
+    }
+
+    private void Start()
+    {
+        // Respaldo por si el Player apareció entre Awake y Start
+        if (target == null && autoDetectTarget)
+        {
+            InitializeTarget();
+        }
     }
 
     private void LateUpdate()
@@ -88,21 +107,65 @@ public class CameraFollow : MonoBehaviour
         transform.position = new Vector3(newX, _currentCameraY, fixedZ);
     }
 
+    private void HandlePlayerSpawned(Player player)
+    {
+        if (!autoDetectTarget || player == null) return;
+        SetTarget(player.transform, snapImmediately: true);
+    }
+
+    /// <summary>
+    /// Asigna un nuevo objetivo a seguir. Si snapImmediately es true, alinea la cámara de inmediato sin retraso de suavizado.
+    /// </summary>
+    public void SetTarget(Transform newTarget, bool snapImmediately = false)
+    {
+        target = newTarget;
+        if (target == null) return;
+
+        if (snapImmediately)
+        {
+            SnapToTarget();
+        }
+    }
+
+    /// <summary>
+    /// Teletransporta instantáneamente la cámara a la posición del target + offset (útil tras spawn/respawn).
+    /// </summary>
+    public void SnapToTarget()
+    {
+        if (target == null) return;
+
+        Vector3 targetPos = target.position;
+        float targetX = targetPos.x + offset.x;
+        float targetY = targetPos.y + offset.y;
+        float fixedZ = offset.z;
+
+        transform.position = new Vector3(targetX, targetY, fixedZ);
+        _currentCameraY = targetY;
+        _velocityX = 0f;
+        _velocityY = 0f;
+    }
+
     private void InitializeTarget()
     {
         if (target != null || !autoDetectTarget) return;
 
+        if (Player.Instance != null)
+        {
+            SetTarget(Player.Instance.transform, snapImmediately: true);
+            return;
+        }
+
         Player player = FindAnyObjectByType<Player>();
         if (player != null)
         {
-            target = player.transform;
+            SetTarget(player.transform, snapImmediately: true);
         }
         else
         {
             GameObject playerObj = GameObject.FindGameObjectWithTag("Player");
             if (playerObj != null)
             {
-                target = playerObj.transform;
+                SetTarget(playerObj.transform, snapImmediately: true);
             }
         }
     }

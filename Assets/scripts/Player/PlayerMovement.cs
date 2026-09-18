@@ -121,12 +121,12 @@ public class PlayerMovement : MonoBehaviour
             if (IsGrounded && !_isSliding)
             {
                 currentVelocity.y = jumpSpeed;
-                Debug.Log($"[PlayerMovement] Salto ejecutado! Velocidad Y: {jumpSpeed}");
+                // Debug.Log($"[PlayerMovement] Salto ejecutado! Velocidad Y: {jumpSpeed}");
             }
-            else
-            {
-                Debug.Log($"[PlayerMovement] Salto denegado -> IsGrounded: {IsGrounded} | IsSliding: {_isSliding}");
-            }
+            // else
+            // {
+            //     Debug.Log($"[PlayerMovement] Salto denegado -> IsGrounded: {IsGrounded} | IsSliding: {_isSliding}");
+            // }
         }
     }
 

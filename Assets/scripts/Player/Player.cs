@@ -10,17 +10,42 @@ using UnityEngine;
 [RequireComponent(typeof(GroundChecker))]
 public class Player : MonoBehaviour
 {
+    public static Player Instance { get; private set; }
+    public static event System.Action<Player> OnPlayerSpawned;
+
     private PlayerMovement _playerMovement;
     private IInputProvider _inputProvider;
+    //[SerializeField] private int fpsObjetivo = 30;
 
     private void Awake()
     {
+        Instance = this;
         InitializeSubsystems();
+    }
+
+    private void OnEnable()
+    {
+        OnPlayerSpawned?.Invoke(this);
+    }
+
+    private void OnDestroy()
+    {
+        if (Instance == this)
+        {
+            Instance = null;
+        }
     }
 
     private void Start()
     {
         Debug.Log("[Player] 2.5D Subsystems initialized and ready.");
+        OnPlayerSpawned?.Invoke(this);
+        
+        // Desactivamos VSync para poder limitar manualmente los FPS.
+        //QualitySettings.vSyncCount = 0;
+
+        // Limitamos los FPS para realizar nuestra prueba.
+        //Application.targetFrameRate = fpsObjetivo;
     }
 
     private void FixedUpdate()
