@@ -1,5 +1,36 @@
 %YAML 1.1
 %TAG !u! tag:unity3d.com,2011:
+--- !u!1 &639668022099791797
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 2536802766306766105}
+  m_Layer: 0
+  m_Name: 'CenterPoint '
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &2536802766306766105
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 639668022099791797}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 7866987171112547376}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &7324854854781657204
 GameObject:
   m_ObjectHideFlags: 0
@@ -17,6 +48,7 @@ GameObject:
   - component: {fileID: 4785348512234130977}
   - component: {fileID: 5207809015301318550}
   - component: {fileID: 1815466399593082094}
+  - component: {fileID: 6419730687620079243}
   m_Layer: 0
   m_Name: PlayerCube
   m_TagString: Player
@@ -36,7 +68,9 @@ Transform:
   m_LocalPosition: {x: 0, y: 8, z: 0}
   m_LocalScale: {x: 1, y: 2, z: 1}
   m_ConstrainProportionsScale: 0
-  m_Children: []
+  m_Children:
+  - {fileID: 2536802766306766105}
+  - {fileID: 6393255762420653973}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!33 &8622369789996997861
@@ -103,7 +137,7 @@ CapsuleCollider:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 7324854854781657204}
-  m_Material: {fileID: 0}
+  m_Material: {fileID: 13400000, guid: afc82b5874dec2448bdc4d2a768d8da5, type: 2}
   m_IncludeLayers:
     serializedVersion: 2
     m_Bits: 0
@@ -158,7 +192,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 4ce6a86cea80bae4a971a7ee314d777e, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Player
-  fpsObjetivo: 1500
 --- !u!114 &4785348512234130977
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -171,11 +204,11 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 0e6a4d691d69cdb4dad8b3c9a237f303, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::PlayerMovement
-  speed: 5
-  sprintSpeed: 7
-  slideSpeed: 8.5
-  jumpSpeed: 8
-  slideDuration: 0.7
+  BaseSpeed: 8
+  SprintSpeed: 11.5
+  SlideSpeed: 14
+  JumpSpeed: 7
+  SlideDuration: 0.7
   ceilingLayer:
     serializedVersion: 2
     m_Bits: 4294967295
@@ -213,3 +246,54 @@ MonoBehaviour:
     m_Bits: 4294967295
   extraDistance: 0.15
   showGizmos: 1
+--- !u!114 &6419730687620079243
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7324854854781657204}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a8bc084d96cb8ae40abfc87f8efeb568, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::EnvironmentChecker
+  obstacleLayer:
+    serializedVersion: 2
+    m_Bits: 1
+  wallCheckDistance: 0.6
+  centerPoint: {fileID: 2536802766306766105}
+  vaultHeightCheck: 1.2
+  headPoint: {fileID: 6393255762420653973}
+  ledgeTopCheckDistance: 0.5
+--- !u!1 &7703409964543376003
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 6393255762420653973}
+  m_Layer: 0
+  m_Name: HeadPoint
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &6393255762420653973
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7703409964543376003}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 1, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 7866987171112547376}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}

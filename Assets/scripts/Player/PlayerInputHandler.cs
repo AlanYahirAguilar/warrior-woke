@@ -62,22 +62,38 @@ public class PlayerInputHandler : MonoBehaviour, IInputProvider
         else if (Keyboard.current != null)
         {
             var keyboard = Keyboard.current;
-            float move = 0f;
-            if (keyboard.dKey.isPressed || keyboard.rightArrowKey.isPressed) move += 1f;
-            if (keyboard.aKey.isPressed || keyboard.leftArrowKey.isPressed) move -= 1f;
-            _horizontalMove = move;
+            bool rightPressed = keyboard.dKey.isPressed || keyboard.rightArrowKey.isPressed;
+            bool leftPressed = keyboard.aKey.isPressed || keyboard.leftArrowKey.isPressed;
+
+            if (rightPressed && leftPressed)
+            {
+                // Si ambas están presionadas, damos prioridad a la última tecla que se presionó
+                if (keyboard.dKey.wasPressedThisFrame || keyboard.rightArrowKey.wasPressedThisFrame)
+                {
+                    _horizontalMove = 1f;
+                }
+                else if (keyboard.aKey.wasPressedThisFrame || keyboard.leftArrowKey.wasPressedThisFrame)
+                {
+                    _horizontalMove = -1f;
+                }
+                // Si ninguna fue presionada este frame, mantenemos el valor previo (el último presionado gana)
+            }
+            else if (rightPressed)
+            {
+                _horizontalMove = 1f;
+            }
+            else if (leftPressed)
+            {
+                _horizontalMove = -1f;
+            }
+            else
+            {
+                _horizontalMove = 0f;
+            }
         }
 
-        // 2. Sprint Input
-        if (sprintActionReference != null && sprintActionReference.action != null)
-        {
-            _isSprintPressed = sprintActionReference.action.IsPressed();
-        }
-        else if (Keyboard.current != null)
-        {
-            var keyboard = Keyboard.current;
-            _isSprintPressed = keyboard.leftShiftKey.isPressed || keyboard.rightShiftKey.isPressed;
-        }
+        // 2. Sprint Input (Ahora es automático, se ignora el input manual)
+        _isSprintPressed = false;
 
         // 3. Jump Trigger
         if (jumpActionReference != null && jumpActionReference.action != null)
@@ -103,7 +119,7 @@ public class PlayerInputHandler : MonoBehaviour, IInputProvider
         else if (Keyboard.current != null)
         {
             var keyboard = Keyboard.current;
-            if (keyboard.leftCtrlKey.wasPressedThisFrame || keyboard.rightCtrlKey.wasPressedThisFrame)
+            if (keyboard.leftShiftKey.wasPressedThisFrame || keyboard.rightShiftKey.wasPressedThisFrame)
             {
                 _isSlideTriggered = true;
             }
