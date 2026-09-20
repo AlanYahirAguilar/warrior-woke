@@ -12,27 +12,28 @@ public class PlayerVaultState : PlayerState
     {
         base.Enter();
         player.SetKinematic(true);
-        startPos = player.transform.position;
-        // Asume un obstáculo pequeño, se mueve hacia adelante y un poco arriba
+        startPos = player.Rb.position;
+        // Obstacle of moderate height: move forward and slightly up in an arc
         targetPos = startPos + new Vector3(player.FacingDirection * 2f, 0f, 0f);
     }
 
-    public override void LogicUpdate()
+    public override void PhysicsUpdate()
     {
-        base.LogicUpdate();
+        base.PhysicsUpdate();
         float t = (Time.time - startTime) / vaultDuration;
-        
+
         if (t >= 1f)
         {
-            player.transform.position = targetPos;
+            // Snap to final position through the Rigidbody, never bypass physics
+            player.Rb.MovePosition(targetPos);
             stateMachine.ChangeState(player.RunState);
         }
         else
         {
-            // Movimiento Lerp en arco
+            // Arc movement via Lerp — routed through MovePosition so physics stays aware
             Vector3 currentPos = Vector3.Lerp(startPos, targetPos, t);
-            currentPos.y += Mathf.Sin(t * Mathf.PI) * 1f; // Arco de altura 1
-            player.transform.position = currentPos;
+            currentPos.y += Mathf.Sin(t * Mathf.PI) * 1f; // Arc height 1 unit
+            player.Rb.MovePosition(currentPos);
         }
     }
 
@@ -98,24 +99,25 @@ public class PlayerLedgeClimbState : PlayerState
     public override void Enter()
     {
         base.Enter();
-        startPos = player.transform.position;
-        // Subir y adelantar sobre la esquina
+        startPos = player.Rb.position;
+        // Move up and forward past the ledge corner
         climbTargetPos = player.CurrentLedgeCorner + new Vector3(player.FacingDirection * 0.4f, 0.1f, 0f);
     }
 
-    public override void LogicUpdate()
+    public override void PhysicsUpdate()
     {
-        base.LogicUpdate();
+        base.PhysicsUpdate();
         float t = (Time.time - startTime) / climbDuration;
-        
+
         if (t >= 1f)
         {
-            player.transform.position = climbTargetPos;
+            // Final snap through the Rigidbody — never bypass physics
+            player.Rb.MovePosition(climbTargetPos);
             stateMachine.ChangeState(player.IdleState);
         }
         else
         {
-            // Movimiento por código: primero arriba, luego hacia adelante
+            // Two-phase movement: first go up, then slide forward onto the ledge
             Vector3 currentPos = startPos;
             if (t < 0.5f)
             {
@@ -126,7 +128,7 @@ public class PlayerLedgeClimbState : PlayerState
                 currentPos.y = climbTargetPos.y;
                 currentPos.x = Mathf.Lerp(startPos.x, climbTargetPos.x, (t - 0.5f) * 2f);
             }
-            player.transform.position = currentPos;
+            player.Rb.MovePosition(currentPos);
         }
     }
 

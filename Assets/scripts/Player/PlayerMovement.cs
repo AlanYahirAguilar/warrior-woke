@@ -1,4 +1,3 @@
-using System.Collections;
 using UnityEngine;
 
 /// <summary>
@@ -14,6 +13,7 @@ public class PlayerMovement : MonoBehaviour
     public float SprintSpeed = 11.5f;
     public float SlideSpeed = 14f;
     public float JumpSpeed = 7f;
+    public float WallSlideSpeed = -2f;
 
     [Header("Sliding Configuration")]
     public float SlideDuration = 0.7f;
@@ -39,11 +39,13 @@ public class PlayerMovement : MonoBehaviour
     public PlayerIdleState IdleState { get; private set; }
     public PlayerRunState RunState { get; private set; }
     public PlayerJumpState JumpState { get; private set; }
+    public PlayerFallState FallState { get; private set; }
     public PlayerSlideState SlideState { get; private set; }
     public PlayerVaultState VaultState { get; private set; }
     public PlayerLedgeGrabState LedgeGrabState { get; private set; }
     public PlayerLedgeClimbState LedgeClimbState { get; private set; }
     public PlayerWallJumpState WallJumpState { get; private set; }
+    public PlayerWallSlideState WallSlideState { get; private set; }
 
     public bool IsGrounded => _groundChecker != null && _groundChecker.IsGrounded;
     public float FacingDirection { get; private set; } = 1f;
@@ -72,11 +74,13 @@ public class PlayerMovement : MonoBehaviour
         IdleState = new PlayerIdleState(this, StateMachine);
         RunState = new PlayerRunState(this, StateMachine);
         JumpState = new PlayerJumpState(this, StateMachine);
+        FallState = new PlayerFallState(this, StateMachine);
         SlideState = new PlayerSlideState(this, StateMachine);
         VaultState = new PlayerVaultState(this, StateMachine);
         LedgeGrabState = new PlayerLedgeGrabState(this, StateMachine);
         LedgeClimbState = new PlayerLedgeClimbState(this, StateMachine);
         WallJumpState = new PlayerWallJumpState(this, StateMachine);
+        WallSlideState = new PlayerWallSlideState(this, StateMachine);
     }
 
     private void Start()
