@@ -225,7 +225,7 @@ public class PlayerDodgeState : PlayerState
         {
             // Return to run if still holding a direction, otherwise idle
             stateMachine.ChangeState(
-                Mathf.Abs(player.InputX) > 0.1f ? (PlayerState)player.RunState : player.IdleState);
+                player.HasMoveInput ? (PlayerState)player.RunState : player.IdleState);
         }
     }
 
@@ -233,6 +233,6 @@ public class PlayerDodgeState : PlayerState
     {
         base.PhysicsUpdate();
         // Dash in the current facing direction regardless of input
-        player.SetVelocity(player.FacingDirection * DodgeSpeed, player.Rb.linearVelocity.y);
+        player.SetVelocity(player.transform.forward * DodgeSpeed, player.Rb.linearVelocity.y);
     }
 }

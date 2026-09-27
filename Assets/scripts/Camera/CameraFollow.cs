@@ -1,9 +1,12 @@
 using UnityEngine;
 
 /// <summary>
-/// Controls 2.5D side-scroller camera tracking.
-/// Follows the player along the horizontal X axis, provides damped tracking along the vertical Y axis
-/// to accommodate high platforms without jitter during small jumps, and locks depth distance along Z.
+/// Third-person "over-the-shoulder" camera (Sleeping Dogs / GTA style).
+/// Sits behind and above one shoulder of the target, looking slightly past it, and
+/// smoothly trails position and rotation as the target moves and turns.
+/// Player movement (see PlayerMovement) is computed relative to this camera's flattened
+/// forward/right axes, so turning the character re-orients where "forward" means next tick.
+/// Includes a simple collision pull-in so the camera never clips through geometry.
 /// Generates zero GC allocations per frame in LateUpdate.
 /// </summary>
 public class CameraFollow : MonoBehaviour
@@ -15,34 +18,37 @@ public class CameraFollow : MonoBehaviour
     [Tooltip("Automatically detects the Player via events or scene search when true. If false, uses the manual Target assigned above.")]
     [SerializeField] private bool autoDetectTarget = true;
 
-    [Header("Offset & Depth")]
-    [Tooltip("Camera offset relative to target. Z controls the lateral viewing distance.")]
-    [SerializeField] private Vector3 offset = new Vector3(0f, 2f, -10f);
+    [Header("Shoulder Framing")]
+    [Tooltip("Height above the target's pivot used as the shoulder/look point.")]
+    [SerializeField] private float shoulderHeight = 1.6f;
 
-    [Tooltip("Automatically computes offset from initial scene placement.")]
-    [SerializeField] private bool autoCalculateOffset = true;
+    [Tooltip("Sideways offset from the target (positive = right shoulder, negative = left shoulder).")]
+    [SerializeField] private float shoulderSide = 0.5f;
+
+    [Tooltip("Distance behind the shoulder point the camera sits.")]
+    [SerializeField] private float distance = 3.5f;
+
+    [Tooltip("How far past the shoulder point the camera looks, to frame the direction of travel.")]
+    [SerializeField] private float lookAheadDistance = 2f;
 
     [Header("Smoothing")]
-    [Tooltip("Horizontal tracking responsiveness (lower is snappier).")]
-    [SerializeField] private float smoothTimeX = 0.15f;
+    [Tooltip("Position smoothing time (lower is snappier).")]
+    [SerializeField] private float positionSmoothTime = 0.12f;
 
-    [Tooltip("Vertical tracking responsiveness. Higher value cushions small jumps while following tall platforms.")]
-    [SerializeField] private float smoothTimeY = 0.35f;
+    [Tooltip("Rotation smoothing speed (higher snaps faster to the target look direction).")]
+    [SerializeField] private float rotationSmoothSpeed = 10f;
 
-    [Tooltip("Vertical distance the player can move before camera begins vertical tracking.")]
-    [SerializeField] private float verticalDeadZone = 1.2f;
+    [Header("Collision")]
+    [Tooltip("Layers considered solid for camera collision avoidance.")]
+    [SerializeField] private LayerMask collisionMask = ~0;
 
-    [Header("Framing & Zoom")]
-    [Tooltip("If true and camera is orthographic, applies an expanded framing size for vertical visibility.")]
-    [SerializeField] private bool adjustOrthographicSize = true;
+    [Tooltip("Radius of the sphere cast used to keep the camera out of geometry.")]
+    [SerializeField] private float collisionRadius = 0.25f;
 
-    [Tooltip("Target orthographic size (6.5 gives optimal visibility for elevated platforms).")]
-    [SerializeField] private float targetOrthographicSize = 6.5f;
+    [Tooltip("Extra pull-in distance from a collision hit point, to avoid clipping into the surface.")]
+    [SerializeField] private float collisionBuffer = 0.15f;
 
-    private Camera _camera;
-    private float _velocityX;
-    private float _velocityY;
-    private float _currentCameraY;
+    private Vector3 _positionVelocity;
 
     private void OnEnable()
     {
@@ -56,24 +62,20 @@ public class CameraFollow : MonoBehaviour
 
     private void Awake()
     {
-        _camera = GetComponent<Camera>();
-        if (_camera != null && _camera.orthographic && adjustOrthographicSize)
-        {
-            _camera.orthographicSize = targetOrthographicSize;
-        }
-
         InitializeTarget();
-        InitializeOffset();
-
-        _currentCameraY = transform.position.y;
     }
 
     private void Start()
     {
-        // Respaldo por si el Player apareció entre Awake y Start
+        // Backup in case the Player spawned between Awake and Start
         if (target == null && autoDetectTarget)
         {
             InitializeTarget();
+        }
+
+        if (target != null)
+        {
+            SnapToTarget();
         }
     }
 
@@ -81,30 +83,27 @@ public class CameraFollow : MonoBehaviour
     {
         if (target == null) return;
 
-        Vector3 targetPos = target.position;
+        Vector3 shoulderPoint = GetShoulderPoint();
+        Vector3 desiredPosition = shoulderPoint - target.forward * distance;
 
-        // 1. Horizontal Tracking (X)
-        float targetX = targetPos.x + offset.x;
-        float newX = Mathf.SmoothDamp(transform.position.x, targetX, ref _velocityX, smoothTimeX);
-
-        // 2. Vertical Tracking (Y) with deadzone to cushion jumps
-        float targetY = targetPos.y + offset.y;
-        float deltaY = targetY - _currentCameraY;
-
-        if (Mathf.Abs(deltaY) > verticalDeadZone)
+        float allowedDistance = distance;
+        if (Physics.SphereCast(shoulderPoint, collisionRadius, (desiredPosition - shoulderPoint).normalized,
+                out RaycastHit hit, distance, collisionMask, QueryTriggerInteraction.Ignore))
         {
-            float desiredY = targetY - Mathf.Sign(deltaY) * verticalDeadZone;
-            _currentCameraY = Mathf.SmoothDamp(_currentCameraY, desiredY, ref _velocityY, smoothTimeY);
-        }
-        else
-        {
-            _currentCameraY = Mathf.SmoothDamp(_currentCameraY, targetY, ref _velocityY, smoothTimeY * 1.5f);
+            allowedDistance = Mathf.Max(hit.distance - collisionBuffer, 0.1f);
+            desiredPosition = shoulderPoint - target.forward * allowedDistance;
         }
 
-        // 3. Fixed Depth (Z)
-        float fixedZ = offset.z;
+        transform.position = Vector3.SmoothDamp(transform.position, desiredPosition, ref _positionVelocity, positionSmoothTime);
 
-        transform.position = new Vector3(newX, _currentCameraY, fixedZ);
+        Vector3 lookTarget = shoulderPoint + target.forward * lookAheadDistance;
+        Quaternion desiredRotation = Quaternion.LookRotation((lookTarget - transform.position).normalized, Vector3.up);
+        transform.rotation = Quaternion.Slerp(transform.rotation, desiredRotation, rotationSmoothSpeed * Time.deltaTime);
+    }
+
+    private Vector3 GetShoulderPoint()
+    {
+        return target.position + Vector3.up * shoulderHeight + target.right * shoulderSide;
     }
 
     private void HandlePlayerSpawned(Player player)
@@ -128,21 +127,16 @@ public class CameraFollow : MonoBehaviour
     }
 
     /// <summary>
-    /// Teletransporta instantáneamente la cámara a la posición del target + offset (útil tras spawn/respawn).
+    /// Teletransporta instantáneamente la cámara detrás del hombro del target (útil tras spawn/respawn).
     /// </summary>
     public void SnapToTarget()
     {
         if (target == null) return;
 
-        Vector3 targetPos = target.position;
-        float targetX = targetPos.x + offset.x;
-        float targetY = targetPos.y + offset.y;
-        float fixedZ = offset.z;
-
-        transform.position = new Vector3(targetX, targetY, fixedZ);
-        _currentCameraY = targetY;
-        _velocityX = 0f;
-        _velocityY = 0f;
+        Vector3 shoulderPoint = GetShoulderPoint();
+        transform.position = shoulderPoint - target.forward * distance;
+        transform.rotation = Quaternion.LookRotation((shoulderPoint + target.forward * lookAheadDistance - transform.position).normalized, Vector3.up);
+        _positionVelocity = Vector3.zero;
     }
 
     private void InitializeTarget()
@@ -167,18 +161,6 @@ public class CameraFollow : MonoBehaviour
             {
                 SetTarget(playerObj.transform, snapImmediately: true);
             }
-        }
-    }
-
-    private void InitializeOffset()
-    {
-        if (autoCalculateOffset && target != null)
-        {
-            offset = transform.position - target.position;
-        }
-        else if (offset.z >= 0f)
-        {
-            offset.z = -10f; // Ensure standard side-view depth
         }
     }
 }

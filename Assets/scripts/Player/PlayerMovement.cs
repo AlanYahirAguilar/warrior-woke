@@ -1,9 +1,11 @@
 using UnityEngine;
 
 /// <summary>
-/// Context for the PlayerStateMachine in a 3D action-platformer.
+/// Context for the PlayerStateMachine in a free-roam 3D character controller.
 /// Owns all state instances and exposes physics helpers consumed by states.
-/// Enforces Z-axis and full rotation constraints (2.5D plane movement).
+/// Movement is camera-relative on the XZ plane (third-person, over-the-shoulder style):
+/// input is projected onto the main camera's flattened forward/right vectors, and the
+/// character smoothly rotates to face its current movement direction.
 /// Adheres to SRP: orchestrates state routing, never implements game logic directly.
 /// </summary>
 [RequireComponent(typeof(Rigidbody))]
@@ -26,17 +28,29 @@ public class PlayerMovement : MonoBehaviour
 
     [Header("Facing")]
     [SerializeField] private bool faceMovementDirection = true;
+    [Tooltip("Smoothing time (seconds) for turning to face the movement direction. Lower = snappier/more sensitive, higher = smoother/heavier.")]
+    [SerializeField] private float turnSmoothTime = 0.12f;
+
+    private float _turnSmoothVelocity;
+
+    [Header("Input Deadzone")]
+    [SerializeField] private float moveInputDeadzone = 0.1f;
 
     // ─── Cached Components (set once in Awake, never in the loop) ────────────────
     public Rigidbody        Rb         { get; private set; }
     private CapsuleCollider _capsuleCollider;
     private IGroundChecker  _groundChecker;
+    private Transform       _cameraTransform;
     public EnvironmentChecker EnvChecker { get; private set; }
 
     // ─── Movement Input State ─────────────────────────────────────────────────────
     public float InputX         { get; private set; }
+    public float InputZ         { get; private set; }
     public bool  JumpTriggered  { get; private set; }
     public bool  SlideTriggered { get; private set; }
+
+    /// <summary>True when the combined move input exceeds the deadzone.</summary>
+    public bool HasMoveInput => (InputX * InputX + InputZ * InputZ) > (moveInputDeadzone * moveInputDeadzone);
 
     // ─── Combat Input State ───────────────────────────────────────────────────────
     public bool LightAttackTriggered { get; private set; }
@@ -46,6 +60,14 @@ public class PlayerMovement : MonoBehaviour
 
     // ─── Runtime State ────────────────────────────────────────────────────────────
     public bool  IsSprint           { get; set; }
+
+    /// <summary>Camera-relative, normalized movement direction on the XZ plane for this tick (zero when no input).</summary>
+    public Vector3 MoveDirection    { get; private set; } = Vector3.zero;
+
+    /// <summary>
+    /// Legacy left/right scalar (-1/1), kept only for the disabled 2.5D parkour states
+    /// (vault/ledge-grab/wall-jump). Movement itself no longer uses this — use transform.forward instead.
+    /// </summary>
     public float FacingDirection    { get; private set; } = 1f;
     public bool  IsGrounded         => _groundChecker != null && _groundChecker.IsGrounded;
     public int   ConsecutiveWallJumps { get; private set; }
@@ -98,6 +120,7 @@ public class PlayerMovement : MonoBehaviour
     /// </summary>
     public void ProcessMovement(
         float horizontal,
+        float vertical,
         bool  jumpTriggered,
         bool  slideTriggered,
         bool  lightAttack,
@@ -105,25 +128,33 @@ public class PlayerMovement : MonoBehaviour
         bool  blockHeld,
         bool  dodgeTriggered)
     {
-        InputX               = horizontal;
-        JumpTriggered        = jumpTriggered;
-        SlideTriggered       = slideTriggered;
-        LightAttackTriggered = lightAttack;
-        HeavyAttackTriggered = heavyAttack;
-        IsBlockHeld          = blockHeld;
-        DodgeTriggered       = dodgeTriggered;
+        InputX                = horizontal;
+        InputZ                = vertical;
+        JumpTriggered         = jumpTriggered;
+        SlideTriggered        = slideTriggered;
+        LightAttackTriggered  = lightAttack;
+        HeavyAttackTriggered  = heavyAttack;
+        IsBlockHeld           = blockHeld;
+        DodgeTriggered        = dodgeTriggered;
 
         _groundChecker?.CheckGrounded();
-        UpdateFacingDirection();
+        UpdateMovementDirectionAndFacing();
 
         StateMachine.CurrentState?.LogicUpdate();
     }
 
     // ─── Physics Helpers ─────────────────────────────────────────────────────────
 
-    public void SetVelocity(float x, float y)
+    /// <summary>Sets horizontal (X/Z) and vertical (Y) velocity independently.</summary>
+    public void SetVelocity(Vector3 horizontalVelocity, float verticalVelocity)
     {
-        Rb.linearVelocity = new Vector3(x, y, 0f);
+        Rb.linearVelocity = new Vector3(horizontalVelocity.x, verticalVelocity, horizontalVelocity.z);
+    }
+
+    /// <summary>Convenience overload: sets a single horizontal axis (Z is zeroed) and vertical velocity.</summary>
+    public void SetVelocity(float x, float verticalVelocity)
+    {
+        SetVelocity(new Vector3(x, 0f, 0f), verticalVelocity);
     }
 
     public void SetKinematic(bool isKinematic)
@@ -165,6 +196,9 @@ public class PlayerMovement : MonoBehaviour
         _capsuleCollider = GetComponent<CapsuleCollider>();
         _groundChecker   = GetComponent<IGroundChecker>() ?? gameObject.AddComponent<GroundChecker>();
         EnvChecker       = GetComponent<EnvironmentChecker>() ?? gameObject.AddComponent<EnvironmentChecker>();
+
+        if (Camera.main != null)
+            _cameraTransform = Camera.main.transform;
     }
 
     private void SnapshotColliderDimensions()
@@ -176,7 +210,9 @@ public class PlayerMovement : MonoBehaviour
 
     private void ConfigureRigidbody()
     {
-        Rb.constraints = RigidbodyConstraints.FreezePositionZ | RigidbodyConstraints.FreezeRotation;
+        // Free movement on X and Z (camera-relative third person); rotation is driven
+        // manually via transform.rotation, so it stays frozen on the Rigidbody itself.
+        Rb.constraints = RigidbodyConstraints.FreezeRotation;
     }
 
     private void BuildStateMachine()
@@ -196,21 +232,73 @@ public class PlayerMovement : MonoBehaviour
         DodgeState        = new PlayerDodgeState(this, StateMachine);
     }
 
-    private void UpdateFacingDirection()
+    /// <summary>
+    /// Projects raw input onto the camera's flattened forward/right axes to get a
+    /// world-space movement direction, and smoothly rotates the character to face it.
+    /// Falls back to world-space axes if no camera is available.
+    /// </summary>
+    private void UpdateMovementDirectionAndFacing()
     {
-        if (!faceMovementDirection || Mathf.Abs(InputX) <= 0.05f) return;
+        if (!HasMoveInput)
+        {
+            MoveDirection = Vector3.zero;
+            return;
+        }
 
-        // Lock visual direction during kinematic/parkour states
+        if (_cameraTransform == null && Camera.main != null)
+            _cameraTransform = Camera.main.transform;
+
+        Vector3 forward;
+        Vector3 right;
+
+        if (_cameraTransform != null)
+        {
+            forward = _cameraTransform.forward;
+            right   = _cameraTransform.right;
+        }
+        else
+        {
+            forward = Vector3.forward;
+            right   = Vector3.right;
+        }
+
+        forward.y = 0f;
+        right.y   = 0f;
+        forward.Normalize();
+        right.Normalize();
+
+        Vector3 direction = forward * InputZ + right * InputX;
+        if (direction.sqrMagnitude <= 0.0001f)
+        {
+            MoveDirection = Vector3.zero;
+            return;
+        }
+
+        direction.Normalize();
+        MoveDirection = direction;
+        FacingDirection = direction.x >= 0f ? 1f : -1f;
+
+        if (!faceMovementDirection || !CanRotateInCurrentState()) return;
+
+        // SmoothDampAngle eases in/out of the turn instead of snapping at a flat angular
+        // speed — this is what actually fixes "the camera spins too fast": the camera
+        // trails transform.forward, so a snappy instant turn reads as a fast camera swing.
+        float targetYaw = Quaternion.LookRotation(direction, Vector3.up).eulerAngles.y;
+        float currentYaw = transform.eulerAngles.y;
+        float newYaw = Mathf.SmoothDampAngle(currentYaw, targetYaw, ref _turnSmoothVelocity, turnSmoothTime);
+        transform.rotation = Quaternion.Euler(0f, newYaw, 0f);
+    }
+
+    private bool CanRotateInCurrentState()
+    {
+        // Lock visual direction during kinematic/parkour/locked combat states
         var current = StateMachine.CurrentState;
-        if (current == WallJumpState   ||
-            current == LedgeGrabState  ||
-            current == LedgeClimbState ||
-            current == VaultState      ||
-            current == BlockState      ||
-            current == LightAttackState||
-            current == HeavyAttackState) return;
-
-        FacingDirection    = Mathf.Sign(InputX);
-        transform.rotation = Quaternion.Euler(0f, FacingDirection > 0 ? 90f : -90f, 0f);
+        return current != WallJumpState   &&
+               current != LedgeGrabState  &&
+               current != LedgeClimbState &&
+               current != VaultState      &&
+               current != BlockState      &&
+               current != LightAttackState&&
+               current != HeavyAttackState;
     }
 }

@@ -42,7 +42,7 @@ public class PlayerIdleState : PlayerState
         }
 
         // Movement
-        if (Mathf.Abs(player.InputX) > 0.1f)
+        if (player.HasMoveInput)
         {
             stateMachine.ChangeState(player.RunState);
             return;
@@ -117,12 +117,13 @@ public class PlayerRunState : PlayerState
             return;
         }
 
-        // Parkour
-        if (player.EnvChecker.IsObstacleVaultable(player.FacingDirection))
-        {
-            stateMachine.ChangeState(player.VaultState);
-            return;
-        }
+        // Parkour — disabled: vault/ledge/wall-jump assume a fixed 2.5D plane (left/right
+        // raycasts) and don't have a defined behavior yet in free-roam 3D. See CONTEXTO.md.
+        // if (player.EnvChecker.IsObstacleVaultable(player.FacingDirection))
+        // {
+        //     stateMachine.ChangeState(player.VaultState);
+        //     return;
+        // }
 
         if (player.SlideTriggered && player.IsGrounded)
         {
@@ -137,7 +138,7 @@ public class PlayerRunState : PlayerState
         }
 
         // Stop running
-        if (Mathf.Abs(player.InputX) < 0.1f)
+        if (!player.HasMoveInput)
         {
             player.IsSprint = false;
             stateMachine.ChangeState(player.IdleState);
@@ -148,7 +149,7 @@ public class PlayerRunState : PlayerState
     {
         base.PhysicsUpdate();
         float speed = player.IsSprint ? player.SprintSpeed : player.BaseSpeed;
-        player.SetVelocity(player.InputX * speed, player.Rb.linearVelocity.y);
+        player.SetVelocity(player.MoveDirection * speed, player.Rb.linearVelocity.y);
     }
 
     public override void Exit()
@@ -192,8 +193,8 @@ public class PlayerSlideState : PlayerState
     public override void PhysicsUpdate()
     {
         base.PhysicsUpdate();
-        // Use FacingDirection instead of InputX to maintain momentum even if keys are released
-        player.SetVelocity(player.FacingDirection * player.SlideSpeed, player.Rb.linearVelocity.y);
+        // Use the character's current facing instead of raw input to maintain momentum even if keys are released
+        player.SetVelocity(player.transform.forward * player.SlideSpeed, player.Rb.linearVelocity.y);
     }
 
     public override void Exit()
