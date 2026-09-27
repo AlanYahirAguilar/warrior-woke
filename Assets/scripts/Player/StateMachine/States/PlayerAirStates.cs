@@ -1,40 +1,18 @@
 using UnityEngine;
 
-public class PlayerFallState : PlayerState
-{
-    public PlayerFallState(PlayerMovement player, PlayerStateMachine stateMachine) : base(player, stateMachine) { }
+// ────────────────────────────────────────────────────────────────────────────────
+// PlayerJumpState
+// ────────────────────────────────────────────────────────────────────────────────
 
-    public override void LogicUpdate()
-    {
-        base.LogicUpdate();
-
-        if (player.IsGrounded)
-        {
-            stateMachine.ChangeState(player.IdleState);
-        }
-        else if (player.EnvChecker.IsLedgeDetected(player.FacingDirection, out Vector3 ledgeCorner))
-        {
-            player.CurrentLedgeCorner = ledgeCorner;
-            stateMachine.ChangeState(player.LedgeGrabState);
-        }
-        else if (player.EnvChecker.IsTouchingWall(player.FacingDirection) && player.Rb.linearVelocity.y < 0f)
-        {
-            stateMachine.ChangeState(player.WallSlideState);
-        }
-        // Jump buffer or coyote time could be added here later if desired
-    }
-
-    public override void PhysicsUpdate()
-    {
-        base.PhysicsUpdate();
-        float currentSpeed = player.IsSprint ? player.SprintSpeed : player.BaseSpeed;
-        player.SetVelocity(player.InputX * currentSpeed, player.Rb.linearVelocity.y);
-    }
-}
-
+/// <summary>
+/// Airborne state entered after a grounded jump.
+/// Detects ledges on both the ascending AND descending arc (GDD requirement).
+/// Wall jumps are allowed while ascending if a wall is touched and the consecutive limit is not reached.
+/// </summary>
 public class PlayerJumpState : PlayerState
 {
-    public PlayerJumpState(PlayerMovement player, PlayerStateMachine stateMachine) : base(player, stateMachine) { }
+    public PlayerJumpState(PlayerMovement player, PlayerStateMachine stateMachine)
+        : base(player, stateMachine) { }
 
     public override void Enter()
     {
@@ -47,128 +25,78 @@ public class PlayerJumpState : PlayerState
     {
         base.LogicUpdate();
 
-        // Wall jump is intentionally NOT available from JumpState (ascending).
-        // The player must first contact the wall (WallSlideState) before being
-        // able to wall jump. This gives the mechanic weight and prevents exploiting
-        // it as a free double-jump mid-air.
-        if (player.Rb.linearVelocity.y <= 0f)
-        {
-            stateMachine.ChangeState(player.FallState);
-        }
-    }
-
-    public override void PhysicsUpdate()
-    {
-        base.PhysicsUpdate();
-        float currentSpeed = player.IsSprint ? player.SprintSpeed : player.BaseSpeed;
-        player.SetVelocity(player.InputX * currentSpeed, player.Rb.linearVelocity.y);
-    }
-}
-
-public class PlayerWallSlideState : PlayerState
-{
-    public PlayerWallSlideState(PlayerMovement player, PlayerStateMachine stateMachine) : base(player, stateMachine) { }
-
-    public override void LogicUpdate()
-    {
-        base.LogicUpdate();
-
-        if (player.IsGrounded)
-        {
-            stateMachine.ChangeState(player.IdleState);
-        }
-        else if (player.JumpTriggered && player.ConsecutiveWallJumps < 2 && !PlayerWallJumpState.IsCoolingDown)
-        {
-            stateMachine.ChangeState(player.WallJumpState);
-        }
-        else if (!player.EnvChecker.IsTouchingWall(player.FacingDirection))
-        {
-            stateMachine.ChangeState(player.FallState);
-        }
-        else if (player.EnvChecker.IsLedgeDetected(player.FacingDirection, out Vector3 ledgeCorner))
+        // ── Ledge detection — checked on BOTH arcs (ascending and descending) ──
+        if (player.EnvChecker.IsLedgeDetected(player.FacingDirection, out Vector3 ledgeCorner))
         {
             player.CurrentLedgeCorner = ledgeCorner;
             stateMachine.ChangeState(player.LedgeGrabState);
+            return;
+        }
+
+        // ── Wall jump — only while ascending and wall is touched ──
+        if (player.Rb.linearVelocity.y > 0f &&
+            player.EnvChecker.IsTouchingWall(player.FacingDirection) &&
+            player.JumpTriggered &&
+            player.ConsecutiveWallJumps < 2)
+        {
+            stateMachine.ChangeState(player.WallJumpState);
+            return;
+        }
+
+        // ── Land detection — transition to idle when grounded ──
+        if (player.Rb.linearVelocity.y <= 0f && player.IsGrounded)
+        {
+            stateMachine.ChangeState(player.IdleState);
         }
     }
 
     public override void PhysicsUpdate()
     {
         base.PhysicsUpdate();
-        // Fall slowly to give the player time to react
-        player.SetVelocity(0f, player.WallSlideSpeed);
+        float speed = player.IsSprint ? player.SprintSpeed : player.BaseSpeed;
+        player.SetVelocity(player.InputX * speed, player.Rb.linearVelocity.y);
     }
 }
 
+// ────────────────────────────────────────────────────────────────────────────────
+// PlayerWallJumpState
+// ────────────────────────────────────────────────────────────────────────────────
+
+/// <summary>
+/// Short airborne state that applies wall-rebound impulse.
+/// Locks directional input for wallJumpLockoutDuration seconds to prevent
+/// the player from immediately sticking back to the same wall.
+/// GDD: max 2 consecutive wall jumps before touching the ground again.
+/// </summary>
 public class PlayerWallJumpState : PlayerState
 {
-    /// <summary>
-    /// Direction lockout: prevents immediately re-sticking to the same wall
-    /// right after launching. Purely a feel/input concern.
-    /// </summary>
-    private const float WallJumpDirectionLockout = 0.15f;
+    private const float WallJumpLockoutDuration = 0.15f;
 
-    /// <summary>
-    /// GDD-mandated cooldown between consecutive wall jumps (max 2 before touching ground).
-    /// Separate from the direction lockout — this is the inter-jump pacing constraint.
-    /// </summary>
-    private const float WallJumpCooldown = 0.2f;
-
-    /// <summary>
-    /// Tracks when the last wall jump was executed to enforce the GDD cooldown.
-    /// Static so it persists across state re-entries within the same session.
-    /// </summary>
-    private static float _lastWallJumpTime = -999f;
-
-    public PlayerWallJumpState(PlayerMovement player, PlayerStateMachine stateMachine) : base(player, stateMachine) { }
-
-    public static bool IsCoolingDown => Time.time < _lastWallJumpTime + WallJumpCooldown;
+    public PlayerWallJumpState(PlayerMovement player, PlayerStateMachine stateMachine)
+        : base(player, stateMachine) { }
 
     public override void Enter()
     {
         base.Enter();
-        _lastWallJumpTime = Time.time;
         player.IncrementWallJump();
 
-        // Directional: pressing toward the wall = vertical wall climb; otherwise = diagonal rebound
-        float inputDir = Mathf.Sign(player.InputX);
-        bool isPressingTowardsWall = Mathf.Abs(player.InputX) > 0.1f && inputDir == player.FacingDirection;
-
-        if (isPressingTowardsWall)
-        {
-            // Vertical wall climb
-            player.SetVelocity(0f, player.JumpSpeed * 1.1f);
-        }
-        else
-        {
-            // Classic diagonal wall jump rebound
-            float jumpDir = -player.FacingDirection;
-            player.SetVelocity(jumpDir * player.BaseSpeed, player.JumpSpeed);
-        }
+        // Impulse in the opposite direction of the wall
+        float jumpDir = -player.FacingDirection;
+        player.SetVelocity(jumpDir * player.BaseSpeed, player.JumpSpeed);
     }
 
     public override void LogicUpdate()
     {
         base.LogicUpdate();
 
-        // Wait for direction lockout before handing control back to other states
-        if (Time.time >= startTime + WallJumpDirectionLockout)
-        {
-            if (player.Rb.linearVelocity.y <= 0f)
-            {
-                stateMachine.ChangeState(player.FallState);
-            }
-            else
-            {
-                stateMachine.ChangeState(player.JumpState);
-            }
-        }
+        if (Time.time >= startTime + WallJumpLockoutDuration)
+            stateMachine.ChangeState(player.JumpState);
     }
 
     public override void PhysicsUpdate()
     {
         base.PhysicsUpdate();
-        // During the direction lockout window, ignore InputX so the player cannot
-        // immediately counter-steer back into the same wall or distort the launch arc.
+        // Intentionally empty: horizontal impulse from Enter() is preserved during lockout.
+        // This prevents the player from immediately re-grabbing the same wall.
     }
 }

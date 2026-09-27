@@ -1,0 +1,91 @@
+using UnityEngine;
+
+/// <summary>
+/// Generic health management component. Implements IDamageable.
+/// Reusable across Player, Enemies, and interactive objects.
+///
+/// Best practices applied:
+///  - Zero GC: events use System.Action, no delegates allocated per call.
+///  - Iframes enforced here, not in the state machine.
+///  - Health is always clamped between 0 and MaxHealth (GDD §14).
+/// </summary>
+public class HealthSystem : MonoBehaviour, IDamageable
+{
+    // ─── Inspector Configuration ─────────────────────────────────────────────────
+    [Header("Configuration")]
+    [SerializeField] private int maxHealth = 100;
+
+    [Header("Invincibility Frames")]
+    [Tooltip("Seconds of invincibility after receiving damage (GDD: ~0.5s).")]
+    [SerializeField] private float iFramesDuration = 0.5f;
+
+    // ─── Events ───────────────────────────────────────────────────────────────────
+    /// <summary>Fires when health changes. Args: currentHealth, maxHealth.</summary>
+    public event System.Action<int, int> OnHealthChanged;
+
+    /// <summary>Fires when health reaches zero.</summary>
+    public event System.Action OnDeath;
+
+    /// <summary>Fires when damage is received. Args: amount, source position.</summary>
+    public event System.Action<int, Vector3> OnDamageReceived;
+
+    // ─── IDamageable ─────────────────────────────────────────────────────────────
+    public int  CurrentHealth { get; private set; }
+    public bool IsDead        => CurrentHealth <= 0;
+
+    // ─── Runtime State ────────────────────────────────────────────────────────────
+    private float _lastDamageTime = -999f;
+
+    // ─── Lifecycle ───────────────────────────────────────────────────────────────
+
+    private void Awake()
+    {
+        CurrentHealth = maxHealth;
+    }
+
+    // ─── Public API ──────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Applies damage with iframes check. Clamps health to [0, MaxHealth].
+    /// </summary>
+    public void TakeDamage(int amount, Vector3 source)
+    {
+        if (IsDead) return;
+        if (IsInIFrames()) return;
+
+        _lastDamageTime = Time.time;
+        CurrentHealth   = Mathf.Clamp(CurrentHealth - amount, 0, maxHealth);
+
+        OnDamageReceived?.Invoke(amount, source);
+        OnHealthChanged?.Invoke(CurrentHealth, maxHealth);
+
+        if (IsDead)
+            OnDeath?.Invoke();
+    }
+
+    /// <summary>Restores health, clamped to MaxHealth.</summary>
+    public void Heal(int amount)
+    {
+        if (IsDead) return;
+        CurrentHealth = Mathf.Clamp(CurrentHealth + amount, 0, maxHealth);
+        OnHealthChanged?.Invoke(CurrentHealth, maxHealth);
+    }
+
+    /// <summary>Kills the entity immediately regardless of current health.</summary>
+    public void InstantKill()
+    {
+        if (IsDead) return;
+        CurrentHealth = 0;
+        OnHealthChanged?.Invoke(CurrentHealth, maxHealth);
+        OnDeath?.Invoke();
+    }
+
+    public int MaxHealth => maxHealth;
+
+    // ─── Private Helpers ─────────────────────────────────────────────────────────
+
+    private bool IsInIFrames()
+    {
+        return Time.time - _lastDamageTime < iFramesDuration;
+    }
+}

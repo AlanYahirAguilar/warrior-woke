@@ -1,9 +1,9 @@
 using UnityEngine;
 
 /// <summary>
-/// Master player coordinator acting as a Facade for player subsystems in 2.5D.
-/// Orchestrates input consumption and physical movement across the Unity game loop.
-/// Adheres to Dependency Inversion and Single Responsibility principles.
+/// Master player coordinator — Facade for all player subsystems.
+/// Orchestrates input routing to movement and combat subsystems.
+/// Adheres to Single Responsibility, Dependency Inversion, and Open/Closed principles.
 /// </summary>
 [RequireComponent(typeof(PlayerMovement))]
 [RequireComponent(typeof(PlayerInputHandler))]
@@ -13,12 +13,19 @@ public class Player : MonoBehaviour
     public static Player Instance { get; private set; }
     public static event System.Action<Player> OnPlayerSpawned;
 
+    // ─── Subsystem References (cached in Awake — never looked up in the loop) ───
     private PlayerMovement _playerMovement;
     private IInputProvider _inputProvider;
-    //[SerializeField] private int fpsObjetivo = 30;
+
+    // ─── Lifecycle ───────────────────────────────────────────────────────────────
 
     private void Awake()
     {
+        if (Instance != null && Instance != this)
+        {
+            Destroy(gameObject);
+            return;
+        }
         Instance = this;
         InitializeSubsystems();
     }
@@ -31,60 +38,55 @@ public class Player : MonoBehaviour
     private void OnDestroy()
     {
         if (Instance == this)
-        {
             Instance = null;
-        }
     }
 
     private void Start()
     {
-        Debug.Log("[Player] 2.5D Subsystems initialized and ready.");
-        OnPlayerSpawned?.Invoke(this);
-        
-        // Desactivamos VSync para poder limitar manualmente los FPS.
-        //QualitySettings.vSyncCount = 0;
-
-        // Limitamos los FPS para realizar nuestra prueba.
-        //Application.targetFrameRate = fpsObjetivo;
+        Debug.Log("[Player] Subsystems initialized and ready.");
     }
+
+    // ─── Game Loop ───────────────────────────────────────────────────────────────
 
     private void FixedUpdate()
     {
         RouteInputToMovement();
     }
 
+    // ─── Initialization ──────────────────────────────────────────────────────────
+
     private void InitializeSubsystems()
     {
-        // Cache movement subsystem
         _playerMovement = GetComponent<PlayerMovement>();
         if (_playerMovement == null)
-        {
             _playerMovement = gameObject.AddComponent<PlayerMovement>();
-        }
 
-        // Cache input subsystem
         _inputProvider = GetComponent<IInputProvider>();
         if (_inputProvider == null)
-        {
             _inputProvider = gameObject.AddComponent<PlayerInputHandler>();
-        }
 
-        // Ensure ground detection subsystem is present
         if (GetComponent<IGroundChecker>() == null)
-        {
             gameObject.AddComponent<GroundChecker>();
-        }
     }
 
+    // ─── Input Routing ───────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Reads from the input provider and forwards consumed values to movement and combat.
+    /// Called in FixedUpdate so it aligns with physics ticks.
+    /// </summary>
     private void RouteInputToMovement()
     {
         if (_playerMovement == null || _inputProvider == null) return;
 
-        float horizontal = _inputProvider.HorizontalMove;
-        bool isSprint = _inputProvider.IsSprintPressed;
-        bool jumpTriggered = _inputProvider.ConsumeJumpTrigger();
-        bool slideTriggered = _inputProvider.ConsumeSlideTrigger();
-
-        _playerMovement.ProcessMovement(horizontal, isSprint, jumpTriggered, slideTriggered);
+        _playerMovement.ProcessMovement(
+            _inputProvider.HorizontalMove,
+            _inputProvider.ConsumeJumpTrigger(),
+            _inputProvider.ConsumeSlideTrigger(),
+            _inputProvider.ConsumeLightAttackTrigger(),
+            _inputProvider.ConsumeHeavyAttackTrigger(),
+            _inputProvider.IsBlockHeld,
+            _inputProvider.ConsumeDodgeTrigger()
+        );
     }
 }
