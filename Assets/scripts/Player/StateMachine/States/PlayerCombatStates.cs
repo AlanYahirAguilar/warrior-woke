@@ -133,7 +133,7 @@ public class PlayerHeavyAttackState : PlayerState
 /// </summary>
 public class PlayerBlockState : PlayerState
 {
-    private const float DamageReductionFactor = 0.3f; // absorbs 70%, player takes 30%
+    private const float DamageReductionFactor = 0.05f; // absorbs 95%, player takes 5%
 
     /// <summary>Exposes the reduction factor so HealthSystem can query it if needed.</summary>
     public float DamageReductionMultiplier => DamageReductionFactor;
