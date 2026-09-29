@@ -8,6 +8,8 @@ using UnityEngine;
 /// Fast attack state (Mouse1). Duration ~0.25s per GDD.
 /// Chains into HeavyAttack if Mouse2 is pressed within the combo window.
 /// Can chain up to 3 light attacks consecutively before forcing return to Idle.
+///
+/// Semana 4: Hitbox.Activate() now called with damage from WeaponHolder.
 /// </summary>
 public class PlayerLightAttackState : PlayerState
 {
@@ -15,17 +17,32 @@ public class PlayerLightAttackState : PlayerState
     private const float ComboWindow     = 0.5f;
     private const int   MaxLightChain   = 3;
 
-    private int _chainCount;
+    private int           _chainCount;
+    private Hitbox        _hitbox;
+    private WeaponHolder  _weaponHolder;
 
     public PlayerLightAttackState(PlayerMovement player, PlayerStateMachine stateMachine)
-        : base(player, stateMachine) { }
+        : base(player, stateMachine)
+    {
+        // Cache components once — never inside the loop (best practice #2)
+        _hitbox       = player.GetComponent<Hitbox>();
+        _weaponHolder = player.GetComponent<WeaponHolder>();
+    }
 
     public override void Enter()
     {
         base.Enter();
         _chainCount++;
-        // Stop horizontal movement during attack (player planted while striking)
+
+        // Apply correct damage from currently equipped weapon before activating the hitbox
+        if (_hitbox != null && _weaponHolder != null)
+            _hitbox.SetDamage(_weaponHolder.GetLightDamage());
+
+        // Stop horizontal movement during strike (planted while attacking)
         player.SetVelocity(0f, player.Rb.linearVelocity.y);
+
+        // Activate hitbox on the frame the attack starts
+        _hitbox?.Activate();
 
         // TODO: trigger animation — animator.SetTrigger("lightAttack");
     }
@@ -90,18 +107,30 @@ public class PlayerLightAttackState : PlayerState
 /// <summary>
 /// Slow, powerful attack state (Mouse2). Duration 0.8s per GDD.
 /// Leaves the player vulnerable if it misses (no cancel window).
-/// Can generate knockback on enemies — handled by the receiver's HealthSystem.
+/// Applies knockback via the receiver's HealthSystem.
+///
+/// Semana 4: Hitbox.Activate() now called with WeaponHolder heavy damage.
 /// </summary>
 public class PlayerHeavyAttackState : PlayerState
 {
-    private const float AttackDuration = 0.8f;
+    private const float AttackDuration  = 0.8f;
+    private const float HitWindowStart  = 0.1f; // Slight delay before hitbox fires
+
+    private Hitbox        _hitbox;
+    private WeaponHolder  _weaponHolder;
+    private bool          _hasActivatedHitbox;
 
     public PlayerHeavyAttackState(PlayerMovement player, PlayerStateMachine stateMachine)
-        : base(player, stateMachine) { }
+        : base(player, stateMachine)
+    {
+        _hitbox       = player.GetComponent<Hitbox>();
+        _weaponHolder = player.GetComponent<WeaponHolder>();
+    }
 
     public override void Enter()
     {
         base.Enter();
+        _hasActivatedHitbox = false;
         player.SetVelocity(0f, player.Rb.linearVelocity.y);
 
         // TODO: trigger animation — animator.SetTrigger("heavyAttack");
@@ -111,7 +140,19 @@ public class PlayerHeavyAttackState : PlayerState
     {
         base.LogicUpdate();
 
-        if (Time.time - startTime >= AttackDuration)
+        float elapsed = Time.time - startTime;
+
+        // Fire hitbox slightly after the state begins to match the animation swing peak
+        if (!_hasActivatedHitbox && elapsed >= HitWindowStart)
+        {
+            if (_hitbox != null && _weaponHolder != null)
+                _hitbox.SetDamage(_weaponHolder.GetHeavyDamage());
+
+            _hitbox?.Activate();
+            _hasActivatedHitbox = true;
+        }
+
+        if (elapsed >= AttackDuration)
             stateMachine.ChangeState(player.IdleState);
     }
 
@@ -188,9 +229,11 @@ public class PlayerBlockState : PlayerState
 
 /// <summary>
 /// Quick evasion state (E key). Duration 0.5s with 0.2s of iframes per GDD.
-/// Direction: always in the current FacingDirection (forward dodge, GDD §8 confirmed).
+/// Direction: always in the current FacingDirection (forward dodge).
 /// Cannot be used while airborne (only grounded).
-/// Cooldown is enforced via Time.time comparison instead of a Coroutine (zero GC).
+/// Cooldown enforced via Time.time (zero GC — no Coroutine).
+///
+/// Semana 4: IFrames now activated directly on HealthSystem via ActivateIFrames().
 /// </summary>
 public class PlayerDodgeState : PlayerState
 {
@@ -204,16 +247,25 @@ public class PlayerDodgeState : PlayerState
     /// <summary>Returns true if the dodge cooldown has elapsed.</summary>
     public static bool CanDodge => Time.time - _lastDodgeTime >= DodgeCooldown;
 
+    private HealthSystem _healthSystem;
+    private bool         _iFramesActivated;
+
     public PlayerDodgeState(PlayerMovement player, PlayerStateMachine stateMachine)
-        : base(player, stateMachine) { }
+        : base(player, stateMachine)
+    {
+        _healthSystem = player.GetComponent<HealthSystem>();
+    }
 
     public override void Enter()
     {
         base.Enter();
-        _lastDodgeTime = Time.time;
+        _lastDodgeTime    = Time.time;
+        _iFramesActivated = false;
 
-        // TODO: enable iframes on HealthSystem for IFramesDuration seconds
-        // e.g., player.GetComponent<HealthSystem>().ActivateIFrames(IFramesDuration);
+        // Activate invincibility frames on the HealthSystem for IFramesDuration seconds
+        _healthSystem?.ActivateIFrames(IFramesDuration);
+        _iFramesActivated = true;
+
         // TODO: trigger animation — animator.SetTrigger("dodge");
     }
 

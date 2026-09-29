@@ -46,6 +46,16 @@ public class HealthSystem : MonoBehaviour, IDamageable
     // ─── Public API ──────────────────────────────────────────────────────────────
 
     /// <summary>
+    /// Overrides the max health and resets current health.
+    /// Call this in Awake of the owning entity (e.g., Enemy.cs) BEFORE Start() runs.
+    /// </summary>
+    public void InitializeHealth(int max)
+    {
+        maxHealth     = max;
+        CurrentHealth = max;
+    }
+
+    /// <summary>
     /// Applies damage with iframes check. Clamps health to [0, MaxHealth].
     /// </summary>
     public void TakeDamage(int amount, Vector3 source)
@@ -81,6 +91,17 @@ public class HealthSystem : MonoBehaviour, IDamageable
     }
 
     public int MaxHealth => maxHealth;
+
+    /// <summary>
+    /// Grants temporary invincibility for <paramref name="duration"/> seconds.
+    /// Call from DodgeState, ability triggers, or cutscene handlers.
+    /// Zero GC: no Coroutine — reuses the existing Time.time iframes gate.
+    /// </summary>
+    public void ActivateIFrames(float duration)
+    {
+        // Push _lastDamageTime forward so the iframes gate stays active for 'duration' seconds
+        _lastDamageTime = Time.time - iFramesDuration + duration;
+    }
 
     // ─── Private Helpers ─────────────────────────────────────────────────────────
 

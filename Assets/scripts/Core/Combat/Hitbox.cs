@@ -56,6 +56,12 @@ public class Hitbox : MonoBehaviour
     /// <summary>Adjusts damage value at runtime (e.g., weapon swaps, buffs).</summary>
     public void SetDamage(int newDamage) => damage = newDamage;
 
+    /// <summary>Overrides the detection radius at runtime (e.g., weapon-specific reach).</summary>
+    public void SetRadius(float newRadius) => radius = Mathf.Max(0.01f, newRadius);
+
+    /// <summary>Current detection radius.</summary>
+    public float Radius => radius;
+
     // ─── Gizmos ──────────────────────────────────────────────────────────────────
 
     private void OnDrawGizmosSelected()
