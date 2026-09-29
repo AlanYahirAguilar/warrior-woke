@@ -64,11 +64,6 @@ public class PlayerMovement : MonoBehaviour
     /// <summary>Camera-relative, normalized movement direction on the XZ plane for this tick (zero when no input).</summary>
     public Vector3 MoveDirection    { get; private set; } = Vector3.zero;
 
-    /// <summary>
-    /// Legacy left/right scalar (-1/1), kept only for the disabled 2.5D parkour states
-    /// (vault/ledge-grab/wall-jump). Movement itself no longer uses this — use transform.forward instead.
-    /// </summary>
-    public float FacingDirection    { get; private set; } = 1f;
     public bool  IsGrounded         => _groundChecker != null && _groundChecker.IsGrounded;
     public int   ConsecutiveWallJumps { get; private set; }
     public Vector3 CurrentLedgeCorner { get; set; }
@@ -110,6 +105,8 @@ public class PlayerMovement : MonoBehaviour
 
     private void FixedUpdate()
     {
+        // Rotation applied in physics step so it stays in sync with Rigidbody movement
+        ApplyFacingRotation();
         StateMachine.CurrentState?.PhysicsUpdate();
     }
 
@@ -138,7 +135,7 @@ public class PlayerMovement : MonoBehaviour
         DodgeTriggered        = dodgeTriggered;
 
         _groundChecker?.CheckGrounded();
-        UpdateMovementDirectionAndFacing();
+        UpdateMoveDirection();   // pure logic — no transform writes here
 
         StateMachine.CurrentState?.LogicUpdate();
     }
@@ -233,11 +230,11 @@ public class PlayerMovement : MonoBehaviour
     }
 
     /// <summary>
-    /// Projects raw input onto the camera's flattened forward/right axes to get a
-    /// world-space movement direction, and smoothly rotates the character to face it.
+    /// Projects raw input onto the camera's flattened forward/right axes to compute
+    /// the world-space movement direction for this tick. Pure data — no transform writes.
     /// Falls back to world-space axes if no camera is available.
     /// </summary>
-    private void UpdateMovementDirectionAndFacing()
+    private void UpdateMoveDirection()
     {
         if (!HasMoveInput)
         {
@@ -268,24 +265,25 @@ public class PlayerMovement : MonoBehaviour
         right.Normalize();
 
         Vector3 direction = forward * InputZ + right * InputX;
-        if (direction.sqrMagnitude <= 0.0001f)
-        {
-            MoveDirection = Vector3.zero;
+        MoveDirection = direction.sqrMagnitude > 0.0001f ? direction.normalized : Vector3.zero;
+    }
+
+    /// <summary>
+    /// Smoothly rotates the character to face MoveDirection.
+    /// Lives in FixedUpdate so rotation is applied in the same physics step as velocity,
+    /// keeping the Rigidbody and transform in sync and avoiding visual jitter.
+    /// </summary>
+    private void ApplyFacingRotation()
+    {
+        if (!faceMovementDirection || MoveDirection == Vector3.zero || !CanRotateInCurrentState())
             return;
-        }
-
-        direction.Normalize();
-        MoveDirection = direction;
-        FacingDirection = direction.x >= 0f ? 1f : -1f;
-
-        if (!faceMovementDirection || !CanRotateInCurrentState()) return;
 
         // SmoothDampAngle eases in/out of the turn instead of snapping at a flat angular
         // speed — this is what actually fixes "the camera spins too fast": the camera
         // trails transform.forward, so a snappy instant turn reads as a fast camera swing.
-        float targetYaw = Quaternion.LookRotation(direction, Vector3.up).eulerAngles.y;
+        float targetYaw  = Quaternion.LookRotation(MoveDirection, Vector3.up).eulerAngles.y;
         float currentYaw = transform.eulerAngles.y;
-        float newYaw = Mathf.SmoothDampAngle(currentYaw, targetYaw, ref _turnSmoothVelocity, turnSmoothTime);
+        float newYaw     = Mathf.SmoothDampAngle(currentYaw, targetYaw, ref _turnSmoothVelocity, turnSmoothTime);
         transform.rotation = Quaternion.Euler(0f, newYaw, 0f);
     }
 

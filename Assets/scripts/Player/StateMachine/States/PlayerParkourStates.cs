@@ -14,7 +14,7 @@ public class PlayerVaultState : PlayerState
         player.SetKinematic(true);
         startPos = player.Rb.position;
         // Obstacle of moderate height: move forward and slightly up in an arc
-        targetPos = startPos + new Vector3(player.FacingDirection * 2f, 0f, 0f);
+        targetPos = startPos + player.transform.forward * 2f;
     }
 
     public override void PhysicsUpdate()
@@ -54,11 +54,11 @@ public class PlayerLedgeGrabState : PlayerState
         player.SetVelocity(0f, 0f);
         player.SetKinematic(true);
 
-        // Snap to ledge offset
+        // Snap to ledge offset — always route through Rigidbody so the physics engine stays aware
         float grabOffsetX = 0.4f;
         float grabOffsetY = 1f;
-        Vector3 snapPos = player.CurrentLedgeCorner - new Vector3(player.FacingDirection * grabOffsetX, grabOffsetY, 0f);
-        player.transform.position = snapPos;
+        Vector3 snapPos = player.CurrentLedgeCorner - player.transform.forward * grabOffsetX - Vector3.up * grabOffsetY;
+        player.Rb.MovePosition(snapPos);
     }
 
     public override void LogicUpdate()
@@ -70,9 +70,9 @@ public class PlayerLedgeGrabState : PlayerState
             // Espacio presionado -> Subir el borde
             stateMachine.ChangeState(player.LedgeClimbState);
         }
-        else if (player.InputX == -player.FacingDirection)
+        else if (player.HasMoveInput && Vector3.Dot(player.MoveDirection, player.transform.forward) < -0.5f)
         {
-            // Soltarse si presiona la dirección opuesta
+            // Soltarse si presiona la dirección opuesta al forward
             stateMachine.ChangeState(player.IdleState);
         }
     }
@@ -101,7 +101,7 @@ public class PlayerLedgeClimbState : PlayerState
         base.Enter();
         startPos = player.Rb.position;
         // Move up and forward past the ledge corner
-        climbTargetPos = player.CurrentLedgeCorner + new Vector3(player.FacingDirection * 0.4f, 0.1f, 0f);
+        climbTargetPos = player.CurrentLedgeCorner + player.transform.forward * 0.4f + Vector3.up * 0.1f;
     }
 
     public override void PhysicsUpdate()
@@ -126,7 +126,11 @@ public class PlayerLedgeClimbState : PlayerState
             else
             {
                 currentPos.y = climbTargetPos.y;
-                currentPos.x = Mathf.Lerp(startPos.x, climbTargetPos.x, (t - 0.5f) * 2f);
+                Vector3 startXZ = new Vector3(startPos.x, 0, startPos.z);
+                Vector3 targetXZ = new Vector3(climbTargetPos.x, 0, climbTargetPos.z);
+                Vector3 currentXZ = Vector3.Lerp(startXZ, targetXZ, (t - 0.5f) * 2f);
+                currentPos.x = currentXZ.x;
+                currentPos.z = currentXZ.z;
             }
             player.Rb.MovePosition(currentPos);
         }

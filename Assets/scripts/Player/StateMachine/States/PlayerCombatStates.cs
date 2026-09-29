@@ -229,7 +229,7 @@ public class PlayerBlockState : PlayerState
 
 /// <summary>
 /// Quick evasion state (E key). Duration 0.5s with 0.2s of iframes per GDD.
-/// Direction: always in the current FacingDirection (forward dodge).
+/// Direction: always in the current facing direction (transform.forward).
 /// Cannot be used while airborne (only grounded).
 /// Cooldown enforced via Time.time (zero GC — no Coroutine).
 ///

@@ -3,6 +3,8 @@ using UnityEngine;
 /// <summary>
 /// Handles environment detection (walls, ledges, low obstacles) using Raycasts.
 /// Complies with SRP by isolating collision detection from movement logic.
+/// Uses an OverlapSphere pre-filter to skip Raycasts when no geometry is nearby,
+/// reducing per-frame physics work in open areas.
 /// </summary>
 public class EnvironmentChecker : MonoBehaviour
 {
@@ -20,32 +22,46 @@ public class EnvironmentChecker : MonoBehaviour
     [Header("Ledge Check")]
     [SerializeField] private float ledgeTopCheckDistance = 0.5f;
 
-    public bool IsTouchingWall(float facingDirection)
+    [Header("Pre-filter")]
+    [Tooltip("Sphere radius used as a cheap pre-filter before casting any rays. Set slightly larger than wallCheckDistance.")]
+    [SerializeField] private float proximityCheckRadius = 1.2f;
+
+    // Reusable buffer for OverlapSphere — avoids GC allocations every check
+    private readonly Collider[] _proximityBuffer = new Collider[4];
+
+    /// <summary>Returns true when at least one obstacle collider sits within the proximity sphere.</summary>
+    private bool HasNearbyGeometry()
     {
         if (centerPoint == null) return false;
-        Vector3 direction = facingDirection > 0 ? Vector3.right : Vector3.left;
+        int count = Physics.OverlapSphereNonAlloc(centerPoint.position, proximityCheckRadius, _proximityBuffer, obstacleLayer);
+        return count > 0;
+    }
+
+    public bool IsTouchingWall(Vector3 direction)
+    {
+        if (centerPoint == null) return false;
+        if (!HasNearbyGeometry()) return false;
         return Physics.Raycast(centerPoint.position, direction, wallCheckDistance, obstacleLayer);
     }
 
-    public bool IsObstacleVaultable(float facingDirection)
+    public bool IsObstacleVaultable(Vector3 direction)
     {
         // Si tocamos pared en el centro, pero NO tocamos pared a la altura de la cabeza, es un vault
         if (headPoint == null) return false;
-        
-        bool touchingMid = IsTouchingWall(facingDirection);
-        Vector3 direction = facingDirection > 0 ? Vector3.right : Vector3.left;
+        if (!HasNearbyGeometry()) return false;
+
+        bool touchingMid = Physics.Raycast(centerPoint.position, direction, wallCheckDistance, obstacleLayer);
         bool touchingHigh = Physics.Raycast(headPoint.position, direction, wallCheckDistance, obstacleLayer);
 
         return touchingMid && !touchingHigh;
     }
 
-    public bool IsLedgeDetected(float facingDirection, out Vector3 ledgeCorner)
+    public bool IsLedgeDetected(Vector3 direction, out Vector3 ledgeCorner)
     {
         ledgeCorner = Vector3.zero;
         if (headPoint == null || centerPoint == null) return false;
+        if (!HasNearbyGeometry()) return false;
 
-        Vector3 direction = facingDirection > 0 ? Vector3.right : Vector3.left;
-        
         // Si choca la cabeza y el centro, es una pared alta
         bool touchingHigh = Physics.Raycast(headPoint.position, direction, wallCheckDistance, obstacleLayer);
         bool touchingMid = Physics.Raycast(centerPoint.position, direction, wallCheckDistance, obstacleLayer);
@@ -69,6 +85,8 @@ public class EnvironmentChecker : MonoBehaviour
         {
             Gizmos.color = Color.blue;
             Gizmos.DrawLine(centerPoint.position, centerPoint.position + transform.right * wallCheckDistance);
+            Gizmos.color = new Color(0f, 0.5f, 1f, 0.15f);
+            Gizmos.DrawWireSphere(centerPoint.position, proximityCheckRadius);
         }
         if (headPoint != null)
         {
@@ -77,3 +95,4 @@ public class EnvironmentChecker : MonoBehaviour
         }
     }
 }
+

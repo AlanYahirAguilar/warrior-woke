@@ -117,13 +117,12 @@ public class PlayerRunState : PlayerState
             return;
         }
 
-        // Parkour — disabled: vault/ledge/wall-jump assume a fixed 2.5D plane (left/right
-        // raycasts) and don't have a defined behavior yet in free-roam 3D. See CONTEXTO.md.
-        // if (player.EnvChecker.IsObstacleVaultable(player.FacingDirection))
-        // {
-        //     stateMachine.ChangeState(player.VaultState);
-        //     return;
-        // }
+        // Parkour — Vault habilitado en 3D
+        if (player.EnvChecker.IsObstacleVaultable(player.transform.forward))
+        {
+            stateMachine.ChangeState(player.VaultState);
+            return;
+        }
 
         if (player.SlideTriggered && player.IsGrounded)
         {

@@ -26,24 +26,22 @@ public class PlayerJumpState : PlayerState
     {
         base.LogicUpdate();
 
-        // ── Ledge detection and wall jump — disabled: both assume a fixed 2.5D plane
-        // (left/right raycasts) and don't have a defined behavior yet in free-roam 3D.
-        // See CONTEXTO.md.
-        // if (player.EnvChecker.IsLedgeDetected(player.FacingDirection, out Vector3 ledgeCorner))
-        // {
-        //     player.CurrentLedgeCorner = ledgeCorner;
-        //     stateMachine.ChangeState(player.LedgeGrabState);
-        //     return;
-        // }
-        //
-        // if (player.Rb.linearVelocity.y > 0f &&
-        //     player.EnvChecker.IsTouchingWall(player.FacingDirection) &&
-        //     player.JumpTriggered &&
-        //     player.ConsecutiveWallJumps < 2)
-        // {
-        //     stateMachine.ChangeState(player.WallJumpState);
-        //     return;
-        // }
+        // ── Ledge detection and wall jump — habilitado en 3D
+        if (player.EnvChecker.IsLedgeDetected(player.transform.forward, out Vector3 ledgeCorner))
+        {
+            player.CurrentLedgeCorner = ledgeCorner;
+            stateMachine.ChangeState(player.LedgeGrabState);
+            return;
+        }
+
+        if (player.Rb.linearVelocity.y > 0f &&
+            player.EnvChecker.IsTouchingWall(player.transform.forward) &&
+            player.JumpTriggered &&
+            player.ConsecutiveWallJumps < 2)
+        {
+            stateMachine.ChangeState(player.WallJumpState);
+            return;
+        }
 
         // ── Land detection — transition to idle when grounded ──
         if (player.Rb.linearVelocity.y <= 0f && player.IsGrounded)
@@ -82,8 +80,8 @@ public class PlayerWallJumpState : PlayerState
         base.Enter();
         player.IncrementWallJump();
 
-        // Impulse in the opposite direction of the wall
-        float jumpDir = -player.FacingDirection;
+        // Impulse in the opposite direction of the wall (3D)
+        Vector3 jumpDir = -player.transform.forward;
         player.SetVelocity(jumpDir * player.BaseSpeed, player.JumpSpeed);
     }
 

@@ -30,8 +30,8 @@ Documentos relacionados en `docs/`:
 - **Movimiento y estados del jugador**: máquina de estados en
   `Assets/scripts/Player/StateMachine/` con estados de suelo, aire y combate
   (`PlayerGroundedStates`, `PlayerAirStates`, `PlayerCombatStates`). El movimiento es libre en 3D
-  y relativo a cámara — ver sección 4. Los estados de parkour (`PlayerParkourStates` y wall-jump)
-  siguen en el código pero están deshabilitados (ver sección 4).
+  y relativo a cámara — ver sección 4. Los estados de parkour (`PlayerParkourStates`,
+  `PlayerAirStates`) están **habilitados y funcionando en 3D** (ver sección 4).
 - **Combate**: `HealthSystem` y `Hitbox` en `Assets/scripts/Core/Combat/`.
 - **Pooling y spawns**: `ObjectPoolManager` y `Spawner` en `Assets/scripts/Core/Spawning/`.
 - **Cámara**: `CameraFollow` en `Assets/scripts/Camera/` — cámara al hombro (sección 4).
@@ -87,25 +87,28 @@ cámara atraviese geometría). Sigue detectando al Player automáticamente (even
 siga son dos scripts independientes que se retroalimentan: la cámara sigue el `transform.forward`
 del jugador, y el input del jugador se interpreta según hacia dónde mira la cámara.
 
-### Por qué el parkour quedó deshabilitado
+### Estado del parkour (3D habilitado)
 
 El juego se armó originalmente como plataformero 2.5D: el Rigidbody tenía la posición Z
-congelada, y todo el movimiento era un solo eje (izquierda/derecha) con el personaje rotando
-90°/-90°. Los estados de pared/cornisa (`PlayerVaultState`, `PlayerLedgeGrabState`,
-`PlayerLedgeClimbState`, `PlayerWallJumpState` en `PlayerParkourStates.cs` /
-`PlayerAirStates.cs`) y `EnvironmentChecker.cs` están construidos sobre ese plano fijo (raycasts
-literalmente en `Vector3.left`/`Vector3.right`).
+congelada, y todo el movimiento era un solo eje (izquierda/derecha). Los estados de pared/cornisa
+(`PlayerVaultState`, `PlayerLedgeGrabState`, `PlayerLedgeClimbState`, `PlayerWallJumpState` en
+`PlayerParkourStates.cs` / `PlayerAirStates.cs`) estaban construidos sobre ese plano fijo
+(raycasts literalmente en `Vector3.left`/`Vector3.right`).
 
-Al pasar a movimiento libre en 3D, esos raycasts ya no tienen un "adelante" fijo que revisar, así
-que **las transiciones hacia esos estados se comentaron** (búscalas como
-`// Parkour — disabled` en `PlayerGroundedStates.cs` y `PlayerAirStates.cs`). El código de los
-estados sigue ahí completo — si más adelante se quiere retomar vault/ledge-grab/wall-jump en 3D,
-hay que rehacer `EnvironmentChecker` para que revise en la dirección real (`transform.forward`)
-en vez de un eje mundial fijo, y decidir cómo detectar cornisas/paredes en un mundo abierto. No es
-un bug: fue una decisión de alcance para priorizar el movimiento libre + cámara al hombro.
+Al pasar a movimiento libre en 3D, se reescribieron para funcionar en cualquier dirección:
 
-Sí siguen funcionando: Idle/Run/Jump/Slide, y todo el combate (ataques, bloqueo, esquiva) — la
-esquiva y el slide ahora dashean hacia `transform.forward` en vez de un signo ±1.
+- `EnvironmentChecker.cs` ahora recibe `Vector3 direction` (en la práctica, `transform.forward`
+  del jugador) en lugar de un float ±1. Incorpora un pre-filtro con `Physics.OverlapSphereNonAlloc`
+  que evita lanzar raycasts cuando no hay geometría cercana — cero GC, cero trabajo físico
+  innecesario en zonas abiertas.
+- Vault, ledge-grab, ledge-climb y wall-jump calculan sus targets de posición usando
+  `transform.forward` y `Vector3.Lerp` en X y Z (no solo X).
+- La condición de "soltarse de la cornisa" usa `Vector3.Dot` contra el input para detectar la
+  dirección opuesta en cualquier orientación del jugador.
+- Wall jump aplica el impulso inverso con `-player.transform.forward * player.BaseSpeed`.
+
+Sí siguen funcionando: Idle/Run/Jump/Slide, todo el combate (ataques, bloqueo, esquiva), y ahora
+también el parkour completo. La esquiva y el slide dashean hacia `transform.forward`.
 
 ### Cómo poner un modelo de personaje nuevo
 
