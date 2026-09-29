@@ -46,7 +46,7 @@ Assets/
     Camera/                   CameraFollow.cs
     Core/
       Combat/                 HealthSystem, Hitbox, WeaponData (SO), WeaponHolder, EnemyData (SO)
-      Interfaces/             IDamageable, IGroundChecker, IInputProvider, IPoolable, IXpReceiver
+      Interfaces/             IDamageable, IGroundChecker, IInputProvider, IPoolable
       Spawning/               ObjectPoolManager, Spawner, ReturnToPoolDelay
     Enemy/
       Enemy.cs
@@ -54,7 +54,7 @@ Assets/
       Types/                  Brute.cs, Looter.cs
     Player/
       Player.cs, PlayerMovement.cs, PlayerInputHandler.cs,
-      GroundChecker.cs, EnvironmentChecker.cs, PlayerXpSystem.cs
+      GroundChecker.cs, EnvironmentChecker.cs
       StateMachine/           PlayerState, PlayerStateMachine,
                               States/{PlayerGroundedStates, PlayerAirStates,
                                       PlayerParkourStates, PlayerCombatStates}.cs
@@ -98,7 +98,7 @@ crea el `Spawner` al iniciar (ver §5.6).
 
 | Prefab | Componentes de scripts propios | Notas |
 |---|---|---|
-| `Player` | `Player`, `PlayerMovement`, `PlayerInputHandler`, `GroundChecker`, `EnvironmentChecker`, `HealthSystem`, `Hitbox` | Tag `Player`, layer 8. Rigidbody 70 kg, **Interpolate: None**, rotaciones congeladas. Hijos `CenterPoint`, `HeadPoint`, `Model` (character.fbx). **No tiene** `WeaponHolder`, `PlayerXpSystem`, `Animator Controller`. |
+| `Player` | `Player`, `PlayerMovement`, `PlayerInputHandler`, `GroundChecker`, `EnvironmentChecker`, `HealthSystem`, `Hitbox` | Tag `Player`, layer 8. Rigidbody 70 kg, **Interpolate: None**, rotaciones congeladas. Hijos `CenterPoint`, `HeadPoint`, `Model` (character.fbx). **No tiene** `WeaponHolder` ni `Animator Controller`. |
 | `Enemy` | `HealthSystem`, `Hitbox` | ⚠️ **No tiene `Enemy.cs`**, así que la IA no corre. ⚠️ Tag **`Player`** (error: debería ser distinto). `Hitbox.targetLayers = 0` (no puede golpear a nadie). |
 | `GameManager` | `ObjectPoolManager` | Pools: `player` → Player.prefab (1), `spawnVFX` → Particle System (1). |
 | `Spawner` | `Spawner` | `entityId: player`, `triggerType: OnStart`. |
@@ -128,7 +128,6 @@ flowchart LR
     WH --> WD[(WeaponData SO)]
     E[Enemy] --> EFSM[EnemyStateMachine]
     E --> ED[(EnemyData SO)]
-    E -- OnDeath: AddXp --> XP[PlayerXpSystem<br/>IXpReceiver]
     E -- ReturnToPool --> OPM
 ```
 
@@ -179,7 +178,7 @@ Player (Facade)                 FixedUpdate → RouteInputToMovement()
 | Archivo | Estados |
 |---|---|
 | `PlayerGroundedStates.cs` | `Idle`, `Run` (auto-sprint), `Slide` |
-| `PlayerAirStates.cs` | `Jump`, `WallJump` |
+| `PlayerAirStates.cs` | `Jump`, `WallJump` (⏸️ desactivado: la clase existe pero ninguna transición llega a ella) |
 | `PlayerParkourStates.cs` | `Vault`, `LedgeGrab`, `LedgeClimb` |
 | `PlayerCombatStates.cs` | `LightAttack`, `HeavyAttack`, `Block`, `Dodge` |
 
@@ -196,9 +195,7 @@ stateDiagram-v2
     Run --> Jump
     Run --> Idle: sin input
     Jump --> LedgeGrab: cornisa detectada
-    Jump --> WallJump: pared + Espacio + subiendo + <2
     Jump --> Idle: aterriza
-    WallJump --> Jump: 0.15 s
     LedgeGrab --> LedgeClimb: Espacio
     LedgeGrab --> Idle: dirección opuesta
     LedgeClimb --> Idle
@@ -214,6 +211,10 @@ stateDiagram-v2
     Dodge --> Idle: 0.5 s
 ```
 
+> **Wall jump desactivado (2026-09-29, decisión del equipo):** la transición `Jump → WallJump`
+> está comentada en `PlayerJumpState.LogicUpdate`. `PlayerWallJumpState`, `ConsecutiveWallJumps` y
+> `EnvironmentChecker.IsTouchingWall` se conservan para poder reactivarlo.
+>
 > **Nota:** `Dodge` usa un cooldown `static` (`_lastDodgeTime`), pero ninguna transición consulta
 > `PlayerDodgeState.CanDodge`, así que **hoy el cooldown no se aplica**. Ver `features.md`.
 
@@ -252,7 +253,7 @@ varios colliders, el knockback no se aplica y no hay animaciones.
 - **`Enemy : MonoBehaviour, IPoolable`**: el mismo patrón de contexto + FSM que el jugador. Lee sus
   valores de un `EnemyData` (SO). Estados en `EnemyGroundedStates.cs`: `Patrol`, `Chase`, `Attack`,
   `Dead`. La detección es un `OverlapSphereNonAlloc` + `CompareTag("Player")` + raycast de línea de
-  visión. Al morir llama a `IXpReceiver.AddXp` y vuelve al pool.
+  visión. Al morir espera 1.5 s y vuelve al pool.
 - ⚠️ **Es 2.5D:** congela Z, se mueve solo en X (`Move(float dir)`) y rota a ±90°. El jugador ya es
   3D libre, así que los enemigos **no pueden perseguirlo en profundidad**.
 - ⚠️ `Looter`/`Brute` vienen del GDD anterior. `Brute` declara `blockProbability`, pero no hay
@@ -285,11 +286,11 @@ final el tag.
 **Falta lo del GDD:** control libre con el ratón (hoy la cámara solo sigue el `forward` del
 jugador), camera shake, encuadre de combate y ajuste de zoom.
 
-### 5.8 Progresión por XP — ⚠️ Fuera del GDD
+### 5.8 Progresión — sin XP (decisión cerrada)
 
-`PlayerXpSystem : IXpReceiver`, `IXpReceiver`, `EnemyData.xpReward`. El GDD final prohíbe la
-experiencia (§7, §19). No está en el Player.prefab, así que hoy no tiene efecto. Hay que decidir si
-se quita (ver §8).
+El juego **no tiene experiencia ni niveles de personaje** (GDD §7, §19). `PlayerXpSystem`,
+`IXpReceiver` y `EnemyData.xpReward` se eliminaron el 2026-09-29. No se deben reintroducir: la
+progresión es solo por historia (niveles y mundos).
 
 ### 5.9 Herramientas de Editor — ✅ Implementado
 
@@ -326,37 +327,38 @@ niveles, audio, feedback de daño (VFX, camera shake, estado visual de salud) y 
 
 ## 7. Plan técnico para lo que falta — 📋 Propuesta
 
-> Nada de esta sección está implementado. Las marcadas con **❓** necesitan aprobación del equipo
-> (ver §8) antes de tocar código. Cuando algo se implemente, pasa a §5 y a `features.md`.
+> Nada de esta sección está implementado. Las marcadas con **❓** siguen pendientes de aprobación
+> (ver §8). Las marcadas con **✔** ya están aprobadas. Cuando algo se implemente, pasa a §5 y a `features.md`.
 
 | Sistema | Diseño propuesto | Encaja con |
 |---|---|---|
 | **Input** ❓ | Crear `Assets/Input/AwakenedWarrior.inputactions` con el mapa `Gameplay` (Move, Look, Sprint, Jump, LightAttack, BlockHold, Dodge, Interact, Pause) usando los bindings del GDD §14 + gamepad, y asignar las referencias en `PlayerInputHandler`. El código **ya soporta** `InputActionReference`, así que no hace falta reescribirlo. | Input System, doc oficial ("Using Actions" es el flujo recomendado). |
-| **Sprint** | Reemplazar el auto-sprint por "mantener Shift" (`IInputProvider.IsSprintHeld`), con `SprintSpeed = BaseSpeed × 1.4`. Se cancela al recibir daño, bloquear o atacar. | GDD §5.2. |
-| **Vault** | Solo con Espacio + `IsObstacleVaultable` (hoy es automático al correr contra un obstáculo). | GDD §5.4. |
+| **Controles** ✔ | Adoptar los del GDD §14: J ligero, K fuerte, L bloqueo (mantener), Q esquiva + dirección, E recoger, Shift sprint (mantener), Espacio salto/vault, ESC pausa. El slide pierde Shift y necesita una tecla nueva (por definir). | GDD §14, decisión P1. |
+| **Sprint** ✔ | Reemplazar el auto-sprint por "mantener Shift" (`IInputProvider.IsSprintHeld`), con `SprintSpeed = BaseSpeed × 1.4`. Se cancela al recibir daño, bloquear o atacar. | GDD §5.2. |
+| **Vault** ✔ | Solo con Espacio + `IsObstacleVaultable` (hoy es automático al correr contra un obstáculo). | GDD §5.4. |
 | **Bloqueo** | `HealthSystem` recibe un modificador de daño (p. ej. una interfaz `IDamageModifier` que implementa el estado de bloqueo, o un `float DamageMultiplier` que pone el estado). Reducción del 70 % solo si `Vector3.Dot(forward, dirHaciaAtacante) > umbral`. | GDD §5.8. |
 | **Regeneración de vida** | Componente `HealthRegen` que escucha `OnDamageReceived` y, tras N segundos sin daño, llama a `Heal` por tick (con timer, sin corrutina por frame). | GDD §5.11, D7. |
 | **Caída mortal** | En `PlayerMovement`/`GroundChecker`, registrar la altura al despegar y llamar `InstantKill()` al aterrizar si la caída supera X m. Los barrancos pueden usar un trigger `KillZone`. | GDD §5.11, §5.12. |
 | **Checkpoints / respawn** | `Checkpoint` (trigger, una activación) → `CheckpointManager` (en la escena) guarda la posición. Al `OnDeath` del Player: reposicionar con `Rigidbody.position` (teleport), `HealthSystem.InitializeHealth(100)` y reiniciar la FSM en `Idle`. | GDD §5.13, §17. |
 | **Guardado** | `SaveSystem` estático: `JsonUtility` → `Application.persistentDataPath/save.json` con `{nivel, checkpointId}`. Una sola partida. | GDD §26, doc oficial de JsonUtility. |
 | **Armas** | Agregar `WeaponHolder` al Player.prefab. Crear 3 `WeaponData` (katana 20/35, yari 18/30 con más radio, kanabo 30/50) y un prefab `WeaponPickup` (trigger + E). Al recoger, se suelta la actual como pickup. Desarmado 10/20. | GDD §5.10, §18, D5. |
-| **Enemigos** ❓ | Reescribir `Enemy` para 3D: **NavMeshAgent** (paquete ya instalado) con **Rigidbody kinemático**, como recomienda la documentación de AI Navigation. `NavMeshSurface` en cada nivel. Estados del GDD §21 (Idle, Detectar, Acercarse, Atacar, Defenderse, Buscar, Regresar) y una zona asignada (`EnemyZone`) de la que no salen. Tipos por `EnemyData`: `Archer` (distancia + flecha pooleada), `LightWarrior`, `HeavyWarrior`. | GDD §5.14, §12, §21, D2, D5, D6. |
+| **Enemigos** ✔ | Reescribir `Enemy` para 3D: **NavMeshAgent** (paquete ya instalado) con **Rigidbody kinemático**, como recomienda la documentación de AI Navigation. `NavMeshSurface` en cada nivel. Estados del GDD §21 (Idle, Detectar, Acercarse, Atacar, Defenderse, Buscar, Regresar) y una zona asignada (`EnemyZone`) de la que no salen. Tipos por `EnemyData`: `Archer` (distancia + flecha pooleada), `LightWarrior`, `HeavyWarrior`. La apariencia (modelos) la entrega el equipo en un paquete aparte. | GDD §5.14, §12, §21, D2, D5, D6. |
 | **Jefes** | `Boss : Enemy` con estados extra (Analizar distancia, Reposicionarse, Bloquear, Esquivar), sin fases. `BossArena` cierra la salida con un trigger. | GDD §5.15, §13. |
-| **Cámara** ❓ | Opción A: extender `CameraFollow` con yaw/pitch del ratón (`Look`), shake por evento y encuadre de combate. Opción B: migrar a **Cinemachine 3** (`ThirdPersonFollow` trae hombro, distancia y deoclusión; Impulse para el shake). | GDD §15. |
+| **Cámara** ✔ | Extender `CameraFollow` (sin Cinemachine) con yaw/pitch del ratón (`Look`), límites de pitch, cursor bloqueado en gameplay, shake por evento y encuadre de combate. El movimiento sigue siendo relativo a la cámara, pero la cámara deja de depender del `forward` del jugador. | GDD §15. |
 | **Animación** | Un `Animator Controller` del jugador con parámetros hasheados (`Animator.StringToHash`) en un componente `PlayerAnimator` que escucha los cambios de estado. Los estados no llaman al Animator directamente. | GDD pilar 2. |
 | **Flujo de juego** | Escenas `MainMenu`, `World1_Level1`, `World1_Level2`, `World2_Level3`, cargadas con `SceneManager.LoadSceneAsync`. Pausa con `Time.timeScale = 0` y un panel de UI (uGUI). | GDD §17. |
 | **Audio** | `AudioManager` con fuentes de audio pooleadas para SFX, que se suscribe a los eventos de combate. | GDD §23, D6, D7. |
 
-## 8. Decisiones pendientes (requieren aprobación)
+## 8. Decisiones de alcance
 
-| # | Pregunta | Opciones | Recomendación |
-|---|---|---|---|
-| P1 | Controles | a) Cambiar a los del GDD (J/K/L/Q/E, Shift = sprint) · b) Mantener los actuales | **a**: el GDD es la fuente de verdad. |
-| P2 | Parkour fuera del GDD (LedgeGrab, LedgeClimb, WallJump, Slide) | a) Desactivar las transiciones (sin borrar código) · b) Conservarlos como "deseable" · c) Borrarlos | **a**: el GDD §28 limita el parkour a salto, sprint y vault. Desactivarlos mantiene el trabajo existente. |
-| P3 | Sistema de XP | a) Borrar `PlayerXpSystem`, `IXpReceiver`, `xpReward` · b) Dejarlo sin conectar | **a**: el GDD §7 y §19 prohíben la experiencia. |
-| P4 | Enemigos | a) Reescribir `Enemy` en 3D con NavMeshAgent · b) Adaptar el movimiento actual a 3D a mano | **a**: el paquete ya está instalado y resuelve pathfinding y zonas. |
-| P5 | Cámara | a) Extender `CameraFollow` · b) Migrar a Cinemachine 3 | Hay que decidirlo en equipo: A no agrega dependencias; B da más funciones y menos código propio. |
-| P6 | Input | Migrar a un `.inputactions` propio | Sí (no rompe nada: el código ya lo soporta). |
+| # | Tema | Decisión | Fecha | Estado |
+|---|---|---|---|---|
+| P1 | Controles | Adoptar los del GDD §14 (J/K/L/Q/E, Shift = sprint mantenido, Espacio = salto/vault). | 2026-09-29 | ✔ Aprobada, 📋 por implementar. **Abierto:** tecla nueva del slide. |
+| P2 | Parkour fuera del GDD | **Solo se desactiva el wall jump.** Ledge grab/climb y slide se conservan activos. | 2026-09-29 | ✅ Implementada |
+| P3 | Sistema de XP | Eliminarlo: el juego no tiene XP. | 2026-09-29 | ✅ Implementada |
+| P4 | Enemigos | Reescribir en 3D con NavMeshAgent. El equipo entrega el paquete de apariencia. | 2026-09-29 | ✔ Aprobada, 📋 por implementar |
+| P5 | Cámara | Extender `CameraFollow` con control de ratón (sin Cinemachine). | 2026-09-29 | ✔ Aprobada, 📋 por implementar |
+| P6 | Input | Migrar a un asset `.inputactions` propio. | — | ❓ Pendiente: el equipo pidió primero una explicación |
 
 ## 9. Deuda técnica y bugs conocidos
 

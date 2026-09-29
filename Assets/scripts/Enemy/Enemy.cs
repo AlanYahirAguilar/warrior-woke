@@ -201,13 +201,6 @@ public class Enemy : MonoBehaviour, IPoolable
 
     private void OnDeath()
     {
-        // Grant XP to the player before entering dead state
-        if (PlayerTarget != null)
-        {
-            var xpReceiver = PlayerTarget.GetComponent<IXpReceiver>();
-            xpReceiver?.AddXp(data.XpReward);
-        }
-
         StateMachine.ChangeState(DeadState);
     }
 

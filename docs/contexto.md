@@ -38,6 +38,7 @@ Aplican a cualquier persona o agente que modifique el proyecto:
    | 📋 **Planeado** | Hay diseño técnico acordado en `arquitectura.md`, pero no hay código. |
    | ⬜ **Pendiente** | Lo pide el GDD, pero no hay código ni diseño técnico. |
    | ⚠️ **Fuera del GDD** | Existe en el código, pero el GDD final no lo contempla o lo contradice. |
+   | ⏸️ **Desactivado** | El código se conserva, pero se apagó a propósito (p. ej. una transición comentada). Se puede reactivar. |
 
 ## 2. Identidad del proyecto
 
@@ -233,12 +234,16 @@ final · SFX y música básica · build para Windows.
 ## 10. Lo que debes saber antes de modificar el proyecto
 
 1. **El código viene de un diseño anterior.** El proyecto empezó como plataformero 2.5D con otro
-   GDD: aparecen regiones como "Las Ruinas de Ashfall", enemigos *Looter/Brute*, sistema de XP y
+   GDD: aparecen regiones como "Las Ruinas de Ashfall", enemigos *Looter/Brute* (el sistema de XP ya
+   se eliminó) y
    referencias como `GDD §8`/`GDD §14` que **no** corresponden al GDD final. Antes de usar un valor o
    comentario del código como referencia de diseño, compáralo con el GDD final. La lista completa
    está en `features.md` → "Diferencias GDD vs. implementación".
-2. **Decisiones abiertas** que requieren aprobación del equipo antes de implementarse; están
-   listadas en `arquitectura.md` → "Decisiones pendientes".
+2. **Decisiones de alcance** (controles, parkour, XP, enemigos, cámara, input): están en
+   `arquitectura.md` §8, con su estado. Resumen al 2026-09-29: se adoptan los controles del GDD,
+   solo el wall jump se desactiva (ledge grab/climb y slide siguen activos), el juego no tiene XP,
+   los enemigos se rehacen en 3D con NavMeshAgent y la cámara se extiende con control de ratón. La
+   migración a `.inputactions` sigue pendiente.
 3. **No se implementa nada fuera del MVP** sin que antes funcione el MVP (GDD §25 y §28).
 
 ## 11. Cómo abrir el proyecto
@@ -307,7 +312,7 @@ git config merge.unityyamlmerge.recursive binary
 
 | Integrante | Cuenta git | Aportes principales (según `git log`) |
 |---|---|---|
-| Alan Yahir Aguilar | `AlanYahirAguil` (20233tn135) | Setup inicial, URP, máquina de estados del jugador, parkour, combate, pooling/spawner, enemigos, XP |
+| Alan Yahir Aguilar | `AlanYahirAguil` (20233tn135) | Setup inicial, URP, máquina de estados del jugador, parkour, combate, pooling/spawner, enemigos, XP (ya eliminado) |
 | Axel Solano Castillo | `theisoluck` / antes `Axel Solano Castillo` (20233tn131) | Higiene de git, migración a 3D libre, cámara al hombro, pipeline de modelo del jugador, suelo/spawn, documentación |
 
 Si te unes al equipo, agrégate aquí con tu rol.

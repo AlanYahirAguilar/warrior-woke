@@ -19,9 +19,6 @@ public class EnemyData : ScriptableObject
     [Tooltip("Max hit points for this enemy type.")]
     [SerializeField] private int maxHealth = 50;
 
-    [Tooltip("XP awarded to the player on death.")]
-    [SerializeField] private int xpReward = 20;
-
     // ─── Movement ─────────────────────────────────────────────────────────────────
     [Header("Movement")]
     [Tooltip("Walk / chase speed (units/s).")]
@@ -55,7 +52,6 @@ public class EnemyData : ScriptableObject
     // ─── Read-Only Properties ─────────────────────────────────────────────────────
     public string EnemyName      => enemyName;
     public int    MaxHealth      => maxHealth;
-    public int    XpReward       => xpReward;
     public float  MoveSpeed      => moveSpeed;
     public float  PatrolRange    => patrolRange;
     public float  DetectionRange => detectionRange;

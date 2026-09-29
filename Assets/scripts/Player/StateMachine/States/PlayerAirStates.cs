@@ -7,7 +7,7 @@ using UnityEngine;
 /// <summary>
 /// Airborne state entered after a grounded jump.
 /// Detects ledges on both the ascending AND descending arc (GDD requirement).
-/// Wall jumps are allowed while ascending if a wall is touched and the consecutive limit is not reached.
+/// Wall jump transition is currently disabled (outside the final GDD).
 /// </summary>
 public class PlayerJumpState : PlayerState
 {
@@ -26,7 +26,7 @@ public class PlayerJumpState : PlayerState
     {
         base.LogicUpdate();
 
-        // ── Ledge detection and wall jump — habilitado en 3D
+        // ── Ledge detection — habilitado en 3D
         if (player.EnvChecker.IsLedgeDetected(player.transform.forward, out Vector3 ledgeCorner))
         {
             player.CurrentLedgeCorner = ledgeCorner;
@@ -34,14 +34,16 @@ public class PlayerJumpState : PlayerState
             return;
         }
 
-        if (player.Rb.linearVelocity.y > 0f &&
-            player.EnvChecker.IsTouchingWall(player.transform.forward) &&
-            player.JumpTriggered &&
-            player.ConsecutiveWallJumps < 2)
-        {
-            stateMachine.ChangeState(player.WallJumpState);
-            return;
-        }
+        // Wall jump desactivado por decisión de equipo (fuera del GDD, ver docs/arquitectura.md §8).
+        // PlayerWallJumpState se conserva; para reactivarlo basta con restaurar esta transición.
+        // if (player.Rb.linearVelocity.y > 0f &&
+        //     player.EnvChecker.IsTouchingWall(player.transform.forward) &&
+        //     player.JumpTriggered &&
+        //     player.ConsecutiveWallJumps < 2)
+        // {
+        //     stateMachine.ChangeState(player.WallJumpState);
+        //     return;
+        // }
 
         // ── Land detection — transition to idle when grounded ──
         if (player.Rb.linearVelocity.y <= 0f && player.IsGrounded)

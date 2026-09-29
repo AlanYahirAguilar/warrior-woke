@@ -4,7 +4,7 @@ using UnityEngine;
 /// Brute (Matón) — Basic enemy type from Region 1: Las Ruinas de Ashfall.
 ///
 /// GDD Profile:
-///   - HP: 80  |  Reward: 30 XP + resources
+///   - HP: 80
 ///   - Behavior: slow, resistant, blocks occasionally.
 ///   - Weakness: fast attacks after its heavy blows.
 ///

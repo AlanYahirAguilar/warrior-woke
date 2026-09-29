@@ -4,7 +4,7 @@ using UnityEngine;
 /// Looter (Saqueador) — Basic enemy type from Region 1: Las Ruinas de Ashfall.
 ///
 /// GDD Profile:
-///   - HP: 50  |  Reward: 20 XP + scrap
+///   - HP: 50
 ///   - Behavior: attacks directly, almost no defense.
 ///   - Weakness: dodge and counter-attack.
 ///

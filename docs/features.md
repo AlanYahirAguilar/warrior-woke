@@ -20,7 +20,7 @@
 | F03 | Salto | §5.3 | ✅ |
 | F04 | Vault | §5.4 | 🟡 automático, no Espacio |
 | F05 | Ledge grab / climb | — | ⚠️ Fuera del GDD |
-| F06 | Wall jump | — | ⚠️ Fuera del GDD |
+| F06 | Wall jump | — | ⏸️ Desactivado |
 | F07 | Slide | — | ⚠️ Fuera del GDD |
 | F08 | Esquivar | §5.5 | 🟡 sin cooldown efectivo, sin dirección |
 | F09 | Ataque ligero | §5.6 | 🟡 |
@@ -39,7 +39,6 @@
 | F22 | Input | §14 | 🟡 lectura directa, controles distintos |
 | F23 | Animación | Pilar 2 | ⬜ |
 | F24 | Spawning y object pooling | (técnico) | ✅ |
-| F25 | XP / niveles | Prohibido (§7, §19) | ⚠️ Fuera del GDD |
 | F26 | Menú, pausa, flujo de escenas | §16–§17 | ⬜ |
 | F27 | Niveles y mundos | §9–§10 | ⬜ solo blockout `Level-1` |
 | F28 | Audio | §23 | ⬜ |
@@ -48,27 +47,27 @@
 
 ## 2. Diferencias GDD vs. implementación
 
-Consulta esta tabla antes de tocar cualquier feature. El GDD manda; lo marcado con ❓ tiene una
-decisión pendiente en `arquitectura.md` §8.
+Consulta esta tabla antes de tocar cualquier feature. El GDD manda; las decisiones de alcance
+(P1–P6) están en `arquitectura.md` §8. Las filas marcadas con ✔ tienen una decisión aprobada que
+todavía falta implementar.
 
 | Tema | GDD final | Código actual |
 |---|---|---|
 | Nombre | Awakened Warrior | `warrior-woke` / `WarriorWoke` |
-| Sprint | Mantener Shift, +40 % | Automático tras 3 s corriendo; 8 → 11.5 (+43.75 %) |
-| Shift | Sprint | Slide |
-| Vault | Espacio cerca del obstáculo | Automático al correr contra un obstáculo bajo |
-| Parkour ❓ | Solo salto, sprint y vault (§28) | Además: ledge grab/climb, wall jump (máx 2), slide |
-| Ataque ligero | J | Clic izquierdo |
-| Ataque fuerte | K | Clic derecho |
-| Bloqueo | Mantener L, −70 %, solo frontal | Mantener F, **sin reducción real** (la constante dice 95 %) |
-| Esquiva | Q + dirección | E, siempre hacia `transform.forward` |
-| Recoger arma | E | No existe (E es esquivar) |
+| Sprint ✔ P1 | Mantener Shift, +40 % | Automático tras 3 s corriendo; 8 → 11.5 (+43.75 %) |
+| Shift ✔ P1 | Sprint | Slide |
+| Vault ✔ P1 | Espacio cerca del obstáculo | Automático al correr contra un obstáculo bajo |
+| Parkour | Solo salto, sprint y vault (§28) | Además: ledge grab/climb y slide (se conservan por decisión P2). Wall jump ⏸️ desactivado |
+| Ataque ligero ✔ P1 | J | Clic izquierdo |
+| Ataque fuerte ✔ P1 | K | Clic derecho |
+| Bloqueo ✔ P1 | Mantener L, −70 %, solo frontal | Mantener F, **sin reducción real** (la constante dice 95 %) |
+| Esquiva ✔ P1 | Q + dirección | E, siempre hacia `transform.forward` |
+| Recoger arma ✔ P1 | E | No existe (E es esquivar) |
 | Daño desarmado | Golpe 10 / patada 20 | Sin `WeaponHolder`: 10 / 10 (valor fijo del `Hitbox`). Con `WeaponHolder`: 8 / 20 |
 | Combo | J → J → K, reinicio a los 0.5 s | Hasta 3 ligeros y cierre con pesado dentro de la ventana de 0.25–0.5 s |
 | Regeneración | Sí | No |
-| Progresión | Sin XP ni niveles ❓ | `PlayerXpSystem` + `IXpReceiver` + `EnemyData.xpReward` |
-| Enemigos ❓ | Arquero, guerrero ligero, guerrero pesado; 3D; zona asignada | `Looter`, `Brute` (GDD anterior); 2.5D; patrulla en X |
-| Cámara ❓ | Control libre con ratón, shake, encuadre de combate | Sigue el `forward` del jugador; sin ratón ni shake |
+| Enemigos ✔ P4 | Arquero, guerrero ligero, guerrero pesado; 3D; zona asignada | `Looter`, `Brute` (GDD anterior); 2.5D; patrulla en X |
+| Cámara ✔ P5 | Control libre con ratón, shake, encuadre de combate | Sigue el `forward` del jugador; sin ratón ni shake |
 | Arte | Realista, Japón Sengoku | Placeholder `LowPolyCity` (cartoon, "cyber") |
 
 ## 3. Fichas de features
@@ -102,13 +101,14 @@ Dependencias · Consideraciones técnicas · Falta**.
 - **Cómo funciona hoy:** tras 3 s continuos en `Run`, `IsSprint = true`. Se apaga al salir de
   `Run`, al atacar, al bloquear o al esquivar. `Jump` hereda la velocidad de sprint.
 - **Falta:** acción de sprint mantenido (Shift), `SprintSpeed = BaseSpeed × 1.4` y cancelarlo al
-  recibir daño. Depende de P1 (controles).
+  recibir daño. Aprobado en P1, por implementar.
 
 ### F03 — Salto ✅
 - **Archivos:** `PlayerAirStates.cs` (`PlayerJumpState`).
 - **Cómo funciona:** solo desde el suelo (`IsGrounded`). `Enter` aplica `JumpSpeed` (7) en Y y
   conserva la velocidad horizontal. En el aire hay control total con `MoveDirection`. Al aterrizar
-  (`vy ≤ 0` + suelo) pasa a `Idle`. También detecta cornisas y wall jump (F05, F06).
+  (`vy ≤ 0` + suelo) pasa a `Idle`. También detecta cornisas (F05). La transición a wall jump
+  está desactivada (F06).
 - **Consideraciones:** no hay coyote time ni jump buffer. Un trigger de salto se consume en un solo
   tick de física.
 
@@ -132,19 +132,24 @@ Dependencias · Consideraciones técnicas · Falta**.
   la esquina, el cuerpo queda kinemático colgado (offset 0.4 atrás, 1 abajo). Espacio sube en
   0.5 s (primero vertical, luego horizontal). Presionar la dirección opuesta
   (`Dot < −0.5`) suelta.
-- **Nota:** el GDD §28 limita el parkour a salto, sprint y vault. Hay una decisión pendiente (P2).
+- **Nota:** el GDD §28 limita el parkour a salto, sprint y vault, pero el equipo decidió
+  **conservarlo activo** (P2).
 
-### F06 — Wall jump ⚠️ Fuera del GDD
-- **Archivos:** `PlayerAirStates.cs` (`PlayerWallJumpState`).
-- **Cómo funciona:** subiendo, tocando pared y pulsando Espacio (máx 2 seguidos, se reinicia al
-  saltar desde el suelo), aplica `−forward × BaseSpeed` + `JumpSpeed`, con 0.15 s sin control.
-- **Nota:** decisión pendiente P2. Venía del diseño 2.5D anterior.
+### F06 — Wall jump ⏸️ Desactivado
+- **Archivos:** `PlayerAirStates.cs` (`PlayerWallJumpState` y la transición comentada en
+  `PlayerJumpState.LogicUpdate`).
+- **Cómo funcionaba:** subiendo, tocando pared y pulsando Espacio (máx 2 seguidos, se reiniciaba
+  al saltar desde el suelo), aplicaba `−forward × BaseSpeed` + `JumpSpeed`, con 0.15 s sin control.
+- **Estado:** desactivado el 2026-09-29 (decisión P2, fuera del GDD). La clase del estado,
+  `ConsecutiveWallJumps` y `EnvironmentChecker.IsTouchingWall` se conservan. Para reactivarlo, se
+  descomenta la transición.
 
 ### F07 — Slide ⚠️ Fuera del GDD
 - **Archivos:** `PlayerGroundedStates.cs` (`PlayerSlideState`).
 - **Cómo funciona:** Shift en `Run` reduce el collider al 50 % y avanza a `SlideSpeed` 14 por
   0.7 s. No se levanta si hay techo (`HasCeilingOverhead`).
-- **Nota:** usa la tecla que el GDD asigna al sprint. Decisión pendiente P1 y P2.
+- **Nota:** se conserva activo (P2). Hoy usa Shift, que el GDD asigna al sprint; al aplicar P1
+  necesita una tecla nueva (**por definir**).
 
 ### F08 — Esquivar 🟡
 - **Objetivo:** Q + dirección, 0.5 s, 0.2 s invulnerable, cooldown 1 s. No durante un ataque ni
@@ -236,12 +241,13 @@ Dependencias · Consideraciones técnicas · Falta**.
 - **Cómo funciona el código:** estados `Patrol → Chase → Attack → Dead`. La detección es una esfera
   de `DetectionRange` + tag `Player` + línea de visión, y la pérdida del objetivo es por
   `LoseTrackRange`. El ataque para al enemigo, activa la hitbox al 30 % de `AttackDuration` y respeta
-  `AttackCooldown`. Al morir espera 1.5 s, da XP y vuelve al pool.
+  `AttackCooldown`. Al morir espera 1.5 s y vuelve al pool.
 - **Cómo se implementó:** commit `796fac3` (29-sep), con la misma arquitectura que el jugador.
 - **Problemas:** movimiento **2.5D** (Z congelado, eje X), el `Enemy.prefab` no tiene el script, el
   tag del prefab es `Player`, faltan los estados Defenderse, Buscar y Regresar, no hay ataque a
   distancia y los tipos son del GDD anterior.
-- **Falta:** reescritura 3D (decisión P4). Plan en `arquitectura.md` §7.
+- **Falta:** reescritura 3D con NavMeshAgent (aprobada en P4; la apariencia llega en un paquete del
+  equipo). Plan en `arquitectura.md` §7.
 
 ### F18 — Jefes ⬜
 - Líder del clan rival (300 HP, katana, 15–25) y el Comandante (450 HP, katana, 20–30). Sin fases.
@@ -265,7 +271,7 @@ Dependencias · Consideraciones técnicas · Falta**.
   evento, sin referencias manuales.
 - **Cómo se implementó:** se reescribió en la sesión del 27-sep a partir de una cámara lateral 2.5D.
 - **Falta:** yaw y pitch con ratón o stick (el GDD dice que el jugador mueve la cámara), shake,
-  encuadre de combate y zoom por contexto. Decisión P5. Revisar posible jitter (arquitectura T7).
+  encuadre de combate y zoom por contexto. Aprobado en P5: extender `CameraFollow` con ratón. Revisar posible jitter (arquitectura T7).
 
 ### F22 — Input 🟡
 - **Archivos:** `Player/PlayerInputHandler.cs`, `Core/Interfaces/IInputProvider.cs`.
@@ -290,12 +296,6 @@ Dependencias · Consideraciones técnicas · Falta**.
   Y = 2 y se agregó el `Ground`, porque el jugador aparecía en el aire sin suelo.
 - **Consideraciones:** el pool crece si se vacía (usa `Instantiate` en runtime). Hay que
   dimensionar `initialSize` para que eso no ocurra en combate.
-
-### F25 — XP / niveles ⚠️ Fuera del GDD
-- **Archivos:** `Player/PlayerXpSystem.cs`, `Core/Interfaces/IXpReceiver.cs`,
-  `EnemyData.xpReward`, `Enemy.OnDeath`.
-- **Estado:** el código existe, pero no está en el Player.prefab. El GDD §7 y §19 lo prohíben.
-  Decisión pendiente P3.
 
 ### F26 — Menú, pausa y flujo de escenas ⬜
 - Splash → menú (Nueva partida, Continuar, Salir) → gameplay → pausa (Continuar, Reiniciar desde
@@ -515,7 +515,9 @@ problema, la causa, la solución y el estado (formato del GDD §29 para bugs).
 | 2026-09-27 | `66e2aed` | Axel | Sesión de repo, cámara y personaje (detalle abajo). |
 | 2026-09-29 | `796fac3` | Alan | `HealthSystem.ActivateIFrames`, `WeaponData`/`WeaponHolder`, `EnemyData`, FSM de enemigos, `Looter`/`Brute`, `PlayerXpSystem`. |
 | 2026-09-29 | `f09a2a3` | Alan | Parkour reactivado en 3D (`EnvironmentChecker` con `Vector3` + pre-filtro `OverlapSphereNonAlloc`) y reglas de buenas prácticas en la documentación. |
-| 2026-09-29 | (este commit) | Axel | Se incorpora el GDD final. La documentación se consolida en `docs/contexto.md`, `docs/arquitectura.md` y `docs/features.md`. Se audita el código contra el GDD. Sin cambios de gameplay. |
+| 2026-09-29 | `ccc58ae` | Axel | Se incorpora el GDD final. La documentación se consolida en `docs/contexto.md`, `docs/arquitectura.md` y `docs/features.md`. Se audita el código contra el GDD. Sin cambios de gameplay. |
+
+| 2026-09-29 | (este commit) | Axel | Decisiones P2 y P3: wall jump desactivado (transición comentada, código conservado) y sistema de XP eliminado (`PlayerXpSystem`, `IXpReceiver`, `EnemyData.xpReward`, la llamada en `Enemy.OnDeath` y comentarios de recompensa en `Looter`/`Brute`). Compilación verificada en batch mode sin errores. |
 
 ### Detalle — sesión del 2026-09-27 (repo, cámara y personaje)
 
