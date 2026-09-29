@@ -2,9 +2,9 @@ using UnityEngine;
 using UnityEngine.InputSystem;
 
 /// <summary>
-/// Captures and buffers all player inputs for a 3D action-platformer.
+/// Captures and buffers all player inputs for a free-roam 3D character controller.
 /// Input layout:
-///   Movement  : A / D
+///   Movement  : W/A/S/D or Arrow Keys (camera-relative forward/back/strafe)
 ///   Jump      : Space
 ///   Slide     : Left Shift
 ///   LightAtk  : Mouse1 (left click)
@@ -29,6 +29,7 @@ public class PlayerInputHandler : MonoBehaviour, IInputProvider
 
     // ─── Buffered State ─────────────────────────────────────────────────────────
     private float _horizontalMove;
+    private float _verticalMove;
     private bool _isJumpTriggered;
     private bool _isSlideTriggered;
     private bool _isLightAttackTriggered;
@@ -38,6 +39,7 @@ public class PlayerInputHandler : MonoBehaviour, IInputProvider
 
     // ─── IInputProvider Properties ───────────────────────────────────────────────
     public float HorizontalMove => _horizontalMove;
+    public float VerticalMove => _verticalMove;
     public bool IsJumpTriggered => _isJumpTriggered;
     public bool IsSlideTriggered => _isSlideTriggered;
     public bool IsLightAttackTriggered => _isLightAttackTriggered;
@@ -82,7 +84,9 @@ public class PlayerInputHandler : MonoBehaviour, IInputProvider
     {
         if (moveActionReference?.action != null)
         {
-            _horizontalMove = moveActionReference.action.ReadValue<Vector2>().x;
+            Vector2 move = moveActionReference.action.ReadValue<Vector2>();
+            _horizontalMove = move.x;
+            _verticalMove   = move.y;
             return;
         }
 
@@ -91,6 +95,8 @@ public class PlayerInputHandler : MonoBehaviour, IInputProvider
         var kb = Keyboard.current;
         bool right = kb.dKey.isPressed || kb.rightArrowKey.isPressed;
         bool left  = kb.aKey.isPressed || kb.leftArrowKey.isPressed;
+        bool up    = kb.wKey.isPressed || kb.upArrowKey.isPressed;
+        bool down  = kb.sKey.isPressed || kb.downArrowKey.isPressed;
 
         if (right && left)
         {
@@ -103,6 +109,17 @@ public class PlayerInputHandler : MonoBehaviour, IInputProvider
         else if (right)  _horizontalMove =  1f;
         else if (left)   _horizontalMove = -1f;
         else             _horizontalMove =  0f;
+
+        if (up && down)
+        {
+            if (kb.wKey.wasPressedThisFrame || kb.upArrowKey.wasPressedThisFrame)
+                _verticalMove = 1f;
+            else if (kb.sKey.wasPressedThisFrame || kb.downArrowKey.wasPressedThisFrame)
+                _verticalMove = -1f;
+        }
+        else if (up)   _verticalMove =  1f;
+        else if (down) _verticalMove = -1f;
+        else           _verticalMove =  0f;
     }
 
     private void ReadParkourInput()

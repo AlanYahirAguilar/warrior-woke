@@ -81,6 +81,7 @@ public class Player : MonoBehaviour
 
         _playerMovement.ProcessMovement(
             _inputProvider.HorizontalMove,
+            _inputProvider.VerticalMove,
             _inputProvider.ConsumeJumpTrigger(),
             _inputProvider.ConsumeSlideTrigger(),
             _inputProvider.ConsumeLightAttackTrigger(),

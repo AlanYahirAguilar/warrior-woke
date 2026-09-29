@@ -17,7 +17,8 @@ public class PlayerJumpState : PlayerState
     public override void Enter()
     {
         base.Enter();
-        player.SetVelocity(player.Rb.linearVelocity.x, player.JumpSpeed);
+        Vector3 horizontal = new Vector3(player.Rb.linearVelocity.x, 0f, player.Rb.linearVelocity.z);
+        player.SetVelocity(horizontal, player.JumpSpeed);
         player.ResetConsecutiveWallJumps();
     }
 
@@ -25,23 +26,24 @@ public class PlayerJumpState : PlayerState
     {
         base.LogicUpdate();
 
-        // ── Ledge detection — checked on BOTH arcs (ascending and descending) ──
-        if (player.EnvChecker.IsLedgeDetected(player.FacingDirection, out Vector3 ledgeCorner))
-        {
-            player.CurrentLedgeCorner = ledgeCorner;
-            stateMachine.ChangeState(player.LedgeGrabState);
-            return;
-        }
-
-        // ── Wall jump — only while ascending and wall is touched ──
-        if (player.Rb.linearVelocity.y > 0f &&
-            player.EnvChecker.IsTouchingWall(player.FacingDirection) &&
-            player.JumpTriggered &&
-            player.ConsecutiveWallJumps < 2)
-        {
-            stateMachine.ChangeState(player.WallJumpState);
-            return;
-        }
+        // ── Ledge detection and wall jump — disabled: both assume a fixed 2.5D plane
+        // (left/right raycasts) and don't have a defined behavior yet in free-roam 3D.
+        // See CONTEXTO.md.
+        // if (player.EnvChecker.IsLedgeDetected(player.FacingDirection, out Vector3 ledgeCorner))
+        // {
+        //     player.CurrentLedgeCorner = ledgeCorner;
+        //     stateMachine.ChangeState(player.LedgeGrabState);
+        //     return;
+        // }
+        //
+        // if (player.Rb.linearVelocity.y > 0f &&
+        //     player.EnvChecker.IsTouchingWall(player.FacingDirection) &&
+        //     player.JumpTriggered &&
+        //     player.ConsecutiveWallJumps < 2)
+        // {
+        //     stateMachine.ChangeState(player.WallJumpState);
+        //     return;
+        // }
 
         // ── Land detection — transition to idle when grounded ──
         if (player.Rb.linearVelocity.y <= 0f && player.IsGrounded)
@@ -54,7 +56,7 @@ public class PlayerJumpState : PlayerState
     {
         base.PhysicsUpdate();
         float speed = player.IsSprint ? player.SprintSpeed : player.BaseSpeed;
-        player.SetVelocity(player.InputX * speed, player.Rb.linearVelocity.y);
+        player.SetVelocity(player.MoveDirection * speed, player.Rb.linearVelocity.y);
     }
 }
 

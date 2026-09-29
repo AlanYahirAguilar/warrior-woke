@@ -7,8 +7,11 @@ public interface IInputProvider
 {
     // ─── Movement ───────────────────────────────────────────────────────────────
 
-    /// <summary>Horizontal axis input (-1f to 1f: left/right).</summary>
+    /// <summary>Horizontal axis input (-1f to 1f: left/right strafe, camera-relative).</summary>
     float HorizontalMove { get; }
+
+    /// <summary>Vertical axis input (-1f to 1f: back/forward, camera-relative).</summary>
+    float VerticalMove { get; }
 
     // ─── Parkour ─────────────────────────────────────────────────────────────────
 
