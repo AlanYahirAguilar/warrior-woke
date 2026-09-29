@@ -12,7 +12,7 @@ namespace WarriorWoke.EditorTools
     /// carga automáticamente Assets/Scenes/Level-1.unity.
     /// Solo actúa una vez por sesión del Editor (ver SessionState) para no pelear
     /// contra un cambio de escena hecho a propósito durante el trabajo diario.
-    /// Ver CONTEXTO.md, sección "Por qué a veces 'no se ve nada' al hacer pull".
+    /// Ver docs/contexto.md, sección "Hice pull y no veo los cambios".
     /// </summary>
     [InitializeOnLoad]
     internal static class SceneAutoLoader

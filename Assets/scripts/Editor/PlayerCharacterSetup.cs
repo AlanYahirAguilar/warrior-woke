@@ -9,7 +9,7 @@ namespace WarriorWoke.EditorTools
     /// in as Player.prefab's visual model (replacing the placeholder box), and fits the
     /// CapsuleCollider/HeadPoint to the model's real dimensions so it stands correctly on
     /// the ground. Re-running it is safe (it replaces its own previous "Model" child).
-    /// See CONTEXTO.md -> "Personaje y cámara al hombro".
+    /// See docs/contexto.md and docs/arquitectura.md §5.9.
     /// </summary>
     internal static class PlayerCharacterSetup
     {
