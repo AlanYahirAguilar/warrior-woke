@@ -27,6 +27,7 @@ public class Player : MonoBehaviour
             return;
         }
         Instance = this;
+        EnsurePlayerResources();
         InitializeSubsystems();
     }
 
@@ -67,6 +68,18 @@ public class Player : MonoBehaviour
 
         if (GetComponent<IGroundChecker>() == null)
             gameObject.AddComponent<GroundChecker>();
+    }
+
+    private void EnsurePlayerResources()
+    {
+        if (GetComponent<HealthSystem>() == null)
+            gameObject.AddComponent<HealthSystem>();
+
+        if (GetComponent<PlayerStamina>() == null)
+            gameObject.AddComponent<PlayerStamina>();
+
+        if (GetComponent<PlayerHUD>() == null)
+            gameObject.AddComponent<PlayerHUD>();
     }
 
     // ─── Input Routing ───────────────────────────────────────────────────────────

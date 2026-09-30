@@ -84,8 +84,11 @@ public class PlayerRunState : PlayerState
     {
         base.LogicUpdate();
 
-        // Auto-sprint: activates after the configured threshold (default 3s)
-        if (!player.IsSprint && Time.time - startTime >= player.SprintActivationTime)
+        // Auto-sprint only runs while enough stamina is available.
+        if (player.IsSprint && !player.CanSprint)
+            player.IsSprint = false;
+
+        if (!player.IsSprint && player.CanSprint && Time.time - startTime >= player.SprintActivationTime)
             player.IsSprint = true;
 
         // Combat interrupts run (can attack while moving)

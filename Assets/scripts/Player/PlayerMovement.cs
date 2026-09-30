@@ -40,6 +40,7 @@ public class PlayerMovement : MonoBehaviour
     public Rigidbody        Rb         { get; private set; }
     private CapsuleCollider _capsuleCollider;
     private IGroundChecker  _groundChecker;
+    private PlayerStamina   _stamina;
     private Transform       _cameraTransform;
     public EnvironmentChecker EnvChecker { get; private set; }
 
@@ -60,6 +61,15 @@ public class PlayerMovement : MonoBehaviour
 
     // ─── Runtime State ────────────────────────────────────────────────────────────
     public bool  IsSprint           { get; set; }
+    public bool CanSprint
+    {
+        get
+        {
+            if (_stamina == null)
+                _stamina = GetComponent<PlayerStamina>();
+            return _stamina != null && _stamina.CanSprint;
+        }
+    }
 
     /// <summary>Camera-relative, normalized movement direction on the XZ plane for this tick (zero when no input).</summary>
     public Vector3 MoveDirection    { get; private set; } = Vector3.zero;
@@ -191,6 +201,7 @@ public class PlayerMovement : MonoBehaviour
     {
         Rb               = GetComponent<Rigidbody>();
         _capsuleCollider = GetComponent<CapsuleCollider>();
+        _stamina         = GetComponent<PlayerStamina>();
         _groundChecker   = GetComponent<IGroundChecker>() ?? gameObject.AddComponent<GroundChecker>();
         EnvChecker       = GetComponent<EnvironmentChecker>() ?? gameObject.AddComponent<EnvironmentChecker>();
 
