@@ -9,7 +9,7 @@ using UnityEngine;
 /// Adheres to SRP: orchestrates state routing and component access only.
 ///
 /// Usage:
-///   - Attach this (or a subclass like Looter / Brute) to an enemy prefab.
+///   - Attach this (or a subclass per GDD enemy type) to an enemy prefab.
 ///   - Assign an EnemyData ScriptableObject in the Inspector.
 ///   - The enemy automatically starts in PatrolState.
 /// </summary>
@@ -28,11 +28,15 @@ public class Enemy : MonoBehaviour, IPoolable
     [Tooltip("Layers considered as valid ground for edge detection.")]
     [SerializeField] protected LayerMask groundLayer;
 
+    [Tooltip("Layers scanned when looking for the player. Defaults to the 'Player' layer if left empty.")]
+    [SerializeField] private LayerMask playerLayer;
+
     // ─── IPoolable ────────────────────────────────────────────────────────────────
     public string PoolId { get; set; }
 
     // ─── Subsystem References ─────────────────────────────────────────────────────
     public Rigidbody   Rb            { get; private set; }
+    private CapsuleCollider _capsuleCollider;
     public HealthSystem HealthSystem { get; private set; }
     public Hitbox       Hitbox       { get; private set; }
     public EnemyData    Data         => data;
@@ -93,8 +97,9 @@ public class Enemy : MonoBehaviour, IPoolable
 
     public virtual void OnSpawn()
     {
-        // Reset health and restart in patrol when re-spawned from pool
-        HealthSystem.Heal(data.MaxHealth);
+        // Reset health and restart in patrol when re-spawned from pool.
+        // InitializeHealth (not Heal): Heal is ignored while the enemy is dead.
+        HealthSystem.InitializeHealth(data.MaxHealth);
         StateMachine.ChangeState(PatrolState);
         SpawnPoint = transform.position;
     }
@@ -145,9 +150,13 @@ public class Enemy : MonoBehaviour, IPoolable
 
     private void CacheComponents()
     {
-        Rb           = GetComponent<Rigidbody>();
-        HealthSystem = GetComponent<HealthSystem>();
-        Hitbox       = GetComponent<Hitbox>();
+        Rb               = GetComponent<Rigidbody>();
+        _capsuleCollider = GetComponent<CapsuleCollider>();
+        HealthSystem     = GetComponent<HealthSystem>();
+        Hitbox           = GetComponent<Hitbox>();
+
+        if (playerLayer.value == 0)
+            playerLayer = LayerMask.GetMask("Player");
 
         // Initialize HealthSystem from EnemyData so the Inspector field is not the source of truth
         if (data != null)
@@ -167,12 +176,13 @@ public class Enemy : MonoBehaviour, IPoolable
     }
 
     /// <summary>
-    /// Uses OverlapSphereNonAlloc (pre-allocated buffer — zero GC) to detect the player.
-    /// Checks tags to avoid allocating strings per frame.
+    /// Uses OverlapSphereNonAlloc (pre-allocated buffer — zero GC) filtered by playerLayer to detect
+    /// the player. CompareTag avoids allocating strings per frame.
     /// </summary>
     private void DetectPlayer()
     {
-        int count = Physics.OverlapSphereNonAlloc(transform.position, data.DetectionRange, _detectionBuffer);
+        int count = Physics.OverlapSphereNonAlloc(transform.position, data.DetectionRange, _detectionBuffer,
+                                                   playerLayer, QueryTriggerInteraction.Ignore);
 
         PlayerTarget = null;
         for (int i = 0; i < count; i++)
@@ -194,8 +204,7 @@ public class Enemy : MonoBehaviour, IPoolable
 
     private void CheckGrounded()
     {
-        var col    = GetComponent<CapsuleCollider>();
-        float len  = col != null ? col.bounds.extents.y + 0.15f : 0.6f;
+        float len  = _capsuleCollider != null ? _capsuleCollider.bounds.extents.y + 0.15f : 0.6f;
         IsGrounded = Physics.Raycast(transform.position, Vector3.down, len, groundLayer);
     }
 

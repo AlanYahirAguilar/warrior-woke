@@ -13,6 +13,8 @@ public class Hitbox : MonoBehaviour
     // ─── Inspector Configuration ─────────────────────────────────────────────────
     [Header("Detection")]
     [SerializeField] private float radius          = 0.6f;
+    [Tooltip("Local offset of the sphere center from this transform (e.g. forward reach in front of the torso).")]
+    [SerializeField] private Vector3 localOffset   = Vector3.zero;
     [SerializeField] private LayerMask targetLayers;
     [SerializeField] private int    damage         = 10;
     [SerializeField] private Collider ownerCollider;
@@ -35,7 +37,8 @@ public class Hitbox : MonoBehaviour
     /// </summary>
     public void Activate()
     {
-        int count = Physics.OverlapSphereNonAlloc(transform.position, radius, _hitBuffer, targetLayers);
+        Vector3 center = Center;
+        int count = Physics.OverlapSphereNonAlloc(center, radius, _hitBuffer, targetLayers);
 
         for (int i = 0; i < count; i++)
         {
@@ -48,7 +51,7 @@ public class Hitbox : MonoBehaviour
             if (col.TryGetComponent(out IDamageable target))
             {
                 target.TakeDamage(damage, transform.position);
-                OnHit?.Invoke(target, col.ClosestPoint(transform.position));
+                OnHit?.Invoke(target, col.ClosestPoint(center));
             }
         }
     }
@@ -62,12 +65,15 @@ public class Hitbox : MonoBehaviour
     /// <summary>Current detection radius.</summary>
     public float Radius => radius;
 
+    /// <summary>World-space center of the detection sphere.</summary>
+    public Vector3 Center => transform.TransformPoint(localOffset);
+
     // ─── Gizmos ──────────────────────────────────────────────────────────────────
 
     private void OnDrawGizmosSelected()
     {
         if (!showGizmos) return;
         Gizmos.color = new Color(1f, 0.2f, 0.2f, 0.35f);
-        Gizmos.DrawSphere(transform.position, radius);
+        Gizmos.DrawSphere(Center, radius);
     }
 }

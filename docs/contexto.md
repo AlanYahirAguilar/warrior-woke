@@ -11,7 +11,7 @@
 > **Fuente de diseño:** [`GDD_Awakened_Warrior.pdf`](../GDD_Awakened_Warrior.pdf) (raíz del repo, GDD final).
 > Si este documento y el GDD no coinciden, manda el GDD, y hay que corregir este documento.
 >
-> Última revisión completa: 2026-09-29.
+> Última revisión completa: 2026-09-30.
 
 ---
 
@@ -40,12 +40,18 @@ Aplican a cualquier persona o agente que modifique el proyecto:
    | ⚠️ **Fuera del GDD** | Existe en el código, pero el GDD final no lo contempla o lo contradice. |
    | ⏸️ **Desactivado** | El código se conserva, pero se apagó a propósito (p. ej. una transición comentada). Se puede reactivar. |
 
+   En `arquitectura.md` §7–§8 también se usan ✔ (decisión aprobada) y ❓ (decisión pendiente).
+5. **Lo que queda fuera del GDD y no se usa se elimina**, no se desactiva (decisión P8 en
+   `arquitectura.md` §8). Los IDs de features (`F…`), decisiones (`P…`) y deuda técnica (`T…`)
+   **no se reutilizan**: si algo se elimina, su ID queda libre y el historial explica por qué.
+
 ## 2. Identidad del proyecto
 
 | Elemento | Valor |
 |---|---|
 | Nombre del juego (GDD) | **Awakened Warrior** |
 | Nombre del repositorio | `warrior-woke` (nombre heredado; el código usa `WarriorWoke` en namespaces y menús) |
+| Producto en Unity | `productName: Awakened Warrior`, `companyName: SUNUX GAMES`, identificador `com.SUNUXGAMES.AwakenedWarrior` (`ProjectSettings.asset`) |
 | Género | Acción 3D en tercera persona: parkour + combate cuerpo a cuerpo |
 | Motor | Unity **6000.6.0f1** (Unity 6), URP |
 | Plataforma | PC (Windows). La versión móvil se decide al final del proyecto. |
@@ -234,16 +240,16 @@ final · SFX y música básica · build para Windows.
 ## 10. Lo que debes saber antes de modificar el proyecto
 
 1. **El código viene de un diseño anterior.** El proyecto empezó como plataformero 2.5D con otro
-   GDD: aparecen regiones como "Las Ruinas de Ashfall", enemigos *Looter/Brute* (el sistema de XP ya
-   se eliminó) y
-   referencias como `GDD §8`/`GDD §14` que **no** corresponden al GDD final. Antes de usar un valor o
-   comentario del código como referencia de diseño, compáralo con el GDD final. La lista completa
-   está en `features.md` → "Diferencias GDD vs. implementación".
-2. **Decisiones de alcance** (controles, parkour, XP, enemigos, cámara, input): están en
-   `arquitectura.md` §8, con su estado. Resumen al 2026-09-29: se adoptan los controles del GDD,
-   solo el wall jump se desactiva (ledge grab/climb y slide siguen activos), el juego no tiene XP,
-   los enemigos se rehacen en 3D con NavMeshAgent y la cámara se extiende con control de ratón. La
-   migración a `.inputactions` sigue pendiente.
+   GDD. Lo que venía de ese diseño y no se usa ya se eliminó (XP, wall jump, enemigos
+   *Looter/Brute*), y los comentarios que citaban el GDD anterior se corrigieron. Lo que sigue vivo
+   de esa época (enemigos 2.5D, auto-sprint, controles) está en `features.md` → "Diferencias GDD
+   vs. implementación". Antes de usar un valor del código como referencia de diseño, compáralo con
+   el GDD final.
+2. **Decisiones de alcance** (P1–P10): están en `arquitectura.md` §8, con su estado. Resumen al
+   2026-09-30: se adoptan los controles del GDD; el wall jump se eliminó (ledge grab/climb y slide
+   siguen activos); **no hay XP, estamina ni HUD** (GDD §7, §5.2, §16); los enemigos se rehacen en
+   3D con NavMeshAgent; la cámara se extiende con control de ratón; la iluminación horneada no se
+   versiona. La migración a `.inputactions` sigue pendiente.
 3. **No se implementa nada fuera del MVP** sin que antes funcione el MVP (GDD §25 y §28).
 
 ## 11. Cómo abrir el proyecto
@@ -281,8 +287,15 @@ final · SFX y música básica · build para Windows.
 - En `git status` nunca debe aparecer `Library/`, `Temp/`, `Logs/`, `UserSettings/` ni `obj/`.
 - **Commits:** Conventional Commits (`feat(scope): …`, `fix(scope): …`, `docs: …`, `chore: …`,
   `refactor: …`).
-- `Assets/Scenes/Level-1/LightingData.asset` (~13 MB) cambia cada vez que alguien hornea la luz.
-  Solo súbelo si el cambio de iluminación es intencional.
+- **La iluminación horneada no se versiona** (decisión P9). `LightingData.asset`, los lightmaps y
+  las reflection probes que Unity genera en `Assets/Scenes/<Escena>/` están en `.gitignore`: cada
+  quien hornea en su máquina si lo necesita. La luz direccional de `Level-1` es **Mixed**, así que
+  sin hornear la escena se ve con luz en tiempo real.
+  - Al hornear, Unity también cambia la línea `m_LightingDataAsset` de la escena `.unity`. **No
+    subas ese cambio** (descártalo con `git restore -p` o desde tu cliente de git).
+  - No guardes otros assets dentro de subcarpetas de `Assets/Scenes/`: esas carpetas se ignoran.
+  - `LightingData.asset` es binario aunque la serialización sea Force Text; `.gitattributes` lo
+    marca como `binary` para que git no le convierta los finales de línea.
 
 ### Merge inteligente de Unity (una vez por máquina)
 
@@ -300,9 +313,11 @@ git config merge.unityyamlmerge.recursive binary
 ### `.gitignore`, `.gitattributes`, serialización y LFS
 
 - `.gitignore` excluye `Library/`, `Temp/`, `Logs/`, `UserSettings/`, `obj/`, archivos de IDE,
-  `ProfilerCaptures/` y `UIElementsSchema/`.
+  `ProfilerCaptures/`, `UIElementsSchema/` y la iluminación horneada (`Assets/Scenes/*/`).
 - `.gitattributes` normaliza los finales de línea a LF, usa el merge de Unity para YAML y marca
-  binarios (`.fbx`, imágenes, audio).
+  binarios (`.fbx`, imágenes, `.exr`, audio y `LightingData.asset`).
+- Los `.meta` tienen `-diff`: `git diff` no muestra sus cambios. Si un GUID cambia, revísalo en el
+  Editor o con `git diff --text`.
 - La serialización es **Force Text** (`EditorSettings.asset`, `m_SerializationMode: 2`). No la
   cambies a Binary.
 - **Git LFS no está activado.** Hay bloques comentados al final de `.gitattributes` para
@@ -313,6 +328,7 @@ git config merge.unityyamlmerge.recursive binary
 | Integrante | Cuenta git | Aportes principales (según `git log`) |
 |---|---|---|
 | Alan Yahir Aguilar | `AlanYahirAguil` (20233tn135) | Setup inicial, URP, máquina de estados del jugador, parkour, combate, pooling/spawner, enemigos, XP (ya eliminado) |
-| Axel Solano Castillo | `theisoluck` / antes `Axel Solano Castillo` (20233tn131) | Higiene de git, migración a 3D libre, cámara al hombro, pipeline de modelo del jugador, suelo/spawn, documentación |
+| Axel Solano Castillo | `theisoluck` / antes `Axel Solano Castillo` (20233tn131) | Higiene de git, migración a 3D libre, cámara al hombro, pipeline de modelo del jugador, suelo/spawn, documentación, auditoría y limpieza contra el GDD |
+| Angel | `AngelGUst` (20233tn103) | Estamina y HUD (retirados el 2026-09-30 por estar fuera del GDD, decisión P7) |
 
 Si te unes al equipo, agrégate aquí con tu rol.

@@ -14,7 +14,7 @@ public class WeaponData : ScriptableObject
 {
     // ─── Identity ─────────────────────────────────────────────────────────────────
     [Header("Identity")]
-    [SerializeField] private string weaponName = "Scrap Sword";
+    [SerializeField] private string weaponName = "New Weapon";
     [SerializeField] private Sprite icon;
 
     // ─── Combat Stats ──────────────────────────────────────────────────────────────

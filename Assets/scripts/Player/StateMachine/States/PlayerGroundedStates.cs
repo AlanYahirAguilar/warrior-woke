@@ -12,6 +12,13 @@ public class PlayerIdleState : PlayerState
     public PlayerIdleState(PlayerMovement player, PlayerStateMachine stateMachine)
         : base(player, stateMachine) { }
 
+    public override void Enter()
+    {
+        base.Enter();
+        // Sprint never carries over once the player stops (e.g. landing from a sprint jump).
+        player.IsSprint = false;
+    }
+
     public override void LogicUpdate()
     {
         base.LogicUpdate();
@@ -23,7 +30,7 @@ public class PlayerIdleState : PlayerState
             return;
         }
 
-        if (player.DodgeTriggered && player.IsGrounded)
+        if (player.DodgeTriggered && player.IsGrounded && player.DodgeState.CanDodge)
         {
             stateMachine.ChangeState(player.DodgeState);
             return;
@@ -58,7 +65,7 @@ public class PlayerIdleState : PlayerState
     {
         base.PhysicsUpdate();
         // Preserve vertical velocity (gravity) while zeroing horizontal drift
-        player.SetVelocity(0f, player.Rb.linearVelocity.y);
+        player.StopHorizontal(player.Rb.linearVelocity.y);
     }
 }
 
@@ -74,21 +81,15 @@ public class PlayerRunState : PlayerState
     public PlayerRunState(PlayerMovement player, PlayerStateMachine stateMachine)
         : base(player, stateMachine) { }
 
-    public override void Enter()
-    {
-        base.Enter();
-        player.IsSprint = false;
-    }
+    // No Enter override: every path into Run arrives with IsSprint already cleared
+    // (Idle.Enter and the explicit exits) except Vault, which keeps its momentum (GDD §5.4).
 
     public override void LogicUpdate()
     {
         base.LogicUpdate();
 
-        // Auto-sprint only runs while enough stamina is available.
-        if (player.IsSprint && !player.CanSprint)
-            player.IsSprint = false;
-
-        if (!player.IsSprint && player.CanSprint && Time.time - startTime >= player.SprintActivationTime)
+        // Auto-sprint: activates after the configured threshold (default 3s)
+        if (!player.IsSprint && Time.time - startTime >= player.SprintActivationTime)
             player.IsSprint = true;
 
         // Combat interrupts run (can attack while moving)
@@ -113,7 +114,7 @@ public class PlayerRunState : PlayerState
             return;
         }
 
-        if (player.DodgeTriggered && player.IsGrounded)
+        if (player.DodgeTriggered && player.IsGrounded && player.DodgeState.CanDodge)
         {
             player.IsSprint = false;
             stateMachine.ChangeState(player.DodgeState);
@@ -129,6 +130,7 @@ public class PlayerRunState : PlayerState
 
         if (player.SlideTriggered && player.IsGrounded)
         {
+            player.IsSprint = false;
             stateMachine.ChangeState(player.SlideState);
             return;
         }
@@ -154,11 +156,8 @@ public class PlayerRunState : PlayerState
         player.SetVelocity(player.MoveDirection * speed, player.Rb.linearVelocity.y);
     }
 
-    public override void Exit()
-    {
-        base.Exit();
-        player.IsSprint = false;
-    }
+    // IsSprint is intentionally NOT cleared on Exit so a jump started while sprinting keeps
+    // sprint speed (GDD §5.2). Every other exit clears it explicitly, and Idle.Enter resets it.
 }
 
 // ────────────────────────────────────────────────────────────────────────────────

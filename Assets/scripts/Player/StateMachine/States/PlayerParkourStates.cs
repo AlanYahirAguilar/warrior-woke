@@ -51,7 +51,7 @@ public class PlayerLedgeGrabState : PlayerState
     public override void Enter()
     {
         base.Enter();
-        player.SetVelocity(0f, 0f);
+        player.StopHorizontal(0f);
         player.SetKinematic(true);
 
         // Snap to ledge offset — always route through Rigidbody so the physics engine stays aware

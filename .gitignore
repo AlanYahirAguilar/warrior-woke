@@ -11,6 +11,14 @@
 /[Uu]IElementsSchema/
 /[Pp]rofilerCaptures/
 
+# Iluminación horneada: se genera en cada máquina al hornear y no se sube.
+# Unity la guarda en una carpeta con el nombre de la escena (Assets/Scenes/<Escena>/)
+# y crea el .meta de esa carpeta. Los .unity.meta de las escenas sí se suben.
+# No guardes otros assets dentro de subcarpetas de Assets/Scenes/.
+/Assets/Scenes/*/
+/Assets/Scenes/*.meta
+!/Assets/Scenes/*.unity.meta
+
 # Archivos de soluciones e IDEs (Visual Studio, Rider, VS Code)
 *.csproj
 *.unityproj

@@ -87,10 +87,12 @@ public class ObjectPoolManager : MonoBehaviour
             }
         }
 
-        objectToSpawn.SetActive(true);
-        objectToSpawn.transform.position = position;
-        objectToSpawn.transform.rotation = rotation;
+        // Place the object BEFORE activating it: OnEnable listeners (e.g. Player.OnPlayerSpawned →
+        // CameraFollow snap) must see the final pose, and a Rigidbody picks up the transform
+        // when it becomes active, so no physics body is teleported through its transform.
         objectToSpawn.transform.SetParent(null);
+        objectToSpawn.transform.SetPositionAndRotation(position, rotation);
+        objectToSpawn.SetActive(true);
 
         if (objectToSpawn.TryGetComponent(out IPoolable poolable))
         {

@@ -1,7 +1,7 @@
 using UnityEngine;
 
 /// <summary>
-/// Handles environment detection (walls, ledges, low obstacles) using Raycasts.
+/// Handles environment detection (ledges, low obstacles) using Raycasts.
 /// Complies with SRP by isolating collision detection from movement logic.
 /// Uses an OverlapSphere pre-filter to skip Raycasts when no geometry is nearby,
 /// reducing per-frame physics work in open areas.
@@ -35,13 +35,6 @@ public class EnvironmentChecker : MonoBehaviour
         if (centerPoint == null) return false;
         int count = Physics.OverlapSphereNonAlloc(centerPoint.position, proximityCheckRadius, _proximityBuffer, obstacleLayer);
         return count > 0;
-    }
-
-    public bool IsTouchingWall(Vector3 direction)
-    {
-        if (centerPoint == null) return false;
-        if (!HasNearbyGeometry()) return false;
-        return Physics.Raycast(centerPoint.position, direction, wallCheckDistance, obstacleLayer);
     }
 
     public bool IsObstacleVaultable(Vector3 direction)
@@ -84,14 +77,14 @@ public class EnvironmentChecker : MonoBehaviour
         if (centerPoint != null)
         {
             Gizmos.color = Color.blue;
-            Gizmos.DrawLine(centerPoint.position, centerPoint.position + transform.right * wallCheckDistance);
+            Gizmos.DrawLine(centerPoint.position, centerPoint.position + transform.forward * wallCheckDistance);
             Gizmos.color = new Color(0f, 0.5f, 1f, 0.15f);
             Gizmos.DrawWireSphere(centerPoint.position, proximityCheckRadius);
         }
         if (headPoint != null)
         {
             Gizmos.color = Color.cyan;
-            Gizmos.DrawLine(headPoint.position, headPoint.position + transform.right * wallCheckDistance);
+            Gizmos.DrawLine(headPoint.position, headPoint.position + transform.forward * wallCheckDistance);
         }
     }
 }

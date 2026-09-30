@@ -39,7 +39,7 @@ public class PlayerLightAttackState : PlayerState
             _hitbox.SetDamage(_weaponHolder.GetLightDamage());
 
         // Stop horizontal movement during strike (planted while attacking)
-        player.SetVelocity(0f, player.Rb.linearVelocity.y);
+        player.StopHorizontal(player.Rb.linearVelocity.y);
 
         // Activate hitbox on the frame the attack starts
         _hitbox?.Activate();
@@ -85,7 +85,7 @@ public class PlayerLightAttackState : PlayerState
     {
         base.PhysicsUpdate();
         // Preserve vertical velocity; zero horizontal during strike
-        player.SetVelocity(0f, player.Rb.linearVelocity.y);
+        player.StopHorizontal(player.Rb.linearVelocity.y);
     }
 
     public override void Exit()
@@ -131,7 +131,7 @@ public class PlayerHeavyAttackState : PlayerState
     {
         base.Enter();
         _hasActivatedHitbox = false;
-        player.SetVelocity(0f, player.Rb.linearVelocity.y);
+        player.StopHorizontal(player.Rb.linearVelocity.y);
 
         // TODO: trigger animation — animator.SetTrigger("heavyAttack");
     }
@@ -159,7 +159,7 @@ public class PlayerHeavyAttackState : PlayerState
     public override void PhysicsUpdate()
     {
         base.PhysicsUpdate();
-        player.SetVelocity(0f, player.Rb.linearVelocity.y);
+        player.StopHorizontal(player.Rb.linearVelocity.y);
     }
 }
 
@@ -168,13 +168,14 @@ public class PlayerHeavyAttackState : PlayerState
 // ────────────────────────────────────────────────────────────────────────────────
 
 /// <summary>
-/// Defensive state (F held). Reduces incoming damage by ~70% per GDD.
-/// Restricts mobility — player cannot run or jump while blocking.
-/// A successful block followed by a release enables a counterattack window.
+/// Defensive state (F held). Restricts mobility — player cannot run or jump while blocking.
+/// Light attack while blocking counterattacks.
+/// Damage reduction (GDD §5.8: ~70%, frontal only) is NOT applied yet: nothing reads
+/// DamageReductionMultiplier (see docs/arquitectura.md §9, T4).
 /// </summary>
 public class PlayerBlockState : PlayerState
 {
-    private const float DamageReductionFactor = 0.05f; // absorbs 95%, player takes 5%
+    private const float DamageReductionFactor = 0.3f; // absorbs 70%, player takes 30% (GDD §5.8)
 
     /// <summary>Exposes the reduction factor so HealthSystem can query it if needed.</summary>
     public float DamageReductionMultiplier => DamageReductionFactor;
@@ -185,7 +186,7 @@ public class PlayerBlockState : PlayerState
     public override void Enter()
     {
         base.Enter();
-        player.SetVelocity(0f, player.Rb.linearVelocity.y);
+        player.StopHorizontal(player.Rb.linearVelocity.y);
 
         // TODO: trigger animation — animator.SetBool("isBlocking", true);
     }
@@ -213,7 +214,7 @@ public class PlayerBlockState : PlayerState
     {
         base.PhysicsUpdate();
         // Block anchors the player in place
-        player.SetVelocity(0f, player.Rb.linearVelocity.y);
+        player.StopHorizontal(player.Rb.linearVelocity.y);
     }
 
     public override void Exit()
@@ -231,7 +232,8 @@ public class PlayerBlockState : PlayerState
 /// Quick evasion state (E key). Duration 0.5s with 0.2s of iframes per GDD.
 /// Direction: always in the current facing direction (transform.forward).
 /// Cannot be used while airborne (only grounded).
-/// Cooldown enforced via Time.time (zero GC — no Coroutine).
+/// Cooldown (1 s, GDD §5.5) enforced via Time.time (zero GC — no Coroutine); the transitions
+/// into this state check CanDodge.
 ///
 /// Semana 4: IFrames now activated directly on HealthSystem via ActivateIFrames().
 /// </summary>
@@ -242,13 +244,12 @@ public class PlayerDodgeState : PlayerState
     private const float DodgeSpeed      = 12f;
     private const float DodgeCooldown   = 1f;
 
-    private static float _lastDodgeTime = -999f;
+    private float _lastDodgeTime = -999f;
 
     /// <summary>Returns true if the dodge cooldown has elapsed.</summary>
-    public static bool CanDodge => Time.time - _lastDodgeTime >= DodgeCooldown;
+    public bool CanDodge => Time.time - _lastDodgeTime >= DodgeCooldown;
 
     private HealthSystem _healthSystem;
-    private bool         _iFramesActivated;
 
     public PlayerDodgeState(PlayerMovement player, PlayerStateMachine stateMachine)
         : base(player, stateMachine)
@@ -260,11 +261,9 @@ public class PlayerDodgeState : PlayerState
     {
         base.Enter();
         _lastDodgeTime    = Time.time;
-        _iFramesActivated = false;
 
         // Activate invincibility frames on the HealthSystem for IFramesDuration seconds
         _healthSystem?.ActivateIFrames(IFramesDuration);
-        _iFramesActivated = true;
 
         // TODO: trigger animation — animator.SetTrigger("dodge");
     }

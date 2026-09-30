@@ -40,7 +40,6 @@ public class PlayerMovement : MonoBehaviour
     public Rigidbody        Rb         { get; private set; }
     private CapsuleCollider _capsuleCollider;
     private IGroundChecker  _groundChecker;
-    private PlayerStamina   _stamina;
     private Transform       _cameraTransform;
     public EnvironmentChecker EnvChecker { get; private set; }
 
@@ -61,21 +60,11 @@ public class PlayerMovement : MonoBehaviour
 
     // ─── Runtime State ────────────────────────────────────────────────────────────
     public bool  IsSprint           { get; set; }
-    public bool CanSprint
-    {
-        get
-        {
-            if (_stamina == null)
-                _stamina = GetComponent<PlayerStamina>();
-            return _stamina != null && _stamina.CanSprint;
-        }
-    }
 
     /// <summary>Camera-relative, normalized movement direction on the XZ plane for this tick (zero when no input).</summary>
     public Vector3 MoveDirection    { get; private set; } = Vector3.zero;
 
     public bool  IsGrounded         => _groundChecker != null && _groundChecker.IsGrounded;
-    public int   ConsecutiveWallJumps { get; private set; }
     public Vector3 CurrentLedgeCorner { get; set; }
 
     // ─── State Machine ────────────────────────────────────────────────────────────
@@ -87,7 +76,6 @@ public class PlayerMovement : MonoBehaviour
     public PlayerVaultState      VaultState         { get; private set; }
     public PlayerLedgeGrabState  LedgeGrabState     { get; private set; }
     public PlayerLedgeClimbState LedgeClimbState    { get; private set; }
-    public PlayerWallJumpState   WallJumpState      { get; private set; }
     // Combat states — populated after combat system is added
     public PlayerLightAttackState LightAttackState  { get; private set; }
     public PlayerHeavyAttackState HeavyAttackState  { get; private set; }
@@ -158,10 +146,10 @@ public class PlayerMovement : MonoBehaviour
         Rb.linearVelocity = new Vector3(horizontalVelocity.x, verticalVelocity, horizontalVelocity.z);
     }
 
-    /// <summary>Convenience overload: sets a single horizontal axis (Z is zeroed) and vertical velocity.</summary>
-    public void SetVelocity(float x, float verticalVelocity)
+    /// <summary>Zeroes horizontal (X/Z) velocity and sets the vertical (Y) velocity.</summary>
+    public void StopHorizontal(float verticalVelocity)
     {
-        SetVelocity(new Vector3(x, 0f, 0f), verticalVelocity);
+        Rb.linearVelocity = new Vector3(0f, verticalVelocity, 0f);
     }
 
     public void SetKinematic(bool isKinematic)
@@ -192,16 +180,12 @@ public class PlayerMovement : MonoBehaviour
         return Physics.Raycast(transform.position, Vector3.up, _originalColliderHeight * 0.8f, ceilingLayer);
     }
 
-    public void IncrementWallJump()    => ConsecutiveWallJumps++;
-    public void ResetConsecutiveWallJumps() => ConsecutiveWallJumps = 0;
-
     // ─── Private Helpers ─────────────────────────────────────────────────────────
 
     private void CacheComponents()
     {
         Rb               = GetComponent<Rigidbody>();
         _capsuleCollider = GetComponent<CapsuleCollider>();
-        _stamina         = GetComponent<PlayerStamina>();
         _groundChecker   = GetComponent<IGroundChecker>() ?? gameObject.AddComponent<GroundChecker>();
         EnvChecker       = GetComponent<EnvironmentChecker>() ?? gameObject.AddComponent<EnvironmentChecker>();
 
@@ -233,7 +217,6 @@ public class PlayerMovement : MonoBehaviour
         VaultState        = new PlayerVaultState(this, StateMachine);
         LedgeGrabState    = new PlayerLedgeGrabState(this, StateMachine);
         LedgeClimbState   = new PlayerLedgeClimbState(this, StateMachine);
-        WallJumpState     = new PlayerWallJumpState(this, StateMachine);
         LightAttackState  = new PlayerLightAttackState(this, StateMachine);
         HeavyAttackState  = new PlayerHeavyAttackState(this, StateMachine);
         BlockState        = new PlayerBlockState(this, StateMachine);
@@ -302,8 +285,7 @@ public class PlayerMovement : MonoBehaviour
     {
         // Lock visual direction during kinematic/parkour/locked combat states
         var current = StateMachine.CurrentState;
-        return current != WallJumpState   &&
-               current != LedgeGrabState  &&
+        return current != LedgeGrabState  &&
                current != LedgeClimbState &&
                current != VaultState      &&
                current != BlockState      &&

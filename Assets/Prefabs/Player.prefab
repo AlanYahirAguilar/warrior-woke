@@ -10,7 +10,7 @@ GameObject:
   m_Component:
   - component: {fileID: 2536802766306766105}
   m_Layer: 8
-  m_Name: 'CenterPoint '
+  m_Name: CenterPoint
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -49,6 +49,7 @@ GameObject:
   - component: {fileID: 6419730687620079243}
   - component: {fileID: 2155071560513528099}
   - component: {fileID: 5069361737474222998}
+  - component: {fileID: 4417385296650123456}
   m_Layer: 8
   m_Name: Player
   m_TagString: Player
@@ -243,12 +244,26 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Hitbox
   radius: 0.6
+  localOffset: {x: 0, y: 0, z: 0.6}
   targetLayers:
     serializedVersion: 2
     m_Bits: 512
   damage: 10
   ownerCollider: {fileID: 8710263688752599374}
   showGizmos: 1
+--- !u!114 &4417385296650123456
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7324854854781657204}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 367692bcf8f158a41b360cc7cc377e75, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::WeaponHolder
+  startingWeapon: {fileID: 0}
 --- !u!1 &7703409964543376003
 GameObject:
   m_ObjectHideFlags: 0

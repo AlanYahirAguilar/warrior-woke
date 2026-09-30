@@ -12,7 +12,7 @@ public class EnemyData : ScriptableObject
 {
     // ─── Identity ─────────────────────────────────────────────────────────────────
     [Header("Identity")]
-    [SerializeField] private string enemyName = "Looter";
+    [SerializeField] private string enemyName = "New Enemy";
 
     // ─── Vitals ───────────────────────────────────────────────────────────────────
     [Header("Vitals")]

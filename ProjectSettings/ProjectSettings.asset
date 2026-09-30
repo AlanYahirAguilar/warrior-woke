@@ -12,8 +12,8 @@ PlayerSettings:
   targetDevice: 2
   useOnDemandResources: 0
   accelerometerFrequency: 60
-  companyName: DefaultCompany
-  productName: pin-ball
+  companyName: SUNUX GAMES
+  productName: Awakened Warrior
   defaultCursor: {fileID: 0}
   cursorHotspot: {x: 0, y: 0}
   m_SplashScreenBackgroundColor: {r: 0.13725491, g: 0.12156863, b: 0.1254902, a: 1}
@@ -170,9 +170,9 @@ PlayerSettings:
   androidMaxAspectRatio: 2.4
   androidMinAspectRatio: 1
   applicationIdentifier:
-    Android: com.UnityTechnologies.com.unity.template.urpblank
-    Standalone: com.Unity-Technologies.com.unity.template.urp-blank
-    iPhone: com.Unity-Technologies.com.unity.template.urp-blank
+    Android: com.SUNUXGAMES.AwakenedWarrior
+    Standalone: com.SUNUXGAMES.AwakenedWarrior
+    iPhone: com.SUNUXGAMES.AwakenedWarrior
   buildNumber:
     Standalone: 0
     VisionOS: 0
@@ -858,14 +858,14 @@ PlayerSettings:
   editorAssembliesCompatibilityLevel: 1
   m_RenderingPath: 1
   m_MobileRenderingPath: 1
-  metroPackageName: pin-ball
+  metroPackageName: AwakenedWarrior
   metroPackageVersion: 
   metroCertificatePath: 
   metroCertificatePassword: 
   metroCertificateSubject: 
   metroCertificateIssuer: 
   metroCertificateNotAfter: 0000000000000000
-  metroApplicationDescription: pin-ball
+  metroApplicationDescription: Awakened Warrior
   wsaImages: {}
   metroTileShortName: 
   metroTileShowName: 0

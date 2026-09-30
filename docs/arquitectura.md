@@ -2,10 +2,12 @@
 
 > Parte de la documentación del proyecto: [`contexto.md`](contexto.md) (qué es el juego) ·
 > **`arquitectura.md`** (cómo está construido) · [`features.md`](features.md) (qué hay
-> implementado y buenas prácticas). Los estados (✅ 🟡 🔧 📋 ⬜ ⚠️) se definen en `contexto.md` §1.
+> implementado y buenas prácticas). Los estados (✅ 🟡 🔧 📋 ⬜ ⚠️ ⏸️) y las marcas ✔/❓ se
+> definen en `contexto.md` §1.
 >
-> Este documento describe el **estado real del código** al 2026-09-29 (commit base `f09a2a3`).
-> Lo que todavía no existe aparece marcado como 📋 Planeado o ⬜ Pendiente.
+> Este documento describe el **estado real del código** al 2026-09-30 (limpieza contra el GDD;
+> ver el historial en `features.md` §5). Lo que todavía no existe aparece marcado como 📋 Planeado
+> o ⬜ Pendiente.
 
 ---
 
@@ -15,11 +17,12 @@
 |---|---|---|
 | Unity | 6000.6.0f1 | `ProjectSettings/ProjectVersion.txt` |
 | Render | URP 17.6.0 (`Universal Render Pipeline Asset.asset`) | `Packages/manifest.json` |
-| Input | **Input System 1.20.0**, `activeInputHandler: 1` (solo el nuevo; `UnityEngine.Input` legacy **no** está disponible) | `ProjectSettings/ProjectSettings.asset` |
+| Input | **Input System 1.20.0**, `activeInputHandler: 1` (solo el nuevo; `UnityEngine.Input` legacy **no** está disponible). Sin asset `.inputactions` ni project-wide actions registradas | `ProjectSettings/ProjectSettings.asset`, `EditorBuildSettings.asset` |
+| Identidad del build | `productName: Awakened Warrior`, `companyName: SUNUX GAMES`, `com.SUNUXGAMES.AwakenedWarrior` | `ProjectSettings/ProjectSettings.asset` |
 | Física | 3D (PhysX). Fixed Timestep **0.02 s** (50 Hz). Gravedad −9.81 | `TimeManager.asset`, `DynamicsManager.asset` |
 | Navegación | `com.unity.ai.navigation` 2.0.14 instalado, **sin uso todavía** | manifest |
 | Otros paquetes relevantes | ProBuilder 6.1.2, Timeline 6.6.0, uGUI 2.6.0, Test Framework 1.8.0, Profile Analyzer 1.4.0 | manifest |
-| Paquetes instalados sin uso | Visual Scripting, AI Assistant/Inference, Collab Proxy, Adaptive Performance settings | manifest / `Assets/` |
+| Paquetes instalados sin uso | Visual Scripting, AI Assistant (preview) / Inference, Collab Proxy, Device Simulator Devices, `com.unity.pipeline` 0.6.0-exp.1 (experimental), uGUI, Adaptive Performance settings | manifest / `Assets/` |
 | Serialización | Force Text | `EditorSettings.asset` |
 | Color space | Linear (`m_ActiveColorSpace: 1`) | `ProjectSettings.asset` |
 | Lenguaje | C# puro, sin ECS/DOTS ni Visual Scripting | — |
@@ -51,7 +54,6 @@ Assets/
     Enemy/
       Enemy.cs
       StateMachine/           EnemyState, EnemyStateMachine, States/EnemyGroundedStates.cs
-      Types/                  Brute.cs, Looter.cs
     Player/
       Player.cs, PlayerMovement.cs, PlayerInputHandler.cs,
       GroundChecker.cs, EnvironmentChecker.cs
@@ -60,13 +62,12 @@ Assets/
                                       PlayerParkourStates, PlayerCombatStates}.cs
     Editor/                   SceneAutoLoader, PlayerCharacterSetup (no van al build)
   Prefabs/                    Player, Enemy, GameManager, Spawner, Main Camera,
-                              Directional Light, Particle System, initial_floor
-  Scenes/                     Level-1.unity (+ Level-1/LightingData.asset)
+                              Directional Light, Particle System
+  Scenes/                     Level-1.unity (la iluminación horneada Scenes/<Escena>/ no se versiona)
   Characters/Player/          character.fbx (modelo del protagonista)
   LowPoly/                    HumanPlayer.prefab, LowPolyHumanAnimator.controller, Animations/*.fbx
   LowPolyCity/                asset pack de entorno (placeholder) + escena demo
   material/                   ball, enemy, floors, metal (.mat), ZeroFriction.physicMaterial
-  InputSystem_Actions.inputactions   ← plantilla por defecto de Unity, SIN USO
   ProBuilder Data/, URPDefaultResources/, Adaptive Performance/
 docs/                         contexto.md, arquitectura.md, features.md
 GDD_Awakened_Warrior.pdf      GDD final
@@ -92,19 +93,20 @@ GDD_Awakened_Warrior.pdf      GDD final
 Contiene instancias de `GameManager`, `Spawner`, `Main Camera`, `Directional Light` y `Enemy`, el
 objeto `Ground` (plano de 100×100 con top en Y = 0, layer Ground, material `floors.mat`), un muro
 de ProBuilder (`wall`) y dos casas de LowPolyCity. **El Player no está colocado en la escena:** lo
-crea el `Spawner` al iniciar (ver §5.6).
+crea el `Spawner` al iniciar (ver §5.6). La escena no referencia datos de iluminación horneada
+(`m_LightingDataAsset` vacío); la luz direccional es Mixed y alumbra en tiempo real.
 
 ### Prefabs y sus componentes
 
 | Prefab | Componentes de scripts propios | Notas |
 |---|---|---|
-| `Player` | `Player`, `PlayerMovement`, `PlayerInputHandler`, `GroundChecker`, `EnvironmentChecker`, `HealthSystem`, `Hitbox` | Tag `Player`, layer 8. Rigidbody 70 kg, **Interpolate: None**, rotaciones congeladas. Hijos `CenterPoint`, `HeadPoint`, `Model` (character.fbx). **No tiene** `WeaponHolder` ni `Animator Controller`. |
-| `Enemy` | `HealthSystem`, `Hitbox` | ⚠️ **No tiene `Enemy.cs`**, así que la IA no corre. ⚠️ Tag **`Player`** (error: debería ser distinto). `Hitbox.targetLayers = 0` (no puede golpear a nadie). |
+| `Player` | `Player`, `PlayerMovement`, `PlayerInputHandler`, `GroundChecker`, `EnvironmentChecker`, `HealthSystem` (i-frames 0.5 s), `Hitbox` (radio 0.6, `localOffset` z = 0.6, layer Enemy), `WeaponHolder` (sin arma inicial) | Tag `Player`, layer 8. Rigidbody 70 kg, **Interpolate: None**, rotaciones congeladas. Hijos `CenterPoint`, `HeadPoint`, `Model` (character.fbx). **No tiene** `Animator Controller`. |
+| `Enemy` | `HealthSystem` (100 HP, i-frames 0.2 s), `Hitbox` (daño 5) | Tag `Untagged`, layer 9. ⚠️ **No tiene `Enemy.cs`**, así que la IA no corre, y `Hitbox.targetLayers = 0`. La vida y el daño no son valores del GDD: el prefab se rehace con P4. |
 | `GameManager` | `ObjectPoolManager` | Pools: `player` → Player.prefab (1), `spawnVFX` → Particle System (1). |
 | `Spawner` | `Spawner` | `entityId: player`, `triggerType: OnStart`. |
 | `Main Camera` | `CameraFollow` | `autoDetectTarget` activo. |
 | `Particle System` | `ReturnToPoolDelay` | VFX de spawn pooleado. |
-| `initial_floor`, `Directional Light` | — | `initial_floor` es un blockout viejo y no se usa en `Level-1`. |
+| `Directional Light` | — | Luz Mixed. |
 
 ## 4. Mapa de dependencias
 
@@ -113,12 +115,12 @@ flowchart LR
     subgraph Player.prefab
       PIH[PlayerInputHandler<br/>IInputProvider] --> P[Player<br/>Facade]
       P --> PM[PlayerMovement<br/>contexto de la FSM]
-      PM --> FSM[PlayerStateMachine<br/>+ 12 estados]
+      PM --> FSM[PlayerStateMachine<br/>+ 11 estados]
       PM --> GC[GroundChecker<br/>IGroundChecker]
       PM --> EC[EnvironmentChecker]
       FSM -. GetComponent en constructor .-> HB[Hitbox]
       FSM -. GetComponent .-> HS[HealthSystem<br/>IDamageable]
-      FSM -. GetComponent, opcional .-> WH[WeaponHolder]
+      FSM -. GetComponent .-> WH[WeaponHolder]
     end
     PM -- lee Camera.main.transform --> CAM[CameraFollow]
     CAM -- evento estático Player.OnPlayerSpawned --> P
@@ -133,8 +135,7 @@ flowchart LR
 
 Las líneas punteadas son dependencias que se resuelven con `GetComponent` en el constructor del
 estado. Si el componente no está en el prefab, la referencia queda en `null` y el estado usa `?.`
-para no fallar; por eso el daño por arma **no se aplica** en la escena actual (`WeaponHolder` no
-está en el Player.prefab).
+para no fallar. Los tres (`Hitbox`, `HealthSystem`, `WeaponHolder`) están en el Player.prefab.
 
 ## 5. Sistemas
 
@@ -154,9 +155,10 @@ Player (Facade)                 FixedUpdate → RouteInputToMovement()
   llama a `PlayerMovement.ProcessMovement(...)`. Si faltan `PlayerMovement`, `IInputProvider` o
   `IGroundChecker`, los agrega en `Awake`.
 - **`PlayerMovement.cs`**: cachea `Rigidbody`, `CapsuleCollider`, `GroundChecker`,
-  `EnvironmentChecker` y `Camera.main.transform` en `Awake`, y construye las 12 instancias de estado.
+  `EnvironmentChecker` y `Camera.main.transform` en `Awake`, y construye las 11 instancias de estado.
   Expone el estado de input (`InputX`, `InputZ`, `HasMoveInput`, `JumpTriggered`, …) y helpers de
-  física (`SetVelocity`, `SetKinematic`, `ShrinkCollider`, `ResetCollider`, `HasCeilingOverhead`).
+  física (`SetVelocity(Vector3, float)`, `StopHorizontal(float)`, `SetKinematic`, `ShrinkCollider`,
+  `ResetCollider`, `HasCeilingOverhead`).
   **Regla:** los estados solo mueven el cuerpo a través de estos helpers o de `Rb.MovePosition`.
 - **Flujo de un tick:** `LogicUpdate` y `PhysicsUpdate` corren los dos dentro del paso de física
   (el input se enruta desde `Player.FixedUpdate`), así que la lógica de estados corre a 50 Hz y no
@@ -164,7 +166,7 @@ Player (Facade)                 FixedUpdate → RouteInputToMovement()
   tap no se pierda entre frames ni se procese dos veces.
 - **Movimiento relativo a cámara:** `MoveDirection` es el input proyectado sobre el
   forward/right aplanado de la cámara. La rotación usa `Mathf.SmoothDampAngle` (`turnSmoothTime`) y
-  se bloquea en Vault, LedgeGrab, LedgeClimb, WallJump, Block y los ataques.
+  se bloquea en Vault, LedgeGrab, LedgeClimb, Block y los ataques.
 - **Transiciones:** cada estado decide sus salidas en `LogicUpdate`. `PlayerStateMachine` es
   genérica y no conoce estados concretos. Un estado nuevo se agrega creando la clase, instanciándola
   en `PlayerMovement.BuildStateMachine()` y agregando sus transiciones en los estados de origen.
@@ -178,7 +180,7 @@ Player (Facade)                 FixedUpdate → RouteInputToMovement()
 | Archivo | Estados |
 |---|---|
 | `PlayerGroundedStates.cs` | `Idle`, `Run` (auto-sprint), `Slide` |
-| `PlayerAirStates.cs` | `Jump`, `WallJump` (⏸️ desactivado: la clase existe pero ninguna transición llega a ella) |
+| `PlayerAirStates.cs` | `Jump` |
 | `PlayerParkourStates.cs` | `Vault`, `LedgeGrab`, `LedgeClimb` |
 | `PlayerCombatStates.cs` | `LightAttack`, `HeavyAttack`, `Block`, `Dodge` |
 
@@ -187,12 +189,13 @@ stateDiagram-v2
     Idle --> Run: input
     Idle --> Jump: Espacio + suelo
     Idle --> Block: F
-    Idle --> Dodge: E + suelo
+    Idle --> Dodge: E + suelo + cooldown 1 s
     Idle --> LightAttack: clic izq
     Idle --> HeavyAttack: clic der
     Run --> Vault: obstáculo bajo (automático)
     Run --> Slide: Shift
-    Run --> Jump
+    Run --> Dodge: E + cooldown 1 s
+    Run --> Jump: conserva el sprint
     Run --> Idle: sin input
     Jump --> LedgeGrab: cornisa detectada
     Jump --> Idle: aterriza
@@ -211,12 +214,11 @@ stateDiagram-v2
     Dodge --> Idle: 0.5 s
 ```
 
-> **Wall jump desactivado (2026-09-29, decisión del equipo):** la transición `Jump → WallJump`
-> está comentada en `PlayerJumpState.LogicUpdate`. `PlayerWallJumpState`, `ConsecutiveWallJumps` y
-> `EnvironmentChecker.IsTouchingWall` se conservan para poder reactivarlo.
+> **Sprint:** `IsSprint` se limpia en `Idle.Enter` y en cada salida de `Run` salvo `Jump` y
+> `Vault`, para que el salto y el vault conserven el impulso (GDD §5.2, §5.4).
 >
-> **Nota:** `Dodge` usa un cooldown `static` (`_lastDodgeTime`), pero ninguna transición consulta
-> `PlayerDodgeState.CanDodge`, así que **hoy el cooldown no se aplica**. Ver `features.md`.
+> **No hay estado de caída:** si el jugador sale de una orilla caminando, sigue en `Run`/`Idle`
+> mientras cae (la gravedad actúa igual). Ver T13.
 
 ### 5.2 Input — ✅ Implementado (modo prototipo)
 
@@ -224,42 +226,42 @@ stateDiagram-v2
 opcional (todos vacíos en el prefab) o la lectura directa de `Keyboard.current`/`Mouse.current`.
 **Hoy se usa la lectura directa.** La documentación oficial del Input System la describe como
 adecuada solo para prototipos, porque se salta el rebinding, los esquemas de control y el gamepad.
-`Assets/InputSystem_Actions.inputactions` es la plantilla por defecto de Unity y no está conectada.
+No hay ningún asset `.inputactions` en el proyecto (la plantilla por defecto se eliminó; P6).
 
 ### 5.3 Detección de entorno — ✅ Implementado
 
 - **`GroundChecker : IGroundChecker`**: un `Physics.Raycast` hacia abajo desde
   `bounds.min.y + 0.1` con longitud `0.1 + extraDistance` contra `groundLayer` (Ground + Obstacle).
 - **`EnvironmentChecker`**: pre-filtro `Physics.OverlapSphereNonAlloc` (buffer de 4, radio 1.2)
-  antes de los raycasts. Pared = raycast desde `CenterPoint`. Vault = golpea el centro y no la
-  cabeza. Cornisa = golpean centro y cabeza, más un raycast hacia abajo desde arriba y adelante para
-  encontrar la esquina. Todo usa `transform.forward` como dirección.
+  antes de los raycasts. Vault = golpea el centro y no la cabeza. Cornisa = golpean centro y
+  cabeza, más un raycast hacia abajo desde arriba y adelante para encontrar la esquina. Todo usa
+  `transform.forward` como dirección (los gizmos también).
 
 ### 5.4 Combate — 🟡 Parcial
 
 | Script | Responsabilidad |
 |---|---|
-| `HealthSystem : IDamageable` | Vida con clamp, i-frames por tiempo (`iFramesDuration` 0.5 s), `ActivateIFrames(d)`, `Heal`, `InstantKill`, `InitializeHealth(max)`. Eventos `OnHealthChanged`, `OnDeath`, `OnDamageReceived`. Sin `Update`. |
-| `Hitbox` | `Activate()` hace un `OverlapSphereNonAlloc` (buffer de 10) contra `targetLayers` y llama `TakeDamage` en cada `IDamageable`. `SetDamage`, `SetRadius`, evento `OnHit`. Es un pulso instantáneo, no un trigger persistente. |
+| `HealthSystem : IDamageable` | Vida con clamp, i-frames por tiempo (`iFramesDuration`: 0.5 s el jugador, 0.2 s el enemigo para que entren los golpes del combo, que van cada ≥ 0.25 s), `ActivateIFrames(d)` (nunca acorta unos i-frames ya activos), `Heal` (no revive), `InstantKill`, `InitializeHealth(max)` (reinicia y revive). Eventos `OnHealthChanged`, `OnDeath`, `OnDamageReceived`. Sin `Update`. |
+| `Hitbox` | `Activate()` hace un `OverlapSphereNonAlloc` (buffer de 10) centrado en `Center` (`transform` + `localOffset`) contra `targetLayers` y llama `TakeDamage` en cada `IDamageable`. `SetDamage`, `SetRadius`, evento `OnHit`. Es un pulso instantáneo, no un trigger persistente. En el jugador la esfera está 0.6 m al frente del torso. |
 | `WeaponData` (SO) | Nombre, icono, daño ligero/pesado, radio de hitbox, knockback, `weaponId`. Menú `Create > WarriorWoke > Weapon Data`. **No hay assets creados.** |
-| `WeaponHolder` | Arma equipada, `Equip(data)`, `GetLightDamage()` (8 desarmado), `GetHeavyDamage()` (20), `GetKnockback()`, evento `OnWeaponChanged`. **No está en el Player.prefab.** |
+| `WeaponHolder` | Arma equipada, `Equip(data)`, `GetLightDamage()` (10 desarmado), `GetHeavyDamage()` (20 desarmado), `GetKnockback()`, evento `OnWeaponChanged`. Está en el Player.prefab sin arma inicial. |
 
-Limitaciones reales: el bloqueo no reduce daño (ningún sistema lee `DamageReductionMultiplier`),
-`Hitbox` no verifica dirección (frontal) ni evita pegarle dos veces al mismo objetivo si tiene
-varios colliders, el knockback no se aplica y no hay animaciones.
+Limitaciones reales: el bloqueo no reduce daño (ningún sistema lee `DamageReductionMultiplier`,
+que ya vale 0.3 = −70 % del GDD), `Hitbox` no verifica ángulo ni evita pegarle dos veces al mismo
+objetivo si tiene varios colliders, el knockback no se aplica y no hay animaciones.
 
 ### 5.5 Enemigos — 🟡 Parcial / ⚠️ desalineado con el GDD
 
-- **`Enemy : MonoBehaviour, IPoolable`**: el mismo patrón de contexto + FSM que el jugador. Lee sus
-  valores de un `EnemyData` (SO). Estados en `EnemyGroundedStates.cs`: `Patrol`, `Chase`, `Attack`,
-  `Dead`. La detección es un `OverlapSphereNonAlloc` + `CompareTag("Player")` + raycast de línea de
-  visión. Al morir espera 1.5 s y vuelve al pool.
+- **`Enemy : MonoBehaviour, IPoolable`**: el mismo patrón de contexto + FSM que el jugador, con una
+  diferencia: `LogicUpdate` corre en `Update` y `PhysicsUpdate` en `FixedUpdate`. Lee sus valores de
+  un `EnemyData` (SO). Estados en `EnemyGroundedStates.cs`: `Patrol`, `Chase`, `Attack`, `Dead`.
+  La detección es un `OverlapSphereNonAlloc` filtrado por `playerLayer` (por defecto la layer
+  `Player`) + `CompareTag("Player")` + raycast de línea de visión. Al morir espera 1.5 s y vuelve
+  al pool; `OnSpawn` lo revive con `InitializeHealth`.
 - ⚠️ **Es 2.5D:** congela Z, se mueve solo en X (`Move(float dir)`) y rota a ±90°. El jugador ya es
-  3D libre, así que los enemigos **no pueden perseguirlo en profundidad**.
-- ⚠️ `Looter`/`Brute` vienen del GDD anterior. `Brute` declara `blockProbability`, pero no hay
-  estado de bloqueo (el comentario describe un `BruteBlockState` que no existe).
-- ⚠️ `CheckGrounded()` llama a `GetComponent<CapsuleCollider>()` en cada `FixedUpdate` (viola la
-  regla de cacheo).
+  3D libre, así que los enemigos **no pueden perseguirlo en profundidad**. Se reescribe con P4.
+- ⚠️ No hay subclases por tipo: `Looter`/`Brute` (GDD anterior) se eliminaron; los tipos del GDD
+  (arquero, guerrero ligero, guerrero pesado) llegan con P4.
 - ⚠️ `Enemy.prefab` no usa este script (ver §3).
 
 ### 5.6 Spawning y object pooling — ✅ Implementado
@@ -273,6 +275,9 @@ varios colliders, el knockback no se aplica y no hay animaciones.
   `WaitForSeconds` cacheado).
 - **El jugador nace del pool:** `Spawner (OnStart) → ObjectPoolManager.Spawn("player")`. Para
   cambiar dónde aparece, mueve el `Spawner`.
+- `Spawn` coloca el objeto (posición, rotación, sin padre) **antes** de activarlo, para que los
+  `OnEnable` (p. ej. `OnPlayerSpawned` → snap de la cámara) vean la posición final y el Rigidbody
+  no se teletransporte por su transform.
 - Nota: el pool es propio. Unity 6 trae `UnityEngine.Pool.ObjectPool<T>`, con `collectionCheck`
   y `maxSize`. No hace falta migrar mientras el pool actual funcione.
 
@@ -286,11 +291,15 @@ final el tag.
 **Falta lo del GDD:** control libre con el ratón (hoy la cámara solo sigue el `forward` del
 jugador), camera shake, encuadre de combate y ajuste de zoom.
 
-### 5.8 Progresión — sin XP (decisión cerrada)
+### 5.8 Sistemas eliminados — no reintroducir
 
-El juego **no tiene experiencia ni niveles de personaje** (GDD §7, §19). `PlayerXpSystem`,
-`IXpReceiver` y `EnemyData.xpReward` se eliminaron el 2026-09-29. No se deben reintroducir: la
-progresión es solo por historia (niveles y mundos).
+| Sistema | Motivo | Fecha | Decisión |
+|---|---|---|---|
+| XP (`PlayerXpSystem`, `IXpReceiver`, `EnemyData.xpReward`) | GDD §7, §19: progresión solo por historia | 2026-09-29 | P3 |
+| Wall jump (`PlayerWallJumpState`, `ConsecutiveWallJumps`, `EnvironmentChecker.IsTouchingWall`) | Fuera del GDD §28 y sin uso | 2026-09-30 | P2, P8 |
+| Estamina y HUD (`PlayerStamina`, `PlayerHUD`) | GDD §5.2 (sprint sin recurso) y §16 (sin barras de vida) | 2026-09-30 | P7 |
+| Enemigos `Looter`/`Brute` | GDD anterior; los tipos del GDD final llegan con P4 | 2026-09-30 | P8 |
+| `initial_floor.prefab`, `InputSystem_Actions.inputactions` | Sin uso | 2026-09-30 | P8 |
 
 ### 5.9 Herramientas de Editor — ✅ Implementado
 
@@ -322,7 +331,7 @@ niveles, audio, feedback de daño (VFX, camera shake, estado visual de salud) y 
 | D5 | **ScriptableObjects** para datos de diseño (`WeaponData`, `EnemyData`) | Los datos se comparten entre instancias y se ajustan sin tocar código. Son de **solo lectura en runtime** en builds. |
 | D6 | **Object pooling** para todo lo que nace y muere seguido | Evita GC e `Instantiate` en el game loop. |
 | D7 | **Eventos C# (`System.Action`)** para notificar (`OnDeath`, `OnHealthChanged`, `OnPlayerSpawned`) | La UI, el audio y la cámara se enganchan sin acoplarse. Se suscriben en `OnEnable` y se desuscriben en `OnDisable`. |
-| D8 | Movimiento **relativo a cámara** y cámara que sigue el `forward` del jugador | Controlador estándar de tercera persona. |
+| D8 | Movimiento **relativo a cámara** y cámara que sigue el `forward` del jugador | Controlador estándar de tercera persona. La cámara libre con ratón llega con P5. |
 | D9 | Cero allocations en código caliente (`NonAlloc`, buffers prealocados, sin LINQ ni strings en loops) | Ver buenas prácticas en `features.md`. |
 
 ## 7. Plan técnico para lo que falta — 📋 Propuesta
@@ -341,7 +350,7 @@ niveles, audio, feedback de daño (VFX, camera shake, estado visual de salud) y 
 | **Caída mortal** | En `PlayerMovement`/`GroundChecker`, registrar la altura al despegar y llamar `InstantKill()` al aterrizar si la caída supera X m. Los barrancos pueden usar un trigger `KillZone`. | GDD §5.11, §5.12. |
 | **Checkpoints / respawn** | `Checkpoint` (trigger, una activación) → `CheckpointManager` (en la escena) guarda la posición. Al `OnDeath` del Player: reposicionar con `Rigidbody.position` (teleport), `HealthSystem.InitializeHealth(100)` y reiniciar la FSM en `Idle`. | GDD §5.13, §17. |
 | **Guardado** | `SaveSystem` estático: `JsonUtility` → `Application.persistentDataPath/save.json` con `{nivel, checkpointId}`. Una sola partida. | GDD §26, doc oficial de JsonUtility. |
-| **Armas** | Agregar `WeaponHolder` al Player.prefab. Crear 3 `WeaponData` (katana 20/35, yari 18/30 con más radio, kanabo 30/50) y un prefab `WeaponPickup` (trigger + E). Al recoger, se suelta la actual como pickup. Desarmado 10/20. | GDD §5.10, §18, D5. |
+| **Armas** | `WeaponHolder` ya está en el Player.prefab (desarmado 10/20). Falta crear 3 `WeaponData` (katana 20/35, yari 18/30 con más radio, kanabo 30/50) y un prefab `WeaponPickup` (trigger + E). Al recoger, se suelta la actual como pickup. | GDD §5.10, §18, D5. |
 | **Enemigos** ✔ | Reescribir `Enemy` para 3D: **NavMeshAgent** (paquete ya instalado) con **Rigidbody kinemático**, como recomienda la documentación de AI Navigation. `NavMeshSurface` en cada nivel. Estados del GDD §21 (Idle, Detectar, Acercarse, Atacar, Defenderse, Buscar, Regresar) y una zona asignada (`EnemyZone`) de la que no salen. Tipos por `EnemyData`: `Archer` (distancia + flecha pooleada), `LightWarrior`, `HeavyWarrior`. La apariencia (modelos) la entrega el equipo en un paquete aparte. | GDD §5.14, §12, §21, D2, D5, D6. |
 | **Jefes** | `Boss : Enemy` con estados extra (Analizar distancia, Reposicionarse, Bloquear, Esquivar), sin fases. `BossArena` cierra la salida con un trigger. | GDD §5.15, §13. |
 | **Cámara** ✔ | Extender `CameraFollow` (sin Cinemachine) con yaw/pitch del ratón (`Look`), límites de pitch, cursor bloqueado en gameplay, shake por evento y encuadre de combate. El movimiento sigue siendo relativo a la cámara, pero la cámara deja de depender del `forward` del jugador. | GDD §15. |
@@ -354,25 +363,26 @@ niveles, audio, feedback de daño (VFX, camera shake, estado visual de salud) y 
 | # | Tema | Decisión | Fecha | Estado |
 |---|---|---|---|---|
 | P1 | Controles | Adoptar los del GDD §14 (J/K/L/Q/E, Shift = sprint mantenido, Espacio = salto/vault). | 2026-09-29 | ✔ Aprobada, 📋 por implementar. **Abierto:** tecla nueva del slide. |
-| P2 | Parkour fuera del GDD | **Solo se desactiva el wall jump.** Ledge grab/climb y slide se conservan activos. | 2026-09-29 | ✅ Implementada |
+| P2 | Parkour fuera del GDD | Wall jump fuera (desactivado el 29-sep, **eliminado** el 30-sep por P8). Ledge grab/climb y slide se conservan activos. | 2026-09-29 / 30 | ✅ Implementada |
 | P3 | Sistema de XP | Eliminarlo: el juego no tiene XP. | 2026-09-29 | ✅ Implementada |
 | P4 | Enemigos | Reescribir en 3D con NavMeshAgent. El equipo entrega el paquete de apariencia. | 2026-09-29 | ✔ Aprobada, 📋 por implementar |
 | P5 | Cámara | Extender `CameraFollow` con control de ratón (sin Cinemachine). | 2026-09-29 | ✔ Aprobada, 📋 por implementar |
-| P6 | Input | Migrar a un asset `.inputactions` propio. | — | ❓ Pendiente: el equipo pidió primero una explicación |
+| P6 | Input | Migrar a un asset `.inputactions` propio. La plantilla por defecto ya se eliminó. | — | ❓ Pendiente: el equipo pidió primero una explicación |
+| P7 | Estamina y HUD | Quedan fuera del desarrollo: el GDD no tiene estamina (§5.2) ni barras de vida (§16). Se eliminaron. | 2026-09-30 | ✅ Implementada |
+| P8 | Código fuera del GDD | Lo que está fuera del GDD y no se usa se **elimina**, no se desactiva (wall jump, `Looter`/`Brute`, `initial_floor`, `InputSystem_Actions`). | 2026-09-30 | ✅ Implementada |
+| P9 | Iluminación horneada | No se versiona: `Assets/Scenes/*/` en `.gitignore`, `LightingData.asset` marcado `binary`. | 2026-09-30 | ✅ Implementada |
+| P10 | Identidad del producto | `productName` = Awakened Warrior, `companyName` = SUNUX GAMES. | 2026-09-30 | ✅ Implementada |
 
 ## 9. Deuda técnica y bugs conocidos
 
+Solo se listan los abiertos. Los IDs no se reutilizan; los resueltos están en el historial de
+`features.md` §5 (T1, T5, T6, T8–T12 se resolvieron el 2026-09-30).
+
 | # | Problema | Dónde | Impacto |
 |---|---|---|---|
-| T1 | `Enemy.prefab` tiene tag `Player` | `Prefabs/Enemy.prefab` | El fallback de `CameraFollow` y los triggers por tag pueden confundir al enemigo con el jugador. |
-| T2 | `Enemy.prefab` no tiene `Enemy.cs`, y `Hitbox.targetLayers = 0` | `Prefabs/Enemy.prefab` | El enemigo de la escena no tiene IA ni puede hacer daño. |
-| T3 | Enemigos 2.5D (freeze Z, eje X) | `Enemy.cs`, `EnemyGroundedStates.cs` | Incompatible con el jugador 3D. |
-| T4 | El bloqueo no reduce daño | `PlayerBlockState`, `HealthSystem` | El bloqueo solo inmoviliza al jugador. |
-| T5 | El cooldown de esquiva no se aplica | `PlayerDodgeState.CanDodge` sin uso | Se puede esquivar sin límite. |
-| T6 | `WeaponHolder` no está en el Player.prefab | `Prefabs/Player.prefab` | El daño usa el valor fijo del `Hitbox` y no el de `WeaponHolder`. |
+| T2 | `Enemy.prefab` no tiene `Enemy.cs`, `Hitbox.targetLayers = 0`, y su vida (100) y daño (5) no son del GDD | `Prefabs/Enemy.prefab` | El enemigo de la escena no tiene IA ni puede hacer daño. Se rehace con P4. |
+| T3 | Enemigos 2.5D (freeze Z, eje X) | `Enemy.cs`, `EnemyGroundedStates.cs` | Incompatible con el jugador 3D. Se rehace con P4. |
+| T4 | El bloqueo no reduce daño | `PlayerBlockState`, `HealthSystem` | El bloqueo solo inmoviliza al jugador. Diseño en §7. |
 | T7 | Rigidbody sin interpolación mientras la cámara sigue en `LateUpdate` | Player.prefab, `CameraFollow` | Posible jitter visual. Según la documentación oficial, la interpolación se activa solo si se observa jitter. Hay que verificarlo en Play. |
-| T8 | `GetComponent` por tick | `Enemy.CheckGrounded()` | Viola la regla de cacheo. |
-| T9 | Comentarios que citan otro GDD (`GDD §8`, `§14`, "Ashfall", "~70% per GDD" con 95 % en el código) | varios scripts | Pueden confundir. Hay que corregirlos al tocar cada archivo. |
-| T10 | `SetVelocity(float x, float y)` pone Z en 0 | `PlayerMovement` | Correcto hoy (solo se usa con `x = 0` para frenar), pero es una trampa si se usa con x ≠ 0. |
-| T11 | `EnvironmentChecker.OnDrawGizmosSelected` dibuja hacia `transform.right` | `EnvironmentChecker.cs` | Los gizmos no coinciden con los raycasts reales (`forward`). Solo afecta a la depuración. |
-| T12 | `InputSystem_Actions.inputactions` sin uso | `Assets/` | Puede confundir; se reemplaza en P6. |
+| T13 | No hay estado de caída | `PlayerGroundedStates.cs` | Caer de una orilla sin saltar no pasa por un estado aéreo: no hay ledge grab al caer y la caída mortal (F15) necesitará ese estado. |
+| T14 | `EnvironmentChecker.vaultHeightCheck` no se usa | `EnvironmentChecker.cs` | Campo muerto en el Inspector. Se resuelve al validar la altura del vault (F04). |

@@ -63,9 +63,9 @@ public class WeaponHolder : MonoBehaviour
 
     /// <summary>
     /// Returns the correct damage for the current weapon and attack type.
-    /// Falls back to bare-hand values if no weapon is equipped.
+    /// Falls back to bare-hand values if no weapon is equipped (GDD §5.11: punch 10, kick 20).
     /// </summary>
-    public int GetLightDamage()  => CurrentWeapon != null ? CurrentWeapon.LightAttackDamage : 8;
+    public int GetLightDamage()  => CurrentWeapon != null ? CurrentWeapon.LightAttackDamage : 10;
     public int GetHeavyDamage()  => CurrentWeapon != null ? CurrentWeapon.HeavyAttackDamage : 20;
     public float GetKnockback()  => CurrentWeapon != null ? CurrentWeapon.KnockbackForce    : 3f;
 }

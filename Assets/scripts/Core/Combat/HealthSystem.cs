@@ -7,7 +7,7 @@ using UnityEngine;
 /// Best practices applied:
 ///  - Zero GC: events use System.Action, no delegates allocated per call.
 ///  - Iframes enforced here, not in the state machine.
-///  - Health is always clamped between 0 and MaxHealth (GDD §14).
+///  - Health is always clamped between 0 and MaxHealth (GDD §5.11).
 /// </summary>
 public class HealthSystem : MonoBehaviour, IDamageable
 {
@@ -16,7 +16,7 @@ public class HealthSystem : MonoBehaviour, IDamageable
     [SerializeField] private int maxHealth = 100;
 
     [Header("Invincibility Frames")]
-    [Tooltip("Seconds of invincibility after receiving damage (GDD: ~0.5s).")]
+    [Tooltip("Seconds of invincibility after receiving damage. Player: ~0.5s (GDD §5.11). Enemies must stay below the 0.25s light-attack cadence or combo hits are ignored.")]
     [SerializeField] private float iFramesDuration = 0.5f;
 
     // ─── Events ───────────────────────────────────────────────────────────────────
@@ -99,8 +99,9 @@ public class HealthSystem : MonoBehaviour, IDamageable
     /// </summary>
     public void ActivateIFrames(float duration)
     {
-        // Push _lastDamageTime forward so the iframes gate stays active for 'duration' seconds
-        _lastDamageTime = Time.time - iFramesDuration + duration;
+        // Push _lastDamageTime forward so the iframes gate stays active for 'duration' seconds.
+        // Max() keeps longer iframes that are already running (e.g. from a hit just taken).
+        _lastDamageTime = Mathf.Max(_lastDamageTime, Time.time - iFramesDuration + duration);
     }
 
     // ─── Private Helpers ─────────────────────────────────────────────────────────

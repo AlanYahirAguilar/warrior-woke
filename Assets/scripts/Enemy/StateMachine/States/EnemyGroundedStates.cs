@@ -50,7 +50,8 @@ public class EnemyPatrolState : EnemyState
 
 /// <summary>
 /// Pursues the player until within attack range or until line of sight is lost.
-/// GDD: enemy stays within its assigned zone — returns to patrol if player escapes.
+/// Returns to patrol if the player escapes LoseTrackRange. The GDD §5.14 assigned zone is
+/// not implemented yet (planned in the 3D rewrite, docs/arquitectura.md §7).
 /// </summary>
 public class EnemyChaseState : EnemyState
 {
@@ -174,9 +175,9 @@ public class EnemyDeadState : EnemyState
         if (enemy.TryGetComponent(out Rigidbody rb))
             rb.isKinematic = true;
 
-        // Disable the hitbox so no damage fires after death
-        if (enemy.Hitbox != null)
-            enemy.Hitbox.gameObject.SetActive(false);
+        // No need to disable the Hitbox: it only fires from EnemyAttackState, which is no longer
+        // reachable. (It lives on the enemy root, so deactivating its GameObject would hide the
+        // whole enemy and stop this state before it can return to the pool.)
 
         // TODO: trigger death animation — animator.SetTrigger("die");
         // TODO: spawn death VFX via ObjectPoolManager
@@ -193,10 +194,6 @@ public class EnemyDeadState : EnemyState
 
     private void ReturnToPool()
     {
-        // Re-enable hitbox before returning to pool
-        if (enemy.Hitbox != null)
-            enemy.Hitbox.gameObject.SetActive(true);
-
         if (enemy.TryGetComponent(out Rigidbody rb))
             rb.isKinematic = false;
 
