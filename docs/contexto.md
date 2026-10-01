@@ -128,8 +128,10 @@ Esta tabla es **lo que pide el diseño**. El estado real de cada una está en
 | Recoger arma | E | B |
 | Pausa | ESC | Start / Menu |
 
-> ⚠️ **Los controles actuales del código no son estos.** Ver `features.md` → "Diferencias GDD vs.
-> implementación".
+> Desde el 2026-09-30 el código usa estos controles (decisión P1), incluido el vault con
+> **Espacio**, salvo **E** (recoger arma todavía no existe) y **ESC** (no hay pausa). El slide, que
+> está fuera del GDD, usa **C** mientras se esprinta. Además, **S sin sprint camina hacia atrás sin
+> girar** (P16). Gamepad: no. Ver `features.md` → "Diferencias GDD vs. implementación".
 
 ## 5. Enemigos y jefes (GDD §12, §13, §21)
 
@@ -198,9 +200,16 @@ Comandante (fin del juego y reencuentro con la familia).
 - **Audio:** música tradicional japonesa que se intensifica en combate, con música propia para los
   jefes. SFX de pasos, saltos, golpes, bloqueos y armas. Ambiente de viento, lluvia, fuego y batalla
   a lo lejos. **Sin voces.**
-- ⚠️ **Estado actual del arte:** el proyecto usa assets provisionales (`LowPolyCity`, estilo cartoon
-  "cyber", y animaciones `LowPoly`) que **no** corresponden a la dirección de arte final. El GDD
-  permite assets provisionales (§28, riesgo "Dependencia de assets").
+- ⚠️ **Estado actual del arte:** el proyecto usa assets provisionales que **no** corresponden a la
+  dirección de arte final. El GDD los permite (§28, riesgo "Dependencia de assets"):
+  - Entorno: `LowPolyCity` (estilo cartoon "cyber").
+  - Protagonista: personaje **Ch45** de Mixamo (`Assets/Characters/Player/character.fbx`), armadura
+    oscura con sangre. No es el samurái "de apariencia sencilla" del GDD §22.
+  - Animaciones: clips Humanoid retargeteados a Ch45 de tres orígenes: `LowPoly` (idle, sprint,
+    caminar hacia atrás, salto, rolls, combate), **Dynamic Parkour System** (walk, jog, run, caída,
+    aterrizajes, vault, slide y cornisa; licencia MIT, animaciones de Mixamo; ver
+    `Assets/ThirdParty/DynamicParkourSystem/README.md`) y dos transiciones de guardia de Ch45.
+    **No se conoce el origen ni la licencia de las animaciones `LowPoly`** (arquitectura T15).
 
 ## 9. Alcance (GDD §25) y criterios de terminado (GDD §30)
 
@@ -242,14 +251,17 @@ final · SFX y música básica · build para Windows.
 1. **El código viene de un diseño anterior.** El proyecto empezó como plataformero 2.5D con otro
    GDD. Lo que venía de ese diseño y no se usa ya se eliminó (XP, wall jump, enemigos
    *Looter/Brute*), y los comentarios que citaban el GDD anterior se corrigieron. Lo que sigue vivo
-   de esa época (enemigos 2.5D, auto-sprint, controles) está en `features.md` → "Diferencias GDD
+   de esa época (enemigos 2.5D, slide, ledge grab) está en `features.md` → "Diferencias GDD
    vs. implementación". Antes de usar un valor del código como referencia de diseño, compáralo con
    el GDD final.
 2. **Decisiones de alcance** (P1–P10): están en `arquitectura.md` §8, con su estado. Resumen al
-   2026-09-30: se adoptan los controles del GDD; el wall jump se eliminó (ledge grab/climb y slide
-   siguen activos); **no hay XP, estamina ni HUD** (GDD §7, §5.2, §16); los enemigos se rehacen en
-   3D con NavMeshAgent; la cámara se extiende con control de ratón; la iluminación horneada no se
-   versiona. La migración a `.inputactions` sigue pendiente.
+   2026-09-30: los controles del GDD **ya están implementados** (P1; el slide pasó a C); el wall jump
+   se eliminó (ledge grab/climb y slide siguen activos); **no hay XP, estamina ni HUD** (GDD §7,
+   §5.2, §16); los enemigos se rehacen en 3D con NavMeshAgent; la cámara se extiende con control de
+   ratón; la iluminación horneada no se versiona; el personaje se anima con clips retargeteados y sin
+   root motion (P11–P14). El parkour se basa en el Dynamic Parkour System adaptado a nuestra FSM
+   (P15–P20): vault con Espacio, slide, auto step y cornisa. La migración a `.inputactions` sigue
+   pendiente.
 3. **No se implementa nada fuera del MVP** sin que antes funcione el MVP (GDD §25 y §28).
 
 ## 11. Cómo abrir el proyecto
@@ -261,12 +273,23 @@ final · SFX y música básica · build para Windows.
 - **Escena del juego:** `Assets/Scenes/Level-1.unity` (la única en Build Settings).
   `Assets/LowPolyCity/Scenes/CartoonLowPolyCityLite_01.unity` es solo la demo del asset pack y no
   tiene lógica del juego.
+- **Circuito de pruebas de parkour:** dentro de `Level-1`, objeto `ParkourTestCircuit`, al sur de la
+  casa. Al dar Play apareces en su entrada, frente a los carteles: VAULT · SLIDE · AUTO STEP ·
+  LEDGE · COMBINADO (ver `features.md` F32).
 - **Auto-loader:** `Assets/scripts/Editor/SceneAutoLoader.cs` abre `Level-1.unity` al iniciar el
   Editor, **una vez por sesión** (`SessionState`), así que no interrumpe si luego abres otra escena
   a propósito.
-- **Controles actuales** (del código, no del GDD): WASD/flechas mover · Espacio saltar ·
-  Shift deslizarse · clic izq. ataque ligero · clic der. ataque fuerte · F bloquear (mantener) ·
-  E esquivar. El sprint es automático tras 3 s corriendo.
+- **Controles actuales** (GDD §14, P1): WASD/flechas correr (acelera pasando por caminar) ·
+  S sin sprint caminar hacia atrás sin girar · Shift (mantener) sprint · Espacio saltar, o vault
+  junto a un obstáculo bajo · J ataque ligero · K ataque fuerte · L bloquear (mantener) ·
+  Q + dirección esquivar · C deslizarse (solo mientras esprintas, fuera del GDD) · contra un muro
+  alto: saltar para colgarse, Espacio para subir, dirección contraria para soltarse. E (recoger
+  arma) y ESC (pausa) todavía no hacen nada.
+- **Si cambias animaciones o el modelo:** corre **Tools → Warrior Woke → Configurar Animaciones del
+  Jugador** (y **Validar Personaje** para revisar). Ver `arquitectura.md` §5.10.
+- **Pruebas automáticas:** **Tools → Warrior Woke → Probar Personaje en Play Mode** recorre el
+  circuito con teclado simulado y reporta cada comprobación en la consola (`[PlayModeTest]`).
+  También en batch (ver `arquitectura.md` §5.9).
 
 ### "Hice pull y no veo los cambios"
 

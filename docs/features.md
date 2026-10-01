@@ -5,9 +5,11 @@
 > implementado, cómo se hizo y qué prácticas seguimos). Los estados (✅ 🟡 🔧 📋 ⬜ ⚠️ ⏸️) se
 > definen en `contexto.md` §1.
 >
-> Estado verificado leyendo el código, los prefabs y la escena el 2026-09-30, después de la
-> limpieza contra el GDD (ver §5). Los scripts compilan sin errores. **Todavía no se ha
-> verificado en Play Mode.** Los comportamientos se describen según el código.
+> Estado verificado el 2026-09-30, después de la integración del parkour (ver §5): los scripts
+> compilan sin errores, `PlayerAnimationSetup` valida Avatars, material, clips, Missing Scripts y
+> poses en batch mode, y **`ParkourPlayModeTest` lo prueba en Play Mode real** con teclado simulado:
+> 36/36 comprobaciones (F32). Lo que la prueba no cubre (cómo se ve y se siente) falta revisarlo
+> jugando.
 
 ---
 
@@ -16,16 +18,16 @@
 | # | Feature | GDD | Estado |
 |---|---|---|---|
 | F01 | Movimiento en tercera persona | §5.1 | ✅ |
-| F02 | Sprint | §5.2 | 🟡 automático, no Shift |
-| F03 | Salto | §5.3 | ✅ |
-| F04 | Vault | §5.4 | 🟡 automático, no Espacio |
+| F02 | Sprint | §5.2 | ✅ |
+| F03 | Salto y caída | §5.3 | ✅ |
+| F04 | Vault | §5.4 | ✅ |
 | F05 | Ledge grab / climb | — | ⚠️ Fuera del GDD (se conserva, P2) |
-| F07 | Slide | — | ⚠️ Fuera del GDD (se conserva, P2) |
-| F08 | Esquivar | §5.5 | 🟡 sin dirección, tecla E |
-| F09 | Ataque ligero | §5.6 | 🟡 |
-| F10 | Ataque fuerte | §5.7 | 🟡 |
+| F07 | Slide | — | ⚠️ Fuera del GDD (se conserva, P2; tecla C) |
+| F08 | Esquivar | §5.5 | ✅ |
+| F09 | Ataque ligero | §5.6 | ✅ |
+| F10 | Ataque fuerte | §5.7 | 🟡 sin retroceso, animación placeholder |
 | F11 | Combo | §5.9 | 🟡 |
-| F12 | Bloqueo | §5.8 | 🟡 no reduce daño |
+| F12 | Bloqueo | §5.8 | ✅ |
 | F13 | Vida, daño e i-frames | §5.11 | 🟡 |
 | F14 | Regeneración de vida | §5.11 | ⬜ |
 | F15 | Caída mortal | §5.11–5.12 | ⬜ |
@@ -35,14 +37,16 @@
 | F19 | Checkpoints, muerte y reaparición | §5.13, §6 | ⬜ |
 | F20 | Guardado | §26 | ⬜ |
 | F21 | Cámara al hombro | §15 | 🟡 sin control de ratón ni shake |
-| F22 | Input | §14 | 🟡 lectura directa, controles distintos |
-| F23 | Animación | Pilar 2 | ⬜ |
+| F22 | Input | §14 | 🟡 lectura directa, sin gamepad |
+| F23 | Animación | Pilar 2 | 🟡 clips provisionales |
 | F24 | Spawning y object pooling | (técnico) | ✅ |
 | F26 | Menú, pausa, flujo de escenas | §16–§17 | ⬜ |
 | F27 | Niveles y mundos | §9–§10 | ⬜ solo blockout `Level-1` |
 | F28 | Audio | §23 | ⬜ |
 | F29 | Feedback de daño (sin HUD) | §16 | ⬜ |
 | F30 | Herramientas de Editor | (técnico) | ✅ |
+| F31 | Auto step | (técnico) | ✅ |
+| F32 | Circuito de parkour y pruebas automáticas | (técnico) | ✅ |
 
 IDs eliminados (no se reutilizan): **F06** wall jump (eliminado el 2026-09-30, P2/P8) y **F25**
 sistema de XP (eliminado el 2026-09-29, P3). Estamina y HUD nunca tuvieron ficha y también se
@@ -57,15 +61,12 @@ todavía falta implementar.
 | Tema | GDD final | Código actual |
 |---|---|---|
 | Nombre | Awakened Warrior | `warrior-woke` / `WarriorWoke` |
-| Sprint ✔ P1 | Mantener Shift, +40 % | Automático tras 3 s corriendo; 8 → 11.5 (+43.75 %) |
-| Shift ✔ P1 | Sprint | Slide |
-| Vault ✔ P1 | Espacio cerca del obstáculo | Automático al correr contra un obstáculo bajo |
-| Parkour | Solo salto, sprint y vault (§28) | Además: ledge grab/climb y slide (se conservan por decisión P2). El wall jump se eliminó |
-| Ataque ligero ✔ P1 | J | Clic izquierdo |
-| Ataque fuerte ✔ P1 | K | Clic derecho |
-| Bloqueo ✔ P1 | Mantener L, −70 %, solo frontal | Mantener F, **sin reducción real** (la constante ya dice 70 %, pero nadie la lee) |
-| Esquiva ✔ P1 | Q + dirección | E, siempre hacia `transform.forward` (el cooldown de 1 s sí se aplica) |
-| Recoger arma ✔ P1 | E | No existe (E es esquivar) |
+| Caminar / correr | "Caminar / correr" con WASD | WASD = correr a 5 m/s, acelerando y frenando de forma gradual (el blend pasa por caminar y trotar) (P12) |
+| Caminar hacia atrás | No lo define | S sin sprint retrocede mirando al frente a 1.5 m/s (P16) |
+| Parkour | Solo salto, sprint y vault (§28) | Además: ledge grab/climb y slide (se conservan por decisión P2; slide con C mientras se esprinta) y auto step (movimiento base). El wall jump se eliminó |
+| Ataque fuerte | Patada (desarmado) | Animación de ataque con arma de una mano como placeholder (no hay clip de patada) |
+| Recoger arma ✔ P1 | E | No existe (E no hace nada todavía) |
+| Pausa | ESC | No existe |
 | Combo | J → J → K, reinicio a los 0.5 s | Hasta 3 ligeros y cierre con pesado dentro de la ventana de 0.25–0.5 s |
 | Regeneración | Sí | No |
 | Enemigos ✔ P4 | Arquero, guerrero ligero, guerrero pesado; 3D; zona asignada | Un `Enemy` genérico sin tipos del GDD; 2.5D; patrulla en X |
@@ -82,122 +83,159 @@ Dependencias · Consideraciones técnicas · Falta**.
 - **Archivos:** `Player/PlayerMovement.cs`, `Player/Player.cs`, `Player/PlayerInputHandler.cs`,
   `States/PlayerGroundedStates.cs` (`Idle`, `Run`).
 - **Cómo funciona:** el input (−1..1 por eje) se proyecta sobre el forward y el right aplanados de
-  la cámara para obtener `MoveDirection`. `Run` escribe `Rb.linearVelocity` =
-  `MoveDirection × BaseSpeed (8)`, conservando Y. El personaje gira con `Mathf.SmoothDampAngle`
-  (`turnSmoothTime` 0.12 s). `Idle` pone la velocidad horizontal en 0.
+  la cámara para obtener `MoveDirection`. `Run` lleva la velocidad horizontal hacia
+  `MoveDirection × BaseSpeed (5)` con `AccelerateHorizontal` (12 m/s² al acelerar, 16 m/s² al
+  frenar), conservando Y; `Idle` frena hasta 0 con la misma desaceleración. Así el blend
+  `Locomotion` pasa por Walk y Jog al arrancar y al detenerse. El personaje gira con
+  `Mathf.SmoothDampAngle` (`turnSmoothTime` 0.12 s).
+- **Caminar hacia atrás (P16):** con input hacia atrás (S o diagonales) y sin sprint,
+  `IsBackpedaling` es verdadero: `Run` usa `BackpedalSpeed` (1.5 m/s) y el cuerpo mira al frente de
+  la cámara en lugar de girar, así que la cámara no da media vuelta. `PlayerAnimator` manda `Speed`
+  negativa y el blend reproduce *RunBackward* (LowPoly) a ×0.6. Con Shift gira y esprinta normal.
+  Probado: retrocede 1.72 m en 1.2 s sin girar (0°).
 - **Cómo se implementó:** el proyecto nació 2.5D (Z congelado, un eje). En la sesión del 27-sep
   se migró a 3D: `RigidbodyConstraints.FreezeRotation`, `VerticalMove` en `IInputProvider` y
   `SetVelocity(Vector3, float)`. La rotación empezó con `RotateTowards` a 720°/s, pero la cámara
   giraba demasiado brusco, así que se cambió a `SmoothDampAngle`.
 - **Dependencias:** `Camera.main` (si no hay, usa los ejes del mundo), `GroundChecker`.
-- **Consideraciones:** la lógica de estados corre en el paso de física (50 Hz). La velocidad se
-  asigna directamente, por lo que el Rigidbody no acelera.
-- **Falta:** bloquear el movimiento al morir o durante animaciones de daño (GDD); animaciones de
-  locomoción.
+- **Consideraciones:** la lógica de estados corre en el paso de física (50 Hz). Probado: a 0.1 s
+  del arranque va a 1.2 m/s y llega a 5 m/s; al soltar, a 0.12 s va a 3.1 m/s y se detiene.
+- **Animaciones:** RunBackward (LowPoly) · Idle (LowPoly) · Walk, Jog Forward, Run (DPS) · Sprint
+  (LowPoly), en un blend 1D por `Speed` (`arquitectura.md` §5.10).
+- **Falta:** bloquear el movimiento al morir o durante animaciones de daño (GDD).
 
-### F02 — Sprint 🟡
+### F02 — Sprint ✅
 - **Objetivo:** +~40 % de velocidad manteniendo Shift; se cancela al recibir daño, bloquear o
   atacar (GDD §5.2).
-- **Archivos:** `PlayerGroundedStates.cs` (`PlayerIdleState`, `PlayerRunState`),
-  `PlayerMovement.cs` (`SprintSpeed` 11.5, `SprintActivationTime` 3).
-- **Cómo funciona hoy:** tras 3 s continuos en `Run`, `IsSprint = true`. Se apaga al atacar,
-  bloquear, esquivar, deslizarse, soltar la dirección y al entrar a `Idle` (por ejemplo al
-  aterrizar). **Se conserva** en `Jump` (salta más lejos, GDD §5.2) y en `Vault` (mantiene el
-  impulso, GDD §5.4).
-- **Cómo se implementó:** antes `Run.Exit` apagaba el sprint, así que el salto lo perdía aunque el
-  código de `Jump` lo leyera. El 2026-09-30 se movió el reinicio a `Idle.Enter` y a las salidas
-  explícitas. Ese mismo día se eliminó la estamina (P7), que limitaba este sprint.
-- **Falta:** acción de sprint mantenido (Shift), `SprintSpeed = BaseSpeed × 1.4` y cancelarlo al
-  recibir daño. Aprobado en P1, por implementar.
+- **Archivos:** `PlayerInputHandler.cs` (`IsSprintHeld`), `PlayerMovement.cs` (`SprintMultiplier`
+  1.4, `SprintSpeed`, `CanSprint`, `CancelSprint`), `PlayerGroundedStates.cs` (`PlayerRunState`).
+- **Cómo funciona:** en `Run`, `IsSprint = CanSprint` en cada tick: Shift mantenido y sprint no
+  cancelado. Velocidad = `BaseSpeed × 1.4` (5 → 7 m/s). Atacar, bloquear o recibir daño
+  (`HealthSystem.OnDamageReceived`) llaman `CancelSprint()` y el sprint no vuelve hasta soltar Shift.
+  **Se conserva** en `Jump`, `Fall` y `Vault` (GDD §5.2, §5.4). La animación pasa de Run a Sprint en
+  el blend tree `Locomotion`.
+- **Cómo se implementó:** el auto-sprint (3 s corriendo) se reemplazó el 2026-09-30 por Shift
+  mantenido (P1). Shift era la tecla del slide, que pasó a C.
 
-### F03 — Salto ✅
-- **Archivos:** `PlayerAirStates.cs` (`PlayerJumpState`).
-- **Cómo funciona:** solo desde el suelo (`IsGrounded`). `Enter` aplica `JumpSpeed` (7) en Y y
-  conserva la velocidad horizontal. En el aire hay control total con `MoveDirection`. Al aterrizar
-  (`vy ≤ 0` + suelo) pasa a `Idle`. También detecta cornisas (F05). Si se salta sprintando,
-  conserva la velocidad de sprint (F02).
-- **Consideraciones:** no hay coyote time ni jump buffer. Un trigger de salto se consume en un solo
-  tick de física. No hay estado de caída: salir de una orilla caminando no entra a `Jump`
-  (`arquitectura.md` T13).
+### F03 — Salto y caída ✅
+- **Archivos:** `PlayerAirStates.cs` (`PlayerJumpState`, `PlayerFallState`).
+- **Cómo funciona:** el salto solo sale del suelo (`IsGrounded`). `Jump.Enter` aplica `JumpSpeed`
+  (7) en Y y conserva la velocidad horizontal. En el aire hay control total con `MoveDirection`. Al
+  llegar al apex (`vy ≤ 0`) pasa a `Fall`, o a `Idle` si ya está en el suelo. `Idle` y `Run` pasan a
+  `Fall` si llevan más de 0.15 s sin suelo (`AirTime > FallGraceTime`), por ejemplo al salir de una
+  orilla. `Fall` detecta cornisas y aterriza en `Run` (con input) o `Idle`. Si se salta o cae
+  sprintando, conserva la velocidad de sprint (F02). Animaciones: Jump_Up (LowPoly) y Fall A Loop
+  (DPS); al aterrizar tras más de 0.35 s de caída se ve *Falling To Landing* (sin input) o
+  *Land To Run Forward* (con input), solo visual (P19).
+- **Cómo se implementó:** el 2026-09-30 se agregó `PlayerFallState` (resuelve T13, P13) y, en la
+  integración del parkour, el aterrizaje.
+- **Consideraciones:** no hay coyote time ni jump buffer. Espacio junto a un obstáculo bajo hace
+  vault en lugar de saltar (F04).
 
-### F04 — Vault 🟡
+### F04 — Vault ✅
 - **Objetivo:** pasar obstáculos bajos manteniendo el impulso, con Espacio (GDD §5.4).
 - **Archivos:** `PlayerParkourStates.cs` (`PlayerVaultState`), `EnvironmentChecker.cs`
-  (`IsObstacleVaultable`), `PlayerGroundedStates.cs` (transición desde `Run`).
-- **Cómo funciona hoy:** en `Run`, si el raycast del centro golpea y el de la cabeza no (en
-  `obstacleLayer` = Obstacle), entra a `Vault` **sin pulsar nada**. `Vault` pone el cuerpo
-  kinemático y lo mueve con `Rb.MovePosition` en arco: 2 m hacia adelante, 1 m de altura, 0.4 s.
-  Luego vuelve a `Run` conservando el sprint.
-- **Cómo se implementó:** originalmente con `Vector3.right`/`left` (2.5D). El 29-sep (commit
-  `f09a2a3`) pasó a `transform.forward`, con pre-filtro `OverlapSphereNonAlloc`.
-- **Consideraciones:** la distancia fija de 2 m no mide la profundidad del obstáculo, así que puede
-  aterrizar dentro de uno profundo. Solo detecta objetos en layer `Obstacle`.
-- **Falta:** requerir Espacio, validar la profundidad y altura del obstáculo (`vaultHeightCheck`
-  existe pero no se usa, T14) y animación.
+  (`TryFindVault`), `VaultInfo.cs`, `PlayerGroundedStates.cs` (`Idle` y `Run`),
+  `PlayerAnimator.cs` / `PlayerAnimatorIK.cs` (IK de la mano).
+- **Cómo funciona:** en `Idle` o `Run`, Espacio llama `PlayerVaultState.TryStart`: si
+  `TryFindVault` encuentra delante (en la dirección del input o del frente) un obstáculo en layer
+  Obstacle de 0.45–1.2 m de alto y hasta 1.5 m de profundidad, con suelo detrás, entra a `Vault`;
+  si no, salta. `Vault` gira hacia el obstáculo, pone el cuerpo kinemático y lo lleva en 0.6 s del
+  punto de inicio al de aterrizaje (0.6 m detrás de la cara trasera), con un arco extra si el
+  obstáculo supera la altura que ya levanta la animación. Al salir conserva el impulso (velocidad
+  de correr o de sprint) y pasa a `Run` o `Idle`. La mano izquierda se apoya en la cima con IK,
+  ponderado por la curva `LHandCurve` del clip.
+- **Animación:** *Vault1* (VaultFence) del Dynamic Parkour System, acelerada a 0.6 s.
+- **Cómo se implementó (2026-09-30):** se adaptó `VaultObstacle` del DPS (P15, P17), midiendo el
+  obstáculo con rayos en lugar de su escala y usando layers en lugar de tags. Resuelve T14
+  (`vaultHeightCheck` ahora es la altura máxima). Probado en el circuito: obstáculos de 0.6 m,
+  1.0 m y 1.1 m × 1.2 m de ancho; el de 1.6 m provoca un salto.
+- **Consideraciones:** el cuerpo es kinemático durante el vault, así que no choca con nada en esos
+  0.6 s; el aterrizaje se comprueba antes de empezar.
 
 ### F05 — Ledge grab / climb ⚠️ Fuera del GDD
 - **Archivos:** `PlayerParkourStates.cs` (`LedgeGrab`, `LedgeClimb`), `EnvironmentChecker.IsLedgeDetected`.
-- **Cómo funciona:** en `Jump`, si centro y cabeza tocan pared y un raycast hacia abajo encuentra
-  la esquina, el cuerpo queda kinemático colgado (offset 0.4 atrás, 1 abajo). Espacio sube en
-  0.5 s (primero vertical, luego horizontal). Presionar la dirección opuesta
-  (`Dot < −0.5`) suelta.
+- **Cómo funciona:** en `Jump` o `Fall`, si centro y cabeza tocan pared y un raycast hacia abajo
+  encuentra la esquina, el cuerpo queda kinemático colgado (offset 0.4 atrás, 1 abajo). Espacio sube
+  en 0.9 s (60 % vertical, 40 % horizontal) y termina de pie sobre la cornisa. Presionar la
+  dirección opuesta (`Dot < −0.5`) suelta y pasa a `Fall`.
+- **Animaciones (DPS):** *Idle To Braced Hang* → *Hanging Idle* (colgado) y *Braced Hang To Crouch*
+  (subida).
+- **Corrección del 2026-09-30:** la subida dejaba el centro del torso a 0.1 m sobre la cornisa, con
+  los pies ~0.9 m dentro del muro; ahora termina a media altura del cuerpo sobre la cima. Probado:
+  queda de pie a 3.0 m sobre la losa en el muro de 3.0 m. Los muros deben ser más altos que lo que
+  sube un salto (~2.5 m), o el jugador cae encima en lugar de colgarse.
 - **Nota:** el GDD §28 limita el parkour a salto, sprint y vault, pero el equipo decidió
   **conservarlo activo** (P2).
 
 ### F07 — Slide ⚠️ Fuera del GDD
 - **Archivos:** `PlayerGroundedStates.cs` (`PlayerSlideState`).
-- **Cómo funciona:** Shift en `Run` reduce el collider al 50 % y avanza a `SlideSpeed` 14 por
-  0.7 s. No se levanta si hay techo (`HasCeilingOverhead`).
-- **Nota:** se conserva activo (P2). Hoy usa Shift, que el GDD asigna al sprint; al aplicar P1
-  necesita una tecla nueva (**por definir**).
+- **Cómo funciona:** C en `Run` **mientras se esprinta** reduce el collider al 50 % y avanza a
+  `SlideSpeed` 9 por 0.8 s (antes 14 por 0.7 s). No se levanta si hay techo
+  (`HasCeilingOverhead`), así que pasa bajo barras y túneles por física. Animación: *Running
+  Slide* del Dynamic Parkour System. Probado: pasa bajo la barra de 1.2 m del circuito.
+- **Nota:** se conserva activo (P2). Pasó de Shift a C el 2026-09-30 (P1). Del slide del DPS solo se
+  tomó la animación: su detección por tags es menos robusta que la reducción del collider.
 
-### F08 — Esquivar 🟡
+### F08 — Esquivar ✅
 - **Objetivo:** Q + dirección, 0.5 s, 0.2 s invulnerable, cooldown 1 s. No durante un ataque ni
   una animación de daño (GDD §5.5).
 - **Archivos:** `PlayerCombatStates.cs` (`PlayerDodgeState`), `HealthSystem.ActivateIFrames`.
-- **Cómo funciona hoy:** E desde `Idle` o `Run` (solo en el suelo y si `CanDodge`: pasó 1 s desde
-  la última esquiva). Dash a 12 u/s hacia `transform.forward` durante 0.5 s y llama
-  `ActivateIFrames(0.2)`. Luego va a `Run` o `Idle`. El cooldown es un campo de instancia.
-- **Problemas:** la dirección no usa el input.
-- **Falta:** esquivar en la dirección del input, tecla Q y animación.
+- **Cómo funciona:** Q desde `Idle` o `Run` (solo en el suelo y si `CanDodge`: pasó 1 s desde la
+  última esquiva). La dirección es el input de movimiento relativo a la cámara en ese momento (sin
+  input, hacia el frente) y no cambia durante la esquiva. Dash a 12 u/s por 0.5 s con
+  `ActivateIFrames(0.2)`. El cuerpo no gira mientras esquiva, así que `LocalDirection` elige el roll
+  (adelante, atrás, izquierda, derecha) en el blend tree 2D `Dodge`. Luego va a `Run` o `Idle`.
+- **Consideraciones:** no se puede esquivar desde un ataque porque los estados de ataque no tienen
+  esa transición. Cuando existan animaciones de daño (F29), habrá que bloquearla también ahí.
 
-### F09 — Ataque ligero 🟡
+### F09 — Ataque ligero ✅
 - **Objetivo:** golpe (J), daño 10 desarmado, hasta 3 encadenados, ~0.25 s (GDD §5.6).
 - **Archivos:** `PlayerCombatStates.cs` (`PlayerLightAttackState`), `Core/Combat/Hitbox.cs`,
   `Core/Combat/WeaponHolder.cs` (opcional).
-- **Cómo funciona:** clic izquierdo. El personaje se planta (velocidad horizontal 0) y
-  `Hitbox.Activate()` pega **en el primer tick** a los `IDamageable` dentro de la esfera (radio 0.6,
-  centrada 0.6 m al frente del torso, layer Enemy). Daño desarmado 10 (`WeaponHolder`). Dura
-  0.25 s y luego queda una ventana hasta 0.5 s para encadenar.
-- **Consideraciones:** un clic dentro de los primeros 0.25 s **se pierde**, porque el trigger se
-  consume en el tick siguiente y el estado todavía no escucha. Los i-frames del enemigo (0.2 s)
-  son menores que la cadencia de golpes (≥ 0.25 s), así que cada golpe del combo hace daño.
-- **Falta:** tecla J, buffer de input para el combo, sincronizar el hit con la animación.
+- **Cómo funciona:** J. Al empezar, el personaje gira hacia el input (si hay) y avanza a 3 m/s
+  durante 0.12 s (impulso); luego se planta. `Hitbox.Activate()` pega a los 0.1 s, cuando el puño
+  se extiende en la animación, a los `IDamageable` dentro de la esfera (radio 0.6, centrada 0.6 m
+  al frente del torso, layer Enemy). Daño desarmado 10 (`WeaponHolder`). Dura 0.25 s y luego queda
+  una ventana hasta 0.5 s para encadenar. **Las pulsaciones de J o K durante el golpe se guardan
+  (buffer)** y se usan al abrir la ventana.
+- **Consideraciones:** los i-frames del enemigo (0.2 s) son menores que la cadencia de golpes
+  (≥ 0.25 s), así que cada golpe del combo hace daño. Probado: un segundo J pulsado a los 0.07 s se
+  encadena.
+- **Animación:** alterna PunchRight (golpes 1 y 3) y PunchLeft (golpe 2), acelerados a 0.5 s, con
+  cross-fade de 0.05 s.
+- **Cómo se implementó:** impulso, giro, sincronización del golpe y buffer el 2026-09-30 (P18).
 
 ### F10 — Ataque fuerte 🟡
 - **Objetivo:** patada (K), daño 20 desarmado, 0.8 s, retroceso, vulnerable si falla (GDD §5.7).
 - **Archivos:** `PlayerCombatStates.cs` (`PlayerHeavyAttackState`).
-- **Cómo funciona:** clic derecho. Se planta, activa la hitbox a los 0.1 s con daño 20 desarmado
-  (`WeaponHolder`) y dura 0.8 s sin cancelación.
+- **Cómo funciona:** K. Gira hacia el input, avanza a 4 m/s durante 0.15 s y se planta; activa la
+  hitbox a los 0.3 s (pico del golpe en la animación) con daño 20 desarmado (`WeaponHolder`) y dura
+  0.8 s sin cancelación; al terminar pasa a `Run` si hay input o a `Idle`. Animación:
+  MeleeAttack_OneHanded acelerada a 0.8 s, **placeholder** porque no hay clip de patada (T17).
 - **Problemas:** el knockback (`WeaponHolder.GetKnockback`) no se aplica.
-- **Falta:** tecla K, retroceso y animación.
+- **Falta:** retroceso y animación de patada.
 
 ### F11 — Combo 🟡
 - **Objetivo:** J → J → K, reinicio si pasan más de 0.5 s (GDD §5.9).
 - **Cómo funciona hoy:** `LightAttack` puede volver a entrar hasta 3 veces (`_chainCount`) o pasar
-  a `HeavyAttack` si el input llega entre 0.25 s y 0.5 s desde el inicio del golpe. Permite
-  J → K, J → J → K y J → J → J → K. El GDD define exactamente J → J → K.
-- **Falta:** definir si se restringe a J → J → K, buffer de input y que con arma use las
-  animaciones del arma.
+  a `HeavyAttack` con J o K pulsados durante el golpe (buffer) o dentro de la ventana de 0.25 s a
+  0.5 s. Permite J → K, J → J → K y J → J → J → K. El GDD define exactamente J → J → K. Probado:
+  J, J, K produce dos golpes ligeros y el fuerte, con 1.4 m de avance en total.
+- **Falta:** definir si se restringe a J → J → K y que con arma use las animaciones del arma.
 
-### F12 — Bloqueo 🟡
+### F12 — Bloqueo ✅
 - **Objetivo:** mantener L, −70 % de daño **solo frontal**, reduce la movilidad (GDD §5.8).
-- **Archivos:** `PlayerCombatStates.cs` (`PlayerBlockState`).
-- **Cómo funciona hoy:** mantener F inmoviliza al personaje. Un clic izquierdo mientras bloquea
-  contraataca (`LightAttack`). Expone `DamageReductionMultiplier = 0.3` (−70 %, GDD), pero **nadie
-  lo lee**, así que el daño recibido no cambia.
-- **Falta:** conectar la reducción en `HealthSystem` (70 %), el chequeo frontal y la tecla L. El
-  diseño propuesto está en `arquitectura.md` §7.
+- **Archivos:** `PlayerCombatStates.cs` (`PlayerBlockState`), `Core/Interfaces/IDamageModifier.cs`,
+  `HealthSystem.cs`, `PlayerMovement.cs`.
+- **Cómo funciona:** mantener L inmoviliza al personaje y cancela el sprint. Mientras bloquea,
+  `HealthSystem.TakeDamage` pasa el daño por `IDamageModifier` (`PlayerMovement` →
+  `PlayerBlockState.ModifyIncomingDamage`): si la fuente está a ±60° del frente, recibe el 30 %
+  (redondeado); por la espalda o los lados, el daño completo. J mientras bloquea contraataca.
+  Animación: transición Ch45 a guardia → BlockingLoop → transición Ch45 de vuelta.
+- **Cómo se implementó:** 2026-09-30 (resuelve T4) con el diseño de `arquitectura.md` §7.
+- **Consideraciones:** "reduce la movilidad" se interpreta como inmóvil, igual que antes. No se ha
+  probado contra enemigos porque ninguno hace daño todavía (T2).
 
 ### F13 — Vida, daño e i-frames 🟡
 - **Objetivo:** 100 HP, nunca fuera de [0, máx], 0.5 s de invulnerabilidad tras un golpe,
@@ -221,7 +259,7 @@ Dependencias · Consideraciones técnicas · Falta**.
 - **Objetivo:** muerte instantánea al caer desde gran altura o en un barranco (GDD §5.11, §5.12).
 - **Plan:** medir la altura de la caída + trigger `KillZone` que llama `HealthSystem.InstantKill()`
   (el método ya existe). El GDD no define la altura; hay que acordarla. Para medir caídas sin
-  salto hace falta un estado de caída (T13).
+  salto ya existe `PlayerFallState` (F03): la comprobación va en su aterrizaje.
 
 ### F16 — Sistema de armas 🟡
 - **Objetivo:** recoger con E katana (20/35), yari (18/30, más alcance) o kanabo (30/50, más
@@ -283,17 +321,71 @@ Dependencias · Consideraciones técnicas · Falta**.
 
 ### F22 — Input 🟡
 - **Archivos:** `Player/PlayerInputHandler.cs`, `Core/Interfaces/IInputProvider.cs`.
-- **Cómo funciona:** lee `Keyboard.current`/`Mouse.current` en `Update` y bufferiza los triggers.
-  Hay `InputActionReference` opcionales, todos vacíos. "Last input wins" si se presionan direcciones
-  opuestas. No hay asset `.inputactions` (la plantilla sin uso se eliminó el 30-sep).
-- **Falta:** un asset `.inputactions` con los bindings del GDD + gamepad (P1, P6) y las acciones
-  Sprint, Interact (E), Look y Pause.
+- **Cómo funciona:** lee `Keyboard.current` en `Update` y bufferiza los triggers, con los
+  bindings del GDD §14 (P1): WASD/flechas, Shift (sprint mantenido), Espacio, J, K, L (mantener),
+  Q y C (slide). Hay `InputActionReference` opcionales (incluido Sprint), todos vacíos. "Last input
+  wins" si se presionan direcciones opuestas. No hay asset `.inputactions`.
+- **Falta:** un asset `.inputactions` con gamepad (P6) y las acciones Interact (E), Look y Pause.
 
-### F23 — Animación ⬜
-- Hay clips `LowPoly` y un `LowPolyHumanAnimator.controller` con solo `Idle`. El `character.fbx`
-  se importa como Humanoid si el rig lo permite, pero nada está conectado. Los estados tienen
-  `// TODO: trigger animation`. El GDD lo pone como pilar (2) y el riesgo §28 pide reutilizar
-  animaciones.
+### F23 — Animación 🟡
+- **Objetivo:** que el personaje se vea correctamente y anime cada acción (GDD pilar 2; el riesgo
+  §28 pide reutilizar animaciones).
+- **Archivos:** `Player/PlayerAnimator.cs`, `Player/PlayerAnimatorIds.cs`,
+  `Characters/Player/PlayerAnimator.controller`, `Characters/Player/Textures/`,
+  `Characters/Player/Animations/`, `Editor/PlayerAnimationSetup.cs`.
+- **Cómo funciona:** ver `arquitectura.md` §5.10. La FSM avisa cada cambio de estado y
+  `PlayerAnimator` hace cross-fade (0.15 s; 0.05 s en ataques, aterrizajes y parkour) al estado
+  equivalente del Animator; `Speed` (con signo) mueve el blend WalkBackward → Idle → Walk → Jog →
+  Run → Sprint. Sin root motion. 17 estados, 4 parámetros, IK Pass para la mano del vault.
+- **Cómo se implementó (2026-09-30):**
+  - El personaje se veía sin textura porque Unity no usa las texturas embebidas en un FBX hasta
+    extraerlas. Se extrajeron y el material del FBX ahora tiene Base Map y Normal Map.
+  - La luz direccional de `Level-1` estaba a 0.3; se subió a 1.
+  - Clips Humanoid `LowPoly` retargeteados a Ch45 y dos transiciones Ch45 (P11).
+  - La validación en batch muestrea cada clip sobre Ch45 (`AnimationMode`) y comprueba que mueve el
+    rig sin poses rotas.
+  - Integración del parkour (2026-09-30): 11 clips del Dynamic Parkour System (MIT) para
+    locomoción, caída, aterrizaje, vault, slide y cornisa; *RunBackward* para caminar hacia atrás.
+- **Falta:** clip propio de patada y una caminata hacia atrás real (T17); hit y muerte (con
+  F19/F29); calibrar Run/Sprint contra la zancada (T16); confirmar la licencia de `LowPoly` (T15).
+
+### F31 — Auto step ✅
+- **Objetivo:** que los escalones y bordillos bajos no detengan la carrera (movimiento base del
+  Dynamic Parkour System; no es una mecánica del GDD).
+- **Archivos:** `PlayerMovement.cs` (`TryAutoStep`, `StepHeight`, `stepLayer`),
+  `PlayerGroundedStates.cs` (`Run.PhysicsUpdate`).
+- **Cómo funciona:** en `Run`, si un rayo a 5 cm del suelo choca en la dirección de movimiento, otro
+  a `StepHeight` (0.4 m) no choca y la cima está a menos de 0.4 m, sube el cuerpo hasta la cima.
+  Ignora pendientes (normal con `|y| > 0.3`) y lo que sea más alto (muros, obstáculos de vault).
+- **Cómo se implementó:** adaptado de `AutoStep` del DPS el 2026-09-30 (P17). Probado: sube cinco
+  escalones de 0.25 m hasta la plataforma de 1.25 m.
+
+### F32 — Circuito de parkour y pruebas automáticas ✅
+- **Objetivo:** probar cada movimiento de forma aislada y combinada, a mano y automáticamente.
+- **Archivos:** `Editor/ParkourTestCircuitBuilder.cs`, `Editor/ParkourPlayModeTest.cs`,
+  `Assets/Tests/ParkourCircuit/Materials/`, objeto `ParkourTestCircuit` de `Level-1`.
+- **Circuito** (losa propia con top en y = 0.55; el `Spawner` está en su entrada, P20). Cinco
+  carriles hacia −Z con cartel a la entrada:
+
+  | Carril | x | Obstáculos | Prueba |
+  |---|---|---|---|
+  | VAULT | −8 | 0.6 m · 1.0 m · 1.1 m de 1.2 m de ancho · 1.6 m (demasiado alto) | Espacio cerca del obstáculo |
+  | SLIDE | −3 | Barra a 1.2 m (1 m) · túnel a 1.2 m (4 m) | Shift + C |
+  | AUTO STEP | 2 | 5 escalones de 0.25 m → plataforma de 1.25 m · bordillo de 0.35 m | Caminar |
+  | LEDGE | 7 | Muros de 3.0 m y 3.5 m, 2 m de fondo | Saltar contra el muro, Espacio para subir |
+  | COMBINADO | 12 | Bordillo → vault 1.0 m → barra de slide → muro de 3.0 m | Todo seguido |
+
+  Pasillo libre en x = 17 para movimiento general. Regenerar: **Tools → Warrior Woke → Construir
+  Circuito de Parkour** (también valida que nada de la escena lo invada).
+- **Prueba automática** (**Probar Personaje en Play Mode**): entra a Play Mode, agrega un teclado
+  virtual del Input System (pasa por `PlayerInputHandler` igual que el teclado real) y comprueba:
+  spawn y acceso al circuito; Idle en el suelo; aceleración, carrera a 5 m/s y frenado; caminar
+  hacia atrás sin girar; sprint a 7 m/s; salto, caída y aterrizaje; los tres vaults y el salto ante
+  1.6 m; slide bajo la barra; auto step; agarrarse y subir la cornisa; combo J → J → K con buffer e
+  impulso; esquiva hacia atrás; bloqueo (6 de daño de frente, 20 por la espalda); cero errores en
+  consola. Resultado del 2026-09-30: **36/36**.
+- **Consideraciones:** no prueba la cámara con ratón (no existe), enemigos ni cómo se ven las
+  animaciones; eso se revisa jugando.
 
 ### F24 — Spawning y object pooling ✅
 - **Archivos:** `Core/Spawning/{ObjectPoolManager,Spawner,ReturnToPoolDelay}.cs`,
@@ -529,6 +621,43 @@ problema, la causa, la solución y el estado (formato del GDD §29 para bugs).
 | 2026-09-29 | `c576be0` | Axel | Decisiones P2 y P3: wall jump desactivado (transición comentada, código conservado) y sistema de XP eliminado (`PlayerXpSystem`, `IXpReceiver`, `EnemyData.xpReward`, la llamada en `Enemy.OnDeath` y comentarios de recompensa en `Looter`/`Brute`). Compilación verificada en batch mode sin errores. |
 | 2026-09-30 | `7f08719` | Angel | `PlayerStamina` (gasto por sprint) y `PlayerHUD` (barras de vida y estamina creadas en runtime). No se documentó y contradecía el GDD §5.2 y §16; se retiró en la entrada siguiente. |
 | 2026-09-30 | (ver `git log`) | Axel | Auditoría completa y limpieza contra el GDD (detalle abajo). Scripts compilados sin errores con el compilador de Unity (runtime y Editor). |
+| 2026-09-30 | (ver `git log`) | Axel | Personaje jugable: texturas, Animator, controles del GDD, sprint, caída, bloqueo y esquiva (detalle abajo). Validado en batch mode; falta Play Mode. |
+| 2026-09-30 | (ver `git log`) | Axel | Parkour con el Dynamic Parkour System, locomoción con aceleración, caminar hacia atrás, combate más dinámico, circuito y prueba en Play Mode (detalle abajo). 36/36 en Play Mode. |
+
+### Detalle — parkour y animaciones (2026-09-30)
+
+Formato del GDD §29: **problema → causa → solución → estado**.
+
+| Problema | Causa | Solución | Estado |
+|---|---|---|---|
+| El vault era automático y medía mal el obstáculo | Distancia fija de 2 m; `vaultHeightCheck` sin uso (T14) | Vault con Espacio y `TryFindVault` adaptado del DPS, con animación e IK de mano | ✅ |
+| Animaciones de parkour provisionales | No había clips de vault, slide ni cornisa | 11 clips del Dynamic Parkour System (MIT) | ✅ |
+| Cambio brusco Idle ↔ Run | La velocidad se asignaba de golpe | Aceleración/desaceleración + blend Walk y Jog | ✅ |
+| No había forma de retroceder sin girar | El personaje siempre mira hacia donde se mueve | `IsBackpedaling` + Speed con signo + RunBackward | ✅ |
+| La caminata Ch45 hacia atrás se veía agachada | El clip es una caminata agachada (cabeza a ~1.0 m de los pies) | Se usa *RunBackward* de LowPoly a ×0.6 | ✅ (T17) |
+| Ataques estáticos y J rápidos perdidos | El golpe se plantaba y aplicaba daño al instante; sin buffer | Impulso, giro hacia el input, daño sincronizado, buffer de combo | ✅ |
+| Subir la cornisa dejaba los pies dentro del muro | El destino era la esquina + 0.1 m | Destino a media altura del cuerpo sobre la cima | ✅ |
+| Los escalones detenían la carrera | No había auto step | `TryAutoStep` (DPS) | ✅ |
+| Los obstáculos del circuito quedaban hundidos | `Ground` es una cápsula (cúpula de 0.5 m) | Losa propia para el circuito; Ground documentado (T19) | ✅ |
+| Desde el spawn no se podía salir | `House_01_cyber` encierra el spawn original | `Spawner` en la entrada del circuito (P20, T20) | ✅ |
+| La primera prueba automática no pulsaba teclas | El ejecutor de la prueba no corría corrutinas anidadas | Pila de corrutinas en `ParkourPlayModeTest` | ✅ |
+
+### Detalle — personaje jugable (2026-09-30)
+
+Formato del GDD §29: **problema → causa → solución → estado**.
+
+| Problema | Causa | Solución | Estado |
+|---|---|---|---|
+| El personaje se veía azul / sin textura | Las 5 texturas de Ch45 venían embebidas en `character.fbx` y Unity no las usa hasta extraerlas: el material URP quedaba sin Base Map ni Normal Map. Además, la luz direccional estaba a 0.3 y casi toda la luz venía del cielo azul | Texturas extraídas a `Characters/Player/Textures/` (Normal como *Normal Map*); luz a 1 | ✅ |
+| Personaje sin animaciones | No había Animator Controller | `PlayerAnimator.controller` + `PlayerAnimator` dirigido por la FSM (P11, D10) | ✅ (clips provisionales, T17) |
+| Los FBX de animación Ch45 no se veían en Unity | Estaban en la raíz del repo, fuera de `Assets/` | Solo las 2 transiciones de guardia entraron a `Characters/Player/Animations/` (P11) | ✅ |
+| Controles distintos al GDD | Venían del diseño anterior | J/K/L/Q, Shift sprint, Espacio, slide en C (P1) | ✅ (faltan E y ESC) |
+| Sprint automático | Diseño anterior | Shift mantenido, +40 %, cancelado por daño/bloqueo/ataque (F02) | ✅ |
+| Velocidad de 8 m/s, demasiado alta para la animación | Valor heredado | `BaseSpeed` 5 (correr), sprint 7 (P12) | 🟡 por calibrar (T16) |
+| No había estado de caída (T13) | — | `PlayerFallState` | ✅ |
+| El bloqueo no reducía daño (T4) | Nadie leía el multiplicador | `IDamageModifier` en `HealthSystem`, −70 % solo frontal | ✅ |
+| La esquiva ignoraba la dirección | Usaba `transform.forward` | Dirección del input + roll direccional | ✅ |
+| La primera validación de poses daba siempre la misma altura | `Animator.Update` no evalúa el retarget en modo Editor | Se muestrea con `AnimationMode.SampleAnimationClip` | ✅ |
 
 ### Detalle — limpieza del 2026-09-30
 
@@ -579,4 +708,6 @@ Formato del GDD §29: **problema → causa → solución → estado**.
    Unity. Modelo: `Assets/Characters/Player/character.fbx` (antes `Protagonista.fbx`).
 5. **Suelo y punto de spawn:** el `Spawner` estaba en `(0, 40, −2.5)` sin suelo debajo. Se agregó
    `Ground` (100×100, top en Y = 0, layer Ground, `floors.mat`) y se bajó el `Spawner` a Y = 2.
+   *(Nota del 2026-09-30: en realidad `Ground` usa la malla Capsule, una cúpula de 0.5 m; ver
+   `arquitectura.md` T19.)*
    `initial_floor` (blockout viejo) nunca se colocó en esta escena; se eliminó el 30-sep.
