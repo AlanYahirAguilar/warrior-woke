@@ -1,7 +1,7 @@
 /// <summary>
 /// Defines the contract for input delivery in a 3D action-platformer.
 /// Follows Interface Segregation and Dependency Inversion principles.
-/// Sprint is handled internally by the state machine (auto-sprint), not by this contract.
+/// Bindings follow GDD §14 (decision P1); see PlayerInputHandler for the keyboard layout.
 /// </summary>
 public interface IInputProvider
 {
@@ -12,6 +12,9 @@ public interface IInputProvider
 
     /// <summary>Vertical axis input (-1f to 1f: back/forward, camera-relative).</summary>
     float VerticalMove { get; }
+
+    /// <summary>Sprint — Shift held (GDD §5.2). True while the key is held.</summary>
+    bool IsSprintHeld { get; }
 
     // ─── Parkour ─────────────────────────────────────────────────────────────────
 
@@ -29,16 +32,16 @@ public interface IInputProvider
 
     // ─── Combat ─────────────────────────────────────────────────────────────────
 
-    /// <summary>Light attack — Mouse1 (left click). True only on the frame it was pressed.</summary>
+    /// <summary>Light attack — J. True only on the frame it was pressed.</summary>
     bool IsLightAttackTriggered { get; }
 
-    /// <summary>Heavy attack — Mouse2 (right click). True only on the frame it was pressed.</summary>
+    /// <summary>Heavy attack — K. True only on the frame it was pressed.</summary>
     bool IsHeavyAttackTriggered { get; }
 
-    /// <summary>Block — F key held down. True while the key is held.</summary>
+    /// <summary>Block — L held down. True while the key is held.</summary>
     bool IsBlockHeld { get; }
 
-    /// <summary>Dodge — E key. True only on the frame it was pressed.</summary>
+    /// <summary>Dodge — Q (+ movement direction). True only on the frame it was pressed.</summary>
     bool IsDodgeTriggered { get; }
 
     /// <summary>Consumes the pending light attack trigger.</summary>

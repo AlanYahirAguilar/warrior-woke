@@ -35,12 +35,14 @@ public class HealthSystem : MonoBehaviour, IDamageable
 
     // ─── Runtime State ────────────────────────────────────────────────────────────
     private float _lastDamageTime = -999f;
+    private IDamageModifier _damageModifier;
 
     // ─── Lifecycle ───────────────────────────────────────────────────────────────
 
     private void Awake()
     {
-        CurrentHealth = maxHealth;
+        CurrentHealth   = maxHealth;
+        _damageModifier = GetComponent<IDamageModifier>();
     }
 
     // ─── Public API ──────────────────────────────────────────────────────────────
@@ -57,11 +59,15 @@ public class HealthSystem : MonoBehaviour, IDamageable
 
     /// <summary>
     /// Applies damage with iframes check. Clamps health to [0, MaxHealth].
+    /// An IDamageModifier on the same GameObject (e.g. the player's block) can reduce it first.
     /// </summary>
     public void TakeDamage(int amount, Vector3 source)
     {
         if (IsDead) return;
         if (IsInIFrames()) return;
+
+        if (_damageModifier != null)
+            amount = _damageModifier.ModifyIncomingDamage(amount, source);
 
         _lastDamageTime = Time.time;
         CurrentHealth   = Mathf.Clamp(CurrentHealth - amount, 0, maxHealth);

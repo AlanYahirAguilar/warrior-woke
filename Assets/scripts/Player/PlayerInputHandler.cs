@@ -3,14 +3,16 @@ using UnityEngine.InputSystem;
 
 /// <summary>
 /// Captures and buffers all player inputs for a free-roam 3D character controller.
-/// Input layout:
+/// Input layout (GDD §14, decision P1):
 ///   Movement  : W/A/S/D or Arrow Keys (camera-relative forward/back/strafe)
+///   Sprint    : Shift (held)
 ///   Jump      : Space
-///   Slide     : Left Shift
-///   LightAtk  : Mouse1 (left click)
-///   HeavyAtk  : Mouse2 (right click)
-///   Block     : F (held)
-///   Dodge     : E
+///   Slide     : C (while sprinting — outside the GDD, kept by decision P2)
+///   LightAtk  : J
+///   HeavyAtk  : K
+///   Block     : L (held)
+///   Dodge     : Q (+ movement direction)
+///   E is reserved for picking up weapons (GDD §5.10, not implemented yet).
 ///
 /// Follows SRP — this class only reads hardware input and exposes it via IInputProvider.
 /// Zero GC allocations per frame: no new() or string operations inside Update().
@@ -20,6 +22,7 @@ public class PlayerInputHandler : MonoBehaviour, IInputProvider
     // ─── Input Action References (optional — New Input System) ──────────────────
     [Header("Optional Input Action References")]
     [SerializeField] private InputActionReference moveActionReference;
+    [SerializeField] private InputActionReference sprintActionReference;
     [SerializeField] private InputActionReference jumpActionReference;
     [SerializeField] private InputActionReference slideActionReference;
     [SerializeField] private InputActionReference lightAttackActionReference;
@@ -30,6 +33,7 @@ public class PlayerInputHandler : MonoBehaviour, IInputProvider
     // ─── Buffered State ─────────────────────────────────────────────────────────
     private float _horizontalMove;
     private float _verticalMove;
+    private bool _isSprintHeld;
     private bool _isJumpTriggered;
     private bool _isSlideTriggered;
     private bool _isLightAttackTriggered;
@@ -40,6 +44,7 @@ public class PlayerInputHandler : MonoBehaviour, IInputProvider
     // ─── IInputProvider Properties ───────────────────────────────────────────────
     public float HorizontalMove => _horizontalMove;
     public float VerticalMove => _verticalMove;
+    public bool IsSprintHeld => _isSprintHeld;
     public bool IsJumpTriggered => _isJumpTriggered;
     public bool IsSlideTriggered => _isSlideTriggered;
     public bool IsLightAttackTriggered => _isLightAttackTriggered;
@@ -52,6 +57,7 @@ public class PlayerInputHandler : MonoBehaviour, IInputProvider
     private void OnEnable()
     {
         moveActionReference?.action?.Enable();
+        sprintActionReference?.action?.Enable();
         jumpActionReference?.action?.Enable();
         slideActionReference?.action?.Enable();
         lightAttackActionReference?.action?.Enable();
@@ -63,6 +69,7 @@ public class PlayerInputHandler : MonoBehaviour, IInputProvider
     private void OnDisable()
     {
         moveActionReference?.action?.Disable();
+        sprintActionReference?.action?.Disable();
         jumpActionReference?.action?.Disable();
         slideActionReference?.action?.Disable();
         lightAttackActionReference?.action?.Disable();
@@ -82,6 +89,13 @@ public class PlayerInputHandler : MonoBehaviour, IInputProvider
 
     private void ReadMovementInput()
     {
+        // Sprint — Shift (held, not triggered)
+        if (sprintActionReference?.action != null)
+            _isSprintHeld = sprintActionReference.action.IsPressed();
+        else
+            _isSprintHeld = Keyboard.current != null &&
+                            (Keyboard.current.leftShiftKey.isPressed || Keyboard.current.rightShiftKey.isPressed);
+
         if (moveActionReference?.action != null)
         {
             Vector2 move = moveActionReference.action.ReadValue<Vector2>();
@@ -135,15 +149,13 @@ public class PlayerInputHandler : MonoBehaviour, IInputProvider
             _isJumpTriggered = true;
         }
 
-        // Slide — Left Shift
+        // Slide — C
         if (slideActionReference?.action != null)
         {
             if (slideActionReference.action.WasPressedThisFrame())
                 _isSlideTriggered = true;
         }
-        else if (Keyboard.current != null &&
-                 (Keyboard.current.leftShiftKey.wasPressedThisFrame ||
-                  Keyboard.current.rightShiftKey.wasPressedThisFrame))
+        else if (Keyboard.current != null && Keyboard.current.cKey.wasPressedThisFrame)
         {
             _isSlideTriggered = true;
         }
@@ -151,48 +163,47 @@ public class PlayerInputHandler : MonoBehaviour, IInputProvider
 
     private void ReadCombatInput()
     {
-        var mouse = Mouse.current;
-        var kb    = Keyboard.current;
+        var kb = Keyboard.current;
 
-        // Light Attack — Mouse1
+        // Light Attack — J
         if (lightAttackActionReference?.action != null)
         {
             if (lightAttackActionReference.action.WasPressedThisFrame())
                 _isLightAttackTriggered = true;
         }
-        else if (mouse != null && mouse.leftButton.wasPressedThisFrame)
+        else if (kb != null && kb.jKey.wasPressedThisFrame)
         {
             _isLightAttackTriggered = true;
         }
 
-        // Heavy Attack — Mouse2
+        // Heavy Attack — K
         if (heavyAttackActionReference?.action != null)
         {
             if (heavyAttackActionReference.action.WasPressedThisFrame())
                 _isHeavyAttackTriggered = true;
         }
-        else if (mouse != null && mouse.rightButton.wasPressedThisFrame)
+        else if (kb != null && kb.kKey.wasPressedThisFrame)
         {
             _isHeavyAttackTriggered = true;
         }
 
-        // Block — F (held, not triggered)
+        // Block — L (held, not triggered)
         if (blockActionReference?.action != null)
         {
             _isBlockHeld = blockActionReference.action.IsPressed();
         }
         else
         {
-            _isBlockHeld = kb != null && kb.fKey.isPressed;
+            _isBlockHeld = kb != null && kb.lKey.isPressed;
         }
 
-        // Dodge — E
+        // Dodge — Q
         if (dodgeActionReference?.action != null)
         {
             if (dodgeActionReference.action.WasPressedThisFrame())
                 _isDodgeTriggered = true;
         }
-        else if (kb != null && kb.eKey.wasPressedThisFrame)
+        else if (kb != null && kb.qKey.wasPressedThisFrame)
         {
             _isDodgeTriggered = true;
         }

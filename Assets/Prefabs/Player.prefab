@@ -50,6 +50,7 @@ GameObject:
   - component: {fileID: 2155071560513528099}
   - component: {fileID: 5069361737474222998}
   - component: {fileID: 4417385296650123456}
+  - component: {fileID: 79228358685479468}
   m_Layer: 8
   m_Name: Player
   m_TagString: Player
@@ -149,15 +150,22 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 0e6a4d691d69cdb4dad8b3c9a237f303, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::PlayerMovement
-  BaseSpeed: 8
-  SprintSpeed: 11.5
-  SlideSpeed: 14
+  BaseSpeed: 5
+  SprintMultiplier: 1.4
+  SlideSpeed: 9
   JumpSpeed: 7
-  SlideDuration: 0.7
+  BackpedalSpeed: 1.5
+  Acceleration: 12
+  Deceleration: 16
+  SlideDuration: 0.8
   ceilingLayer:
     serializedVersion: 2
     m_Bits: 192
-  SprintActivationTime: 3
+  StepHeight: 0.4
+  stepLayer:
+    serializedVersion: 2
+    m_Bits: 192
+  FallGraceTime: 0.15
   faceMovementDirection: 1
   turnSmoothTime: 0.12
   moveInputDeadzone: 0.1
@@ -174,6 +182,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::PlayerInputHandler
   moveActionReference: {fileID: 0}
+  sprintActionReference: {fileID: 0}
   jumpActionReference: {fileID: 0}
   slideActionReference: {fileID: 0}
   lightAttackActionReference: {fileID: 0}
@@ -215,8 +224,16 @@ MonoBehaviour:
   wallCheckDistance: 0.6
   centerPoint: {fileID: 2536802766306766105}
   vaultHeightCheck: 1.2
+  minVaultHeight: 0.45
+  maxVaultDepth: 1.5
+  vaultReach: 1.1
+  vaultLandOffset: 0.6
+  landingLayer:
+    serializedVersion: 2
+    m_Bits: 192
   headPoint: {fileID: 6393255762420653973}
   ledgeTopCheckDistance: 0.5
+  proximityCheckRadius: 1.2
 --- !u!114 &2155071560513528099
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -264,6 +281,23 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::WeaponHolder
   startingWeapon: {fileID: 0}
+--- !u!114 &79228358685479468
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7324854854781657204}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 0d27913ce53b5bf41b1dcd0de53bc0d3, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::PlayerAnimator
+  animator: {fileID: 62019402937664537}
+  crossFadeTime: 0.1
+  fastCrossFadeTime: 0.05
+  speedDampTime: 0.1
+  minFallTimeForLanding: 0.35
 --- !u!1 &7703409964543376003
 GameObject:
   m_ObjectHideFlags: 0
@@ -347,13 +381,46 @@ PrefabInstance:
       propertyPath: m_Name
       value: Model
       objectReference: {fileID: 0}
+    - target: {fileID: 5866666021909216657, guid: 92ff0235208cc0d4eafb7027bd27b363, type: 3}
+      propertyPath: m_Controller
+      value: 
+      objectReference: {fileID: 9100000, guid: 0d9c235832635414391307deb85ac562, type: 2}
+    - target: {fileID: 5866666021909216657, guid: 92ff0235208cc0d4eafb7027bd27b363, type: 3}
+      propertyPath: m_ApplyRootMotion
+      value: 0
+      objectReference: {fileID: 0}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
     m_AddedGameObjects: []
-    m_AddedComponents: []
+    m_AddedComponents:
+    - targetCorrespondingSourceObject: {fileID: 919132149155446097, guid: 92ff0235208cc0d4eafb7027bd27b363, type: 3}
+      insertIndex: -1
+      addedObject: {fileID: 8721558592784206715}
   m_SourcePrefab: {fileID: 100100000, guid: 92ff0235208cc0d4eafb7027bd27b363, type: 3}
+--- !u!95 &62019402937664537 stripped
+Animator:
+  m_CorrespondingSourceObject: {fileID: 5866666021909216657, guid: 92ff0235208cc0d4eafb7027bd27b363, type: 3}
+  m_PrefabInstance: {fileID: 5888109034808588680}
+  m_PrefabAsset: {fileID: 0}
 --- !u!4 &6213976297584320099 stripped
 Transform:
   m_CorrespondingSourceObject: {fileID: -8679921383154817045, guid: 92ff0235208cc0d4eafb7027bd27b363, type: 3}
   m_PrefabInstance: {fileID: 5888109034808588680}
   m_PrefabAsset: {fileID: 0}
+--- !u!1 &6735038863485797593 stripped
+GameObject:
+  m_CorrespondingSourceObject: {fileID: 919132149155446097, guid: 92ff0235208cc0d4eafb7027bd27b363, type: 3}
+  m_PrefabInstance: {fileID: 5888109034808588680}
+  m_PrefabAsset: {fileID: 0}
+--- !u!114 &8721558592784206715
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6735038863485797593}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 217de8a9866d58c4391f2d9105f6fba4, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::PlayerAnimatorIK

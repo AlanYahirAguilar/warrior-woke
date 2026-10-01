@@ -5,7 +5,7 @@ using UnityEngine;
 // ────────────────────────────────────────────────────────────────────────────────
 
 /// <summary>
-/// Default grounded state. Transitions to Run, Jump, Block, or Dodge.
+/// Default grounded state. Transitions to Run, Jump, Fall, Block, Dodge or the attacks.
 /// </summary>
 public class PlayerIdleState : PlayerState
 {
@@ -22,6 +22,13 @@ public class PlayerIdleState : PlayerState
     public override void LogicUpdate()
     {
         base.LogicUpdate();
+
+        // Lost the ground without jumping (pushed off an edge, platform removed)
+        if (player.AirTime > player.FallGraceTime)
+        {
+            stateMachine.ChangeState(player.FallState);
+            return;
+        }
 
         // Combat takes priority over movement when grounded
         if (player.IsBlockHeld)
@@ -57,15 +64,16 @@ public class PlayerIdleState : PlayerState
 
         if (player.JumpTriggered && player.IsGrounded)
         {
-            stateMachine.ChangeState(player.JumpState);
+            // Space next to a low obstacle vaults it (GDD §5.4); otherwise it is a jump.
+            stateMachine.ChangeState(PlayerVaultState.TryStart(player) ? (PlayerState)player.VaultState : player.JumpState);
         }
     }
 
     public override void PhysicsUpdate()
     {
         base.PhysicsUpdate();
-        // Preserve vertical velocity (gravity) while zeroing horizontal drift
-        player.StopHorizontal(player.Rb.linearVelocity.y);
+        // Brake smoothly (the locomotion blend shows Run → Jog → Walk → Idle); gravity is preserved
+        player.AccelerateHorizontal(Vector3.zero);
     }
 }
 
@@ -74,42 +82,48 @@ public class PlayerIdleState : PlayerState
 // ────────────────────────────────────────────────────────────────────────────────
 
 /// <summary>
-/// Grounded running state. Auto-sprint activates after SprintActivationTime seconds.
+/// Grounded running state (WASD). Sprint while Shift is held (GDD §5.2).
+/// Accelerates toward the target speed, so the animation blends Idle → Walk → Jog → Run.
+/// Back input without sprint walks backward facing forward (PlayerMovement.IsBackpedaling).
+/// Low edges are climbed automatically (auto step).
 /// </summary>
 public class PlayerRunState : PlayerState
 {
     public PlayerRunState(PlayerMovement player, PlayerStateMachine stateMachine)
         : base(player, stateMachine) { }
 
-    // No Enter override: every path into Run arrives with IsSprint already cleared
-    // (Idle.Enter and the explicit exits) except Vault, which keeps its momentum (GDD §5.4).
-
     public override void LogicUpdate()
     {
         base.LogicUpdate();
 
-        // Auto-sprint: activates after the configured threshold (default 3s)
-        if (!player.IsSprint && Time.time - startTime >= player.SprintActivationTime)
-            player.IsSprint = true;
+        // Sprint follows Shift every tick; a cancelled sprint waits for Shift to be released.
+        player.IsSprint = player.CanSprint;
 
-        // Combat interrupts run (can attack while moving)
+        // Ran off an edge: keep the current speed (and sprint) into the fall
+        if (player.AirTime > player.FallGraceTime)
+        {
+            stateMachine.ChangeState(player.FallState);
+            return;
+        }
+
+        // Combat interrupts run (can attack while moving). Attacking and blocking cancel the sprint (GDD §5.2).
         if (player.LightAttackTriggered)
         {
-            player.IsSprint = false;
+            player.CancelSprint();
             stateMachine.ChangeState(player.LightAttackState);
             return;
         }
 
         if (player.HeavyAttackTriggered)
         {
-            player.IsSprint = false;
+            player.CancelSprint();
             stateMachine.ChangeState(player.HeavyAttackState);
             return;
         }
 
         if (player.IsBlockHeld)
         {
-            player.IsSprint = false;
+            player.CancelSprint();
             stateMachine.ChangeState(player.BlockState);
             return;
         }
@@ -121,23 +135,18 @@ public class PlayerRunState : PlayerState
             return;
         }
 
-        // Parkour — Vault habilitado en 3D
-        if (player.EnvChecker.IsObstacleVaultable(player.transform.forward))
-        {
-            stateMachine.ChangeState(player.VaultState);
-            return;
-        }
-
-        if (player.SlideTriggered && player.IsGrounded)
+        // Slide: C while sprinting (outside the GDD, kept by decision P2)
+        if (player.SlideTriggered && player.IsGrounded && player.IsSprint)
         {
             player.IsSprint = false;
             stateMachine.ChangeState(player.SlideState);
             return;
         }
 
+        // Space: vault a low obstacle in front (GDD §5.4) or jump
         if (player.JumpTriggered && player.IsGrounded)
         {
-            stateMachine.ChangeState(player.JumpState);
+            stateMachine.ChangeState(PlayerVaultState.TryStart(player) ? (PlayerState)player.VaultState : player.JumpState);
             return;
         }
 
@@ -152,12 +161,15 @@ public class PlayerRunState : PlayerState
     public override void PhysicsUpdate()
     {
         base.PhysicsUpdate();
-        float speed = player.IsSprint ? player.SprintSpeed : player.BaseSpeed;
-        player.SetVelocity(player.MoveDirection * speed, player.Rb.linearVelocity.y);
+        float speed = player.IsBackpedaling ? player.BackpedalSpeed
+                    : player.IsSprint       ? player.SprintSpeed
+                    :                         player.BaseSpeed;
+        player.AccelerateHorizontal(player.MoveDirection * speed);
+        player.TryAutoStep();
     }
 
-    // IsSprint is intentionally NOT cleared on Exit so a jump started while sprinting keeps
-    // sprint speed (GDD §5.2). Every other exit clears it explicitly, and Idle.Enter resets it.
+    // IsSprint is intentionally NOT cleared on Exit so a jump or fall started while sprinting
+    // keeps sprint speed (GDD §5.2). Every other exit clears it, and Idle.Enter resets it.
 }
 
 // ────────────────────────────────────────────────────────────────────────────────
