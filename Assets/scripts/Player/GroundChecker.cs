@@ -1,7 +1,9 @@
 using UnityEngine;
 
 /// <summary>
-/// Component solely responsible for detecting ground contact via downward raycasts.
+/// Component solely responsible for detecting ground contact with a short downward sphere cast
+/// (the footprint of the feet, not a single ray under the center: the body stays grounded on the
+/// edge of a step instead of flickering into the air).
 /// Implements IGroundChecker and conforms to the Single Responsibility Principle (SRP).
 /// Reusable across player, enemies, and other physics-driven actors.
 /// </summary>
@@ -32,10 +34,17 @@ public class GroundChecker : MonoBehaviour, IGroundChecker
     /// </summary>
     public bool CheckGrounded()
     {
-        Vector3 origin = GetRayOrigin();
-        float length = GetRayLength();
+        if (_capsuleCollider != null)
+        {
+            // Sphere slightly narrower than the capsule, starting just above the feet
+            float radius = _capsuleCollider.radius * 0.9f;
+            Bounds b = _capsuleCollider.bounds;
+            Vector3 origin = new Vector3(b.center.x, b.min.y + radius + 0.05f, b.center.z);
+            _isGrounded = Physics.SphereCast(origin, radius, Vector3.down, out _, 0.05f + extraDistance, groundLayer, QueryTriggerInteraction.Ignore);
+            return _isGrounded;
+        }
 
-        _isGrounded = Physics.Raycast(origin, Vector3.down, length, groundLayer);
+        _isGrounded = Physics.Raycast(GetRayOrigin(), Vector3.down, GetRayLength(), groundLayer, QueryTriggerInteraction.Ignore);
         return _isGrounded;
     }
 

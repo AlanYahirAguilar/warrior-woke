@@ -10,12 +10,17 @@ namespace WarriorWoke.EditorTools
     /// Builds and validates the player's animation setup (docs/arquitectura.md §5.10):
     ///  1. Extracts character.fbx's embedded textures (Unity does not use embedded textures until
     ///     they are extracted) so URP's FBX material import links the Base/Normal/Emission maps.
-    ///  2. Imports the Ch45 guard transitions as Humanoid clips that reuse
-    ///     character.fbx's Avatar, and the Dynamic Parkour System clips (MIT) as Humanoid clips.
-    ///     All clips have their root motion baked into the pose: movement is done by code.
+    ///  2. Imports the Ch45 guard transitions as Humanoid clips that reuse character.fbx's Avatar,
+    ///     and sets the root motion of every clip the player uses (P22): locomotion, air, landing and
+    ///     slide clips play in place (the Rigidbody moves the body); vault, ledge grab and climb keep
+    ///     their root motion (PlayerAnimator applies it and warps it with MatchTarget). Clip settings
+    ///     are edited through SerializedObject: ModelImporter.clipAnimations fails to marshal in this
+    ///     Unity version and dropped the clips' curves (LHandCurve), which are restored here.
     ///  3. Generates Assets/Characters/Player/PlayerAnimator.controller (IK pass on).
-    ///  4. Assigns it to Player.prefab's "Model" Animator, adds PlayerAnimator / PlayerAnimatorIK.
-    ///  5. "Validar Personaje" checks Avatars, material, clips, missing scripts and sampled poses.
+    ///  4. Assigns it to Player.prefab's "Model" Animator (soles on the collider bottom, measured on
+    ///     the idle pose), adds PlayerAnimator / PlayerAnimatorIK / PlayerContactIK.
+    ///  5. "Validar Personaje" checks Avatars, material, clips, curves, missing scripts, sampled poses
+    ///     and the model's foot contact.
     /// Re-running is safe: the controller keeps its GUID and is rebuilt in place.
     /// Batch: Unity -batchmode -quit -projectPath . -executeMethod WarriorWoke.EditorTools.PlayerAnimationSetup.SetupAndValidateBatch
     /// </summary>
@@ -42,13 +47,14 @@ namespace WarriorWoke.EditorTools
         private const float LightAttackVisualTime = 0.5f;  // 0.25 s strike + combo window up to 0.5 s
         private const float HeavyAttackTime       = 0.8f;  // PlayerHeavyAttackState / GDD §5.7
         private const float DodgeTime             = 0.5f;  // PlayerDodgeState / GDD §5.5
-        private const float VaultTime             = PlayerVaultState.VaultDuration;
-        private const float LedgeGrabTime         = 0.35f; // reach-up before the hang loop
-        private const float LedgeClimbTime        = PlayerLedgeClimbState.ClimbDuration;
-        private const float SlideTime             = 0.8f;  // PlayerMovement.SlideDuration
+        private const float ParkourClipSpeed      = 1.1f;  // ledge grab and climb: natural pace, slightly brisk
+        private const float SlideTime             = 0.8f;  // PlayerMovement.SlideDuration (shortest slide)
+        private const float SlideEnterTime        = 0.3f;  // "Slide Down": the body drops to the ground
+        private const float SlideExitTime         = 0.5f;  // "Slide Up": back on the feet, running
         private const float GuardTransitionTime   = 0.3f;  // Ch45 guard enter/exit, sped up from ~1 s
-        private const float LandTime              = 0.45f;
-        private const float LandRunTime           = 0.4f;
+        private const float LandTime              = 0.45f; // soft landing
+        private const float LandRunTime           = 0.4f;  // landing into a run
+        private const float LandHardTime          = 0.9f;  // heavy landing: the whole absorb, natural pace
 
         // Locomotion blend thresholds = clip speed / BaseSpeed (5 m/s). Walk and Jog speeds were
         // measured from the DPS clips' root travel; walking backward is PlayerMovement.BackpedalSpeed.
@@ -96,7 +102,7 @@ namespace WarriorWoke.EditorTools
 
             ConfigureCh45Clip(GuardEnterPath, PlayerAnimatorIds.BlockEnterName, false, avatar);
             ConfigureCh45Clip(GuardExitPath, PlayerAnimatorIds.BlockExitName, false, avatar);
-            ConfigureDpsClips();
+            ConfigureClipImports();
 
             var clips = new ClipSet();
             if (!clips.Load()) return false;
@@ -186,36 +192,134 @@ namespace WarriorWoke.EditorTools
             importer.SaveAndReimport();
         }
 
-        /// <summary>
-        /// Dynamic Parkour System clips: keep their clip ranges and curves (e.g. "LHandCurve" in
-        /// VaultFence) from the original .meta, build a Humanoid Avatar from their own Mixamo rig
-        /// (the original copies Erika's Avatar, which is not imported) and bake root motion.
-        /// </summary>
-        private static void ConfigureDpsClips()
+        /// <summary>Root motion of a clip: what stays in the pose and what moves the GameObject.</summary>
+        private enum RootMode
         {
-            foreach (string guid in AssetDatabase.FindAssets("t:Model", new[] { DpsFolder.TrimEnd('/') }))
+            /// <summary>Everything baked into the pose (a loop that must not move at all).</summary>
+            Baked,
+            /// <summary>Horizontal travel removed from the pose (plays in place); vertical motion stays in the pose. The Rigidbody moves the body.</summary>
+            InPlace,
+            /// <summary>Horizontal and vertical travel are root motion (horizontal based on the center of mass): in place unless PlayerAnimator applies it (parkour).</summary>
+            RootMotion,
+        }
+
+        private readonly struct ClipImport
+        {
+            public readonly string File, Clip;
+            public readonly RootMode Mode;
+            public readonly bool Loop, FeetBased;
+            public ClipImport(string file, string clip, RootMode mode, bool loop, bool feetBased)
             {
-                string path = AssetDatabase.GUIDToAssetPath(guid);
-                if (!(AssetImporter.GetAtPath(path) is ModelImporter importer)) continue;
+                File = file; Clip = clip; Mode = mode; Loop = loop; FeetBased = feetBased;
+            }
+        }
 
-                importer.animationType      = ModelImporterAnimationType.Human;
-                importer.avatarSetup        = ModelImporterAvatarSetup.CreateFromThisModel;
-                importer.materialImportMode = ModelImporterMaterialImportMode.None;
-                importer.importAnimation    = true;
+        // Every non-Ch45 clip whose import the player depends on, with its root motion (decision P22).
+        private static readonly ClipImport[] ClipImports =
+        {
+            new ClipImport(DpsFolder + "Walk.fbx", "Walk", RootMode.InPlace, true, true),
+            new ClipImport(DpsFolder + "Jog Forward.fbx", "Jog Forward", RootMode.InPlace, true, true),
+            new ClipImport(DpsFolder + "Run.fbx", "Run", RootMode.InPlace, true, true),
+            new ClipImport(DpsFolder + "Fall Idle.fbx", "Fall A Loop", RootMode.InPlace, true, true),
+            new ClipImport(DpsFolder + "Falling To Landing.fbx", "Falling To Landing", RootMode.InPlace, false, true),
+            new ClipImport(DpsFolder + "Land To Run Forward.fbx", "Fall A Land To Run Forward", RootMode.InPlace, false, true),
+            new ClipImport(DpsFolder + "Slide.fbx", "Slide Down", RootMode.InPlace, false, true),
+            new ClipImport(DpsFolder + "Slide.fbx", "Slide", RootMode.InPlace, true, true),
+            new ClipImport(DpsFolder + "Slide.fbx", "Slide Up", RootMode.InPlace, false, true),
+            new ClipImport(DpsFolder + "VaultFence.fbx", "Vault1", RootMode.RootMotion, false, false),
+            new ClipImport(DpsFolder + "Idle To Braced Hang.fbx", "Idle To Braced Hang", RootMode.RootMotion, false, false),
+            new ClipImport(DpsFolder + "Braced Hanging Idle.fbx", "Hanging Idle", RootMode.Baked, true, false),
+            new ClipImport(DpsFolder + "Braced Hang Climb.fbx", "Braced Hang To Crouch", RootMode.RootMotion, false, true),
+            // LowPoly jump: the body rises by physics, so the clip's own rise must not stay in the pose
+            new ClipImport(LowPolyMove + "Jumps.fbx", "Jump_Up", RootMode.RootMotion, false, true),
+        };
 
-                ModelImporterClipAnimation[] clips = importer.clipAnimations;
-                if (clips == null || clips.Length == 0) clips = importer.defaultClipAnimations;
-                foreach (ModelImporterClipAnimation clip in clips)
-                    BakeRootIntoPose(clip);
-                importer.clipAnimations = clips;
+        // LHandCurve of VaultFence (Dynamic Parkour System's original .meta): weight of the planted left hand.
+        private static readonly Keyframe[] VaultHandCurveKeys =
+        {
+            new Keyframe(0f, 0f, 0f, 0f), new Keyframe(0.21843004f, 1f, 0f, 0f),
+            new Keyframe(0.52901024f, 1f, 0f, 0f), new Keyframe(1f, 0f, 0f, 0f),
+        };
+
+        /// <summary>
+        /// Applies ClipImports. The Dynamic Parkour System FBX get a Humanoid Avatar from their own
+        /// Mixamo rig (the original copies Erika's Avatar, which is not imported). Clip ranges come
+        /// from the original .meta files and are kept; only root motion, loop and curves are written.
+        /// </summary>
+        private static void ConfigureClipImports()
+        {
+            var files = new HashSet<string>();
+            foreach (ClipImport c in ClipImports) files.Add(c.File);
+
+            foreach (string path in files)
+            {
+                if (!(AssetImporter.GetAtPath(path) is ModelImporter importer))
+                {
+                    Debug.LogError($"[PlayerAnimationSetup] No se encontró {path}.");
+                    continue;
+                }
+
+                if (path.StartsWith(DpsFolder))
+                {
+                    importer.animationType      = ModelImporterAnimationType.Human;
+                    importer.avatarSetup        = ModelImporterAvatarSetup.CreateFromThisModel;
+                    importer.materialImportMode = ModelImporterMaterialImportMode.None;
+                    importer.importAnimation    = true;
+                }
+
+                var so = new SerializedObject(importer);
+                SerializedProperty clips = so.FindProperty("m_ClipAnimations");
+                if (clips == null || clips.arraySize == 0)
+                {
+                    Debug.LogError($"[PlayerAnimationSetup] {path} no tiene clips definidos en su .meta.");
+                    continue;
+                }
+
+                for (int i = 0; i < clips.arraySize; i++)
+                {
+                    SerializedProperty clip = clips.GetArrayElementAtIndex(i);
+                    string clipName = clip.FindPropertyRelative("name").stringValue;
+                    foreach (ClipImport c in ClipImports)
+                    {
+                        if (c.File != path || c.Clip != clipName) continue;
+                        clip.FindPropertyRelative("loopTime").boolValue             = c.Loop;
+                        clip.FindPropertyRelative("loopBlendOrientation").boolValue = true; // the code turns the body
+                        clip.FindPropertyRelative("loopBlendPositionXZ").boolValue  = c.Mode == RootMode.Baked;
+                        clip.FindPropertyRelative("loopBlendPositionY").boolValue   = c.Mode != RootMode.RootMotion;
+                        clip.FindPropertyRelative("heightFromFeet").boolValue       = c.FeetBased;
+                        // Root-motion clips follow the body's center of mass, so the pose stays over the
+                        // root (Vault1 starts mid-run: based on "Original" its pose began 0.9 m ahead of it)
+                        if (c.Mode == RootMode.RootMotion)
+                            clip.FindPropertyRelative("keepOriginalPositionXZ").boolValue = false;
+                        if (c.Clip == PlayerAnimatorIds.VaultClip)
+                            SetClipCurve(clip, PlayerAnimatorIds.LHandCurve, new AnimationCurve(VaultHandCurveKeys));
+                    }
+                }
+
+                so.ApplyModifiedPropertiesWithoutUndo();
                 importer.SaveAndReimport();
             }
         }
 
-        /// <summary>
-        /// Root motion is not applied (decision P13: movement by code), so the hips' travel is baked
-        /// into the pose: the clip plays in place and never drifts from the collider.
-        /// </summary>
+        private static void SetClipCurve(SerializedProperty clip, string curveName, AnimationCurve curve)
+        {
+            SerializedProperty curves = clip.FindPropertyRelative("curves");
+            SerializedProperty entry = null;
+            for (int i = 0; i < curves.arraySize; i++)
+            {
+                if (curves.GetArrayElementAtIndex(i).FindPropertyRelative("name").stringValue == curveName)
+                    entry = curves.GetArrayElementAtIndex(i);
+            }
+            if (entry == null)
+            {
+                curves.InsertArrayElementAtIndex(curves.arraySize);
+                entry = curves.GetArrayElementAtIndex(curves.arraySize - 1);
+                entry.FindPropertyRelative("name").stringValue = curveName;
+            }
+            entry.FindPropertyRelative("curve").animationCurveValue = curve;
+        }
+
+        /// <summary>Ch45 guard transitions are in place: everything stays in the pose.</summary>
         private static void BakeRootIntoPose(ModelImporterClipAnimation clip)
         {
             clip.lockRootRotation        = true;
@@ -253,6 +357,12 @@ namespace WarriorWoke.EditorTools
             controller.AddParameter(PlayerAnimatorIds.DodgeX, AnimatorControllerParameterType.Float);
             controller.AddParameter(PlayerAnimatorIds.DodgeY, AnimatorControllerParameterType.Float);
             controller.AddParameter(PlayerAnimatorIds.LHandCurve, AnimatorControllerParameterType.Float);
+            controller.AddParameter(new AnimatorControllerParameter
+            {
+                name = PlayerAnimatorIds.ParkourSpeed,
+                type = AnimatorControllerParameterType.Float,
+                defaultFloat = 1f,
+            });
 
             // Locomotion: signed speed (1 = BaseSpeed). Backpedal < 0 < Walk < Jog < Run < Sprint.
             AnimatorState locomotion = controller.CreateBlendTreeInController(PlayerAnimatorIds.LocomotionName, out BlendTree locoTree, 0);
@@ -273,18 +383,30 @@ namespace WarriorWoke.EditorTools
             // Air
             AddState(sm, PlayerAnimatorIds.JumpName, c.JumpUp, 1f, new Vector2(500, 0));
             AddState(sm, PlayerAnimatorIds.FallName, c.FallLoop, 1f, new Vector2(500, 60));
-            AnimatorState land    = AddState(sm, PlayerAnimatorIds.LandName, c.Land, Fit(c.Land, LandTime), new Vector2(500, 120));
-            AnimatorState landRun = AddState(sm, PlayerAnimatorIds.LandRunName, c.LandRun, Fit(c.LandRun, LandRunTime), new Vector2(500, 180));
+            AnimatorState land     = AddState(sm, PlayerAnimatorIds.LandName, c.Land, Fit(c.Land, LandTime), new Vector2(500, 120));
+            AnimatorState landRun  = AddState(sm, PlayerAnimatorIds.LandRunName, c.LandRun, Fit(c.LandRun, LandRunTime), new Vector2(500, 180));
+            AnimatorState landHard = AddState(sm, PlayerAnimatorIds.LandHardName, c.Land, Fit(c.Land, LandHardTime), new Vector2(500, 240));
             AddExitTimeTransition(land, locomotion);
             AddExitTimeTransition(landRun, locomotion);
+            AddExitTimeTransition(landHard, locomotion, 0.8f, 0.3f); // the recovery blends into locomotion
 
             // Parkour (Dynamic Parkour System clips)
-            AddState(sm, PlayerAnimatorIds.VaultName, c.Vault, Fit(c.Vault, VaultTime), new Vector2(800, 0));
-            AddState(sm, PlayerAnimatorIds.SlideName, c.Slide, Fit(c.Slide, SlideTime), new Vector2(800, 60));
-            AnimatorState ledgeGrab = AddState(sm, PlayerAnimatorIds.LedgeGrabName, c.LedgeEnter, Fit(c.LedgeEnter, LedgeGrabTime), new Vector2(800, 120));
-            AnimatorState ledgeHang = AddState(sm, PlayerAnimatorIds.LedgeHangName, c.LedgeHang, 1f, new Vector2(800, 180));
-            AddState(sm, PlayerAnimatorIds.LedgeClimbName, c.LedgeClimb, Fit(c.LedgeClimb, LedgeClimbTime), new Vector2(800, 240));
-            AddExitTimeTransition(ledgeGrab, ledgeHang);
+            // Vault: playback speed = approach speed / clip speed (ParkourSpeed, set by PlayerAnimator)
+            AnimatorState vault = AddState(sm, PlayerAnimatorIds.VaultName, c.Vault, 1f, new Vector2(800, 0));
+            vault.speedParameter = PlayerAnimatorIds.ParkourSpeed;
+            vault.speedParameterActive = true;
+
+            // Slide in three phases: drop to the ground → slide (loop, as long as the FSM slides) → get up
+            AnimatorState slide     = AddState(sm, PlayerAnimatorIds.SlideName, c.SlideEnter, Fit(c.SlideEnter, SlideEnterTime), new Vector2(800, 60));
+            AnimatorState slideLoop = AddState(sm, PlayerAnimatorIds.SlideLoopName, c.SlideLoop, 1f, new Vector2(1050, 60));
+            AnimatorState slideExit = AddState(sm, PlayerAnimatorIds.SlideExitName, c.SlideExit, Fit(c.SlideExit, SlideExitTime), new Vector2(1050, 120));
+            AddExitTimeTransition(slide, slideLoop, 0.9f, 0.1f);
+            AddExitTimeTransition(slideExit, locomotion, 0.75f, 0.2f);
+
+            AnimatorState ledgeGrab = AddState(sm, PlayerAnimatorIds.LedgeGrabName, c.LedgeEnter, ParkourClipSpeed, new Vector2(800, 180));
+            AnimatorState ledgeHang = AddState(sm, PlayerAnimatorIds.LedgeHangName, c.LedgeHang, 1f, new Vector2(1050, 180));
+            AddState(sm, PlayerAnimatorIds.LedgeClimbName, c.LedgeClimb, ParkourClipSpeed, new Vector2(800, 240));
+            AddExitTimeTransition(ledgeGrab, ledgeHang, 0.9f, 0.15f);
 
             // Combat
             AddState(sm, PlayerAnimatorIds.LightAttackRightName, c.PunchRight, Fit(c.PunchRight, LightAttackVisualTime), new Vector2(-300, 0));
@@ -320,6 +442,7 @@ namespace WarriorWoke.EditorTools
 
         private static bool AssignToPrefab(AnimatorController controller, Avatar avatar)
         {
+            float soleBelowRoot = MeasureIdleSole(AssetDatabase.LoadAssetAtPath<GameObject>(PrefabPath));
             GameObject root = PrefabUtility.LoadPrefabContents(PrefabPath);
             if (root == null)
             {
@@ -339,10 +462,21 @@ namespace WarriorWoke.EditorTools
 
                 animator.runtimeAnimatorController = controller;
                 animator.avatar = avatar;
-                animator.applyRootMotion = false;
+                animator.applyRootMotion = false; // PlayerAnimator turns it on only during parkour (P22)
+                animator.cullingMode = AnimatorCullingMode.AlwaysAnimate;
+
+                // Soles on the collider bottom: the model was centered on its renderer bounds, which
+                // include padding, and stood ~11 cm above the ground (measured on the idle pose).
+                var capsule = root.GetComponent<CapsuleCollider>();
+                model.localPosition = new Vector3(0f, -capsule.height * 0.5f - soleBelowRoot, 0f);
+
+                // Interpolated body: the camera and the model follow the 50 Hz physics without jitter (T7)
+                root.GetComponent<Rigidbody>().interpolation = RigidbodyInterpolation.Interpolate;
 
                 if (model.GetComponent<PlayerAnimatorIK>() == null)
                     model.gameObject.AddComponent<PlayerAnimatorIK>();
+                if (root.GetComponent<PlayerContactIK>() == null)
+                    root.AddComponent<PlayerContactIK>();
 
                 var playerAnimator = root.GetComponent<PlayerAnimator>();
                 if (playerAnimator == null)
@@ -351,19 +485,28 @@ namespace WarriorWoke.EditorTools
                 so.FindProperty("animator").objectReferenceValue = animator;
                 so.ApplyModifiedPropertiesWithoutUndo();
 
-                // Movement values that depend on the new clips and the auto step layers
+                // Movement values of the human-scale tuning (P23) and the auto step layers
                 var movement = new SerializedObject(root.GetComponent<PlayerMovement>());
-                movement.FindProperty("SlideSpeed").floatValue = 9f;
+                movement.FindProperty("SlideSpeed").floatValue = 7.5f;
                 movement.FindProperty("SlideDuration").floatValue = SlideTime;
+                movement.FindProperty("JumpSpeed").floatValue = 4.5f;
+                movement.FindProperty("Acceleration").floatValue = 10f;
+                movement.FindProperty("Deceleration").floatValue = 13f;
                 movement.FindProperty("stepLayer").intValue = LayerMask.GetMask("Ground", "Obstacle");
+                movement.FindProperty("ceilingLayer").intValue = LayerMask.GetMask("Ground", "Obstacle");
                 movement.ApplyModifiedPropertiesWithoutUndo();
 
                 var env = new SerializedObject(root.GetComponent<EnvironmentChecker>());
                 env.FindProperty("landingLayer").intValue = LayerMask.GetMask("Ground", "Obstacle");
                 env.ApplyModifiedPropertiesWithoutUndo();
 
+                var contact = new SerializedObject(root.GetComponent<PlayerContactIK>());
+                contact.FindProperty("groundLayer").intValue = LayerMask.GetMask("Ground", "Obstacle");
+                contact.FindProperty("wallLayer").intValue = LayerMask.GetMask("Obstacle");
+                contact.ApplyModifiedPropertiesWithoutUndo();
+
                 PrefabUtility.SaveAsPrefabAsset(root, PrefabPath);
-                Debug.Log("[PlayerAnimationSetup] Player.prefab: controller asignado (Apply Root Motion desactivado), PlayerAnimator y PlayerAnimatorIK presentes, capas de auto step y aterrizaje configuradas.");
+                Debug.Log($"[PlayerAnimationSetup] Player.prefab: controller asignado, Model a y = {model.localPosition.y:F3} (suela {soleBelowRoot:F3} m bajo su raíz), Rigidbody interpolado, PlayerAnimator, PlayerAnimatorIK y PlayerContactIK presentes.");
                 return true;
             }
             finally
@@ -406,9 +549,23 @@ namespace WarriorWoke.EditorTools
                 Transform model = prefab.transform.Find(ModelChildName);
                 Animator animator = model != null ? model.GetComponent<Animator>() : null;
                 ok &= Check(animator != null && animator.runtimeAnimatorController == controller, "Animator de 'Model' usa PlayerAnimator.controller");
-                ok &= Check(animator != null && !animator.applyRootMotion, "Apply Root Motion desactivado");
+                ok &= Check(animator != null && !animator.applyRootMotion, "Apply Root Motion desactivado por defecto (solo se activa en parkour)");
                 ok &= Check(prefab.GetComponent<PlayerAnimator>() != null, "Player.prefab tiene PlayerAnimator");
+                ok &= Check(prefab.GetComponent<PlayerContactIK>() != null, "Player.prefab tiene PlayerContactIK");
                 ok &= Check(model != null && model.GetComponent<PlayerAnimatorIK>() != null, "'Model' tiene PlayerAnimatorIK");
+                ok &= Check(prefab.GetComponent<Rigidbody>().interpolation == RigidbodyInterpolation.Interpolate, "Rigidbody interpolado");
+
+                if (model != null)
+                {
+                    float halfHeight = prefab.GetComponent<CapsuleCollider>().height * 0.5f;
+                    float soleGap = model.localPosition.y + halfHeight + MeasureIdleSole(prefab);
+                    ok &= Check(Mathf.Abs(soleGap) < 0.01f, $"De pie, las suelas tocan la base del collider (diferencia {soleGap * 100f:F1} cm)");
+                }
+
+                AnimationClip vaultClip = LoadClip(DpsFolder + "VaultFence.fbx", PlayerAnimatorIds.VaultClip);
+                ok &= Check(vaultClip != null && CurveKeyCount(vaultClip, PlayerAnimatorIds.LHandCurve) >= 3,
+                            "El clip Vault1 tiene la curva LHandCurve (IK de la mano del vault)");
+
                 if (animator != null && controller != null)
                     ok &= ValidatePoses(prefab, controller);
             }
@@ -509,6 +666,50 @@ namespace WarriorWoke.EditorTools
             return ok;
         }
 
+        /// <summary>
+        /// Height of the lowest vertex of the skinned mesh relative to the model's root, in the first
+        /// frame of the Idle clip (negative = below the root). The soles, not the bones, touch the ground.
+        /// </summary>
+        private static float MeasureIdleSole(GameObject prefab)
+        {
+            AnimationClip idle = LoadClip(LowPolyMove + "Idle.fbx", "Idle");
+            GameObject instance = (GameObject)PrefabUtility.InstantiatePrefab(prefab);
+            var mesh = new Mesh();
+            AnimationMode.StartAnimationMode();
+            try
+            {
+                GameObject model = instance.transform.Find(ModelChildName).gameObject;
+                AnimationMode.BeginSampling();
+                AnimationMode.SampleAnimationClip(model, idle, 0f);
+                AnimationMode.EndSampling();
+
+                float min = float.MaxValue;
+                foreach (SkinnedMeshRenderer smr in model.GetComponentsInChildren<SkinnedMeshRenderer>())
+                {
+                    smr.BakeMesh(mesh, true);
+                    foreach (Vector3 v in mesh.vertices)
+                        min = Mathf.Min(min, smr.transform.TransformPoint(v).y);
+                }
+                return min - model.transform.position.y;
+            }
+            finally
+            {
+                AnimationMode.StopAnimationMode();
+                Object.DestroyImmediate(mesh);
+                Object.DestroyImmediate(instance);
+            }
+        }
+
+        private static int CurveKeyCount(AnimationClip clip, string curveName)
+        {
+            foreach (EditorCurveBinding binding in AnimationUtility.GetCurveBindings(clip))
+            {
+                if (binding.propertyName == curveName)
+                    return AnimationUtility.GetEditorCurve(clip, binding).length;
+            }
+            return 0;
+        }
+
         private static IEnumerable<AnimationClip> ClipsOf(Motion motion)
         {
             if (motion is AnimationClip clip)
@@ -535,12 +736,12 @@ namespace WarriorWoke.EditorTools
             return state;
         }
 
-        private static void AddExitTimeTransition(AnimatorState from, AnimatorState to)
+        private static void AddExitTimeTransition(AnimatorState from, AnimatorState to, float exitTime = 0.85f, float duration = 0.15f)
         {
             AnimatorStateTransition t = from.AddTransition(to);
             t.hasExitTime = true;
-            t.exitTime = 0.85f;
-            t.duration = 0.15f;
+            t.exitTime = exitTime;
+            t.duration = duration;
             t.hasFixedDuration = true;
         }
 
@@ -610,7 +811,7 @@ namespace WarriorWoke.EditorTools
         {
             public AnimationClip Idle, Walk, Jog, Run, Sprint, WalkBackward;
             public AnimationClip JumpUp, FallLoop, Land, LandRun;
-            public AnimationClip Vault, Slide, LedgeEnter, LedgeHang, LedgeClimb;
+            public AnimationClip Vault, SlideEnter, SlideLoop, SlideExit, LedgeEnter, LedgeHang, LedgeClimb;
             public AnimationClip RollForward, RollBackward, RollLeft, RollRight;
             public AnimationClip PunchRight, PunchLeft, HeavyAttack, Blocking, GuardEnter, GuardExit;
 
@@ -627,7 +828,9 @@ namespace WarriorWoke.EditorTools
                 Land         = LoadClip(DpsFolder + "Falling To Landing.fbx", "Falling To Landing");
                 LandRun      = LoadClip(DpsFolder + "Land To Run Forward.fbx", "Fall A Land To Run Forward");
                 Vault        = LoadClip(DpsFolder + "VaultFence.fbx", "Vault1");
-                Slide        = LoadClip(DpsFolder + "Slide.fbx", "Running Slide");
+                SlideEnter   = LoadClip(DpsFolder + "Slide.fbx", "Slide Down");
+                SlideLoop    = LoadClip(DpsFolder + "Slide.fbx", "Slide");
+                SlideExit    = LoadClip(DpsFolder + "Slide.fbx", "Slide Up");
                 LedgeEnter   = LoadClip(DpsFolder + "Idle To Braced Hang.fbx", "Idle To Braced Hang");
                 LedgeHang    = LoadClip(DpsFolder + "Braced Hanging Idle.fbx", "Hanging Idle");
                 LedgeClimb   = LoadClip(DpsFolder + "Braced Hang Climb.fbx", "Braced Hang To Crouch");
@@ -643,7 +846,7 @@ namespace WarriorWoke.EditorTools
                 GuardExit    = LoadClip(GuardExitPath, PlayerAnimatorIds.BlockExitName);
 
                 foreach (AnimationClip clip in new[] { Idle, Walk, Jog, Run, Sprint, WalkBackward, JumpUp, FallLoop, Land,
-                                                       LandRun, Vault, Slide, LedgeEnter, LedgeHang, LedgeClimb,
+                                                       LandRun, Vault, SlideEnter, SlideLoop, SlideExit, LedgeEnter, LedgeHang, LedgeClimb,
                                                        RollForward, RollBackward, RollLeft, RollRight, PunchRight,
                                                        PunchLeft, HeavyAttack, Blocking, GuardEnter, GuardExit })
                 {

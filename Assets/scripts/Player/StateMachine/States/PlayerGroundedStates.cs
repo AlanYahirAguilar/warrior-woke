@@ -63,10 +63,18 @@ public class PlayerIdleState : PlayerState
         }
 
         if (player.JumpTriggered && player.IsGrounded)
-        {
-            // Space next to a low obstacle vaults it (GDD §5.4); otherwise it is a jump.
-            stateMachine.ChangeState(PlayerVaultState.TryStart(player) ? (PlayerState)player.VaultState : player.JumpState);
-        }
+            stateMachine.ChangeState(ResolveSpace(player));
+    }
+
+    /// <summary>
+    /// Space on the ground, by context: vault a low obstacle in front (GDD §5.4), grab a ledge within
+    /// reach (P2) or jump.
+    /// </summary>
+    public static PlayerState ResolveSpace(PlayerMovement player)
+    {
+        if (PlayerVaultState.TryStart(player)) return player.VaultState;
+        if (PlayerLedgeGrabState.TryStartFromGround(player)) return player.LedgeGrabState;
+        return player.JumpState;
     }
 
     public override void PhysicsUpdate()
@@ -85,7 +93,7 @@ public class PlayerIdleState : PlayerState
 /// Grounded running state (WASD). Sprint while Shift is held (GDD §5.2).
 /// Accelerates toward the target speed, so the animation blends Idle → Walk → Jog → Run.
 /// Back input without sprint walks backward facing forward (PlayerMovement.IsBackpedaling).
-/// Low edges are climbed automatically (auto step).
+/// Low edges are climbed and stepped down automatically (auto step). After a landing the speed recovers gradually.
 /// </summary>
 public class PlayerRunState : PlayerState
 {
@@ -143,10 +151,10 @@ public class PlayerRunState : PlayerState
             return;
         }
 
-        // Space: vault a low obstacle in front (GDD §5.4) or jump
+        // Space: vault, ledge grab or jump, by context
         if (player.JumpTriggered && player.IsGrounded)
         {
-            stateMachine.ChangeState(PlayerVaultState.TryStart(player) ? (PlayerState)player.VaultState : player.JumpState);
+            stateMachine.ChangeState(PlayerIdleState.ResolveSpace(player));
             return;
         }
 
@@ -164,8 +172,10 @@ public class PlayerRunState : PlayerState
         float speed = player.IsBackpedaling ? player.BackpedalSpeed
                     : player.IsSprint       ? player.SprintSpeed
                     :                         player.BaseSpeed;
-        player.AccelerateHorizontal(player.MoveDirection * speed);
+        // After a landing the legs absorb the impact: full speed comes back over the recovery
+        player.AccelerateHorizontal(player.MoveDirection * (speed * player.RecoverySpeedScale));
         player.TryAutoStep();
+        player.TryStepDown();
     }
 
     // IsSprint is intentionally NOT cleared on Exit so a jump or fall started while sprinting
@@ -177,11 +187,15 @@ public class PlayerRunState : PlayerState
 // ────────────────────────────────────────────────────────────────────────────────
 
 /// <summary>
-/// Slide mechanic: shrinks collider and maintains speed for SlideDuration seconds.
-/// The player cannot exit the slide if there is a ceiling overhead (maintains ducked posture).
+/// Slide (outside the GDD, kept by decision P2): C while sprinting. The collider shrinks to half
+/// height keeping its bottom on the ground, the body keeps the speed it had (no boost beyond
+/// SlideSpeed) and loses it with friction. It cannot stand up under a ceiling, so it keeps sliding
+/// (at least at SlideMinSpeed) until there is room.
 /// </summary>
 public class PlayerSlideState : PlayerState
 {
+    private float _speed;
+
     public PlayerSlideState(PlayerMovement player, PlayerStateMachine stateMachine)
         : base(player, stateMachine) { }
 
@@ -189,6 +203,7 @@ public class PlayerSlideState : PlayerState
     {
         base.Enter();
         player.ShrinkCollider(0.5f);
+        _speed = Mathf.Min(Mathf.Max(player.HorizontalSpeed, player.BaseSpeed), player.SlideSpeed);
     }
 
     public override void LogicUpdate()
@@ -199,15 +214,16 @@ public class PlayerSlideState : PlayerState
         {
             // Keep crouching if there is something above the player
             if (!player.HasCeilingOverhead())
-                stateMachine.ChangeState(player.RunState);
+                stateMachine.ChangeState(player.HasMoveInput ? (PlayerState)player.RunState : player.IdleState);
         }
     }
 
     public override void PhysicsUpdate()
     {
         base.PhysicsUpdate();
-        // Use the character's current facing instead of raw input to maintain momentum even if keys are released
-        player.SetVelocity(player.transform.forward * player.SlideSpeed, player.Rb.linearVelocity.y);
+        _speed = Mathf.Max(player.SlideMinSpeed, _speed - player.SlideFriction * Time.fixedDeltaTime);
+        // The facing is locked during the slide: momentum, not steering
+        player.SetVelocity(player.transform.forward * _speed, player.Rb.linearVelocity.y);
     }
 
     public override void Exit()

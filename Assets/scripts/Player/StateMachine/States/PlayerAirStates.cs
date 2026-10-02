@@ -7,7 +7,8 @@ using UnityEngine;
 /// <summary>
 /// Rising part of a grounded jump. Detects ledges on the way up and hands over to
 /// PlayerFallState at the apex (or lands directly if it touches ground while not rising).
-/// Keeps sprint speed if the jump started while sprinting (GDD §5.2: sprint extends jumps).
+/// The take-off keeps the ground speed (sprint extends jumps, GDD §5.2); in the air the input only
+/// steers the momentum (PlayerMovement.AccelerateAir), it does not replace it.
 /// </summary>
 public class PlayerJumpState : PlayerState
 {
@@ -25,10 +26,8 @@ public class PlayerJumpState : PlayerState
     {
         base.LogicUpdate();
 
-        // ── Ledge detection — habilitado en 3D
-        if (player.EnvChecker.IsLedgeDetected(player.transform.forward, out Vector3 ledgeCorner))
+        if (PlayerLedgeGrabState.TryStartInAir(player))
         {
-            player.CurrentLedgeCorner = ledgeCorner;
             stateMachine.ChangeState(player.LedgeGrabState);
             return;
         }
@@ -44,7 +43,7 @@ public class PlayerJumpState : PlayerState
     {
         base.PhysicsUpdate();
         float speed = player.IsSprint ? player.SprintSpeed : player.BaseSpeed;
-        player.SetVelocity(player.MoveDirection * speed, player.Rb.linearVelocity.y);
+        player.AccelerateAir(player.MoveDirection * speed);
     }
 }
 
@@ -53,9 +52,9 @@ public class PlayerJumpState : PlayerState
 // ────────────────────────────────────────────────────────────────────────────────
 
 /// <summary>
-/// Airborne without rising: after a jump's apex or after leaving an edge without jumping
-/// (docs/arquitectura.md T13). Keeps air control and the sprint speed it arrived with,
-/// can grab ledges, and lands into Run or Idle.
+/// Airborne without rising: after a jump's apex, after leaving an edge without jumping or after
+/// letting go of a ledge. Keeps the momentum it arrived with, can grab ledges, and on touching the
+/// ground registers the landing (its weight depends on the drop height) before going to Run or Idle.
 /// The future fatal-fall check (GDD §5.12, F15) belongs here.
 /// </summary>
 public class PlayerFallState : PlayerState
@@ -67,15 +66,15 @@ public class PlayerFallState : PlayerState
     {
         base.LogicUpdate();
 
-        if (player.EnvChecker.IsLedgeDetected(player.transform.forward, out Vector3 ledgeCorner))
+        if (PlayerLedgeGrabState.TryStartInAir(player))
         {
-            player.CurrentLedgeCorner = ledgeCorner;
             stateMachine.ChangeState(player.LedgeGrabState);
             return;
         }
 
         if (player.IsGrounded && player.Rb.linearVelocity.y <= 0f)
         {
+            player.RegisterLanding();
             stateMachine.ChangeState(player.HasMoveInput ? (PlayerState)player.RunState : player.IdleState);
         }
     }
@@ -84,6 +83,6 @@ public class PlayerFallState : PlayerState
     {
         base.PhysicsUpdate();
         float speed = player.IsSprint ? player.SprintSpeed : player.BaseSpeed;
-        player.SetVelocity(player.MoveDirection * speed, player.Rb.linearVelocity.y);
+        player.AccelerateAir(player.MoveDirection * speed);
     }
 }

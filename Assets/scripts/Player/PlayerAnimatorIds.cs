@@ -11,6 +11,11 @@ public static class PlayerAnimatorIds
     public const string DodgeX = "DodgeX";
     public const string DodgeY = "DodgeY";
     public const string LHandCurve = "LHandCurve"; // driven by the curve of the VaultFence clip (Dynamic Parkour System)
+    public const string ParkourSpeed = "ParkourSpeed"; // playback speed of the vault (approach speed / clip speed)
+
+    // Clips whose length PlayerAnimator needs to start them at an offset
+    public const string VaultClip     = "Vault1";
+    public const string LedgeGrabClip = "Idle To Braced Hang";
 
     // States (Base Layer)
     public const string LocomotionName       = "Locomotion";
@@ -18,8 +23,11 @@ public static class PlayerAnimatorIds
     public const string FallName             = "Fall";
     public const string LandName             = "Land";
     public const string LandRunName          = "LandRun";
+    public const string LandHardName         = "LandHard";
     public const string LedgeHangName        = "LedgeHang";
-    public const string SlideName            = "Slide";
+    public const string SlideName            = "Slide";      // drop to the ground ("Slide Down")
+    public const string SlideLoopName        = "SlideLoop";  // sliding ("Slide", loop)
+    public const string SlideExitName        = "SlideExit";  // get up ("Slide Up")
     public const string VaultName            = "Vault";
     public const string LedgeGrabName        = "LedgeGrab";
     public const string LedgeClimbName       = "LedgeClimb";
@@ -35,13 +43,17 @@ public static class PlayerAnimatorIds
     public static readonly int DodgeXParam = Animator.StringToHash(DodgeX);
     public static readonly int DodgeYParam = Animator.StringToHash(DodgeY);
     public static readonly int LHandCurveParam = Animator.StringToHash(LHandCurve);
+    public static readonly int ParkourSpeedParam = Animator.StringToHash(ParkourSpeed);
 
     public static readonly int Locomotion       = Animator.StringToHash(LocomotionName);
     public static readonly int Jump             = Animator.StringToHash(JumpName);
     public static readonly int Fall             = Animator.StringToHash(FallName);
     public static readonly int Land             = Animator.StringToHash(LandName);
     public static readonly int LandRun          = Animator.StringToHash(LandRunName);
+    public static readonly int LandHard         = Animator.StringToHash(LandHardName);
+    public static readonly int LedgeHang        = Animator.StringToHash(LedgeHangName);
     public static readonly int Slide            = Animator.StringToHash(SlideName);
+    public static readonly int SlideExit        = Animator.StringToHash(SlideExitName);
     public static readonly int Vault            = Animator.StringToHash(VaultName);
     public static readonly int LedgeGrab        = Animator.StringToHash(LedgeGrabName);
     public static readonly int LedgeClimb       = Animator.StringToHash(LedgeClimbName);

@@ -51,6 +51,7 @@ GameObject:
   - component: {fileID: 5069361737474222998}
   - component: {fileID: 4417385296650123456}
   - component: {fileID: 79228358685479468}
+  - component: {fileID: 7729443631634034740}
   m_Layer: 8
   m_Name: Player
   m_TagString: Player
@@ -123,7 +124,7 @@ Rigidbody:
   m_ImplicitTensor: 1
   m_UseGravity: 1
   m_IsKinematic: 0
-  m_Interpolate: 0
+  m_Interpolate: 1
   m_Constraints: 72
   m_CollisionDetection: 0
 --- !u!114 &3610058757516321345
@@ -152,12 +153,16 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::PlayerMovement
   BaseSpeed: 5
   SprintMultiplier: 1.4
-  SlideSpeed: 9
-  JumpSpeed: 7
+  SlideSpeed: 7.5
+  JumpSpeed: 4.5
   BackpedalSpeed: 1.5
-  Acceleration: 12
-  Deceleration: 16
+  Acceleration: 10
+  Deceleration: 13
+  AirAcceleration: 4
+  AirDrag: 0.5
   SlideDuration: 0.8
+  SlideFriction: 4
+  SlideMinSpeed: 2.5
   ceilingLayer:
     serializedVersion: 2
     m_Bits: 192
@@ -166,8 +171,14 @@ MonoBehaviour:
     serializedVersion: 2
     m_Bits: 192
   FallGraceTime: 0.15
+  SoftLandingHeight: 0.6
+  HardLandingHeight: 3.2
+  HardLandingSpeedKept: 0.3
+  HardLandingRecovery: 0.7
+  LedgeRegrabDelay: 0.4
   faceMovementDirection: 1
   turnSmoothTime: 0.12
+  sprintTurnSmoothTime: 0.2
   moveInputDeadzone: 0.1
 --- !u!114 &5207809015301318550
 MonoBehaviour:
@@ -221,8 +232,8 @@ MonoBehaviour:
   obstacleLayer:
     serializedVersion: 2
     m_Bits: 128
-  wallCheckDistance: 0.6
   centerPoint: {fileID: 2536802766306766105}
+  headPoint: {fileID: 6393255762420653973}
   vaultHeightCheck: 1.2
   minVaultHeight: 0.45
   maxVaultDepth: 1.5
@@ -231,8 +242,9 @@ MonoBehaviour:
   landingLayer:
     serializedVersion: 2
     m_Bits: 192
-  headPoint: {fileID: 6393255762420653973}
-  ledgeTopCheckDistance: 0.5
+  ledgeReachGround: 1
+  ledgeReachAir: 0.75
+  standInset: 0.45
   proximityCheckRadius: 1.2
 --- !u!114 &2155071560513528099
 MonoBehaviour:
@@ -296,8 +308,34 @@ MonoBehaviour:
   animator: {fileID: 62019402937664537}
   crossFadeTime: 0.1
   fastCrossFadeTime: 0.05
+  fallCrossFadeTime: 0.3
   speedDampTime: 0.1
-  minFallTimeForLanding: 0.35
+  stepSmoothTime: 0.1
+  parkourTurnSpeed: 540
+--- !u!114 &7729443631634034740
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7324854854781657204}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c2cf50a4bddfa63478e922d2504137ac, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::PlayerContactIK
+  groundLayer:
+    serializedVersion: 2
+    m_Bits: 192
+  wallLayer:
+    serializedVersion: 2
+    m_Bits: 128
+  footRayAbove: 0.5
+  footRayBelow: 0.45
+  maxPelvisDrop: 0.35
+  pelvisSpeed: 10
+  groundFadeSpeed: 8
+  hangAlignSpeed: 6
 --- !u!1 &7703409964543376003
 GameObject:
   m_ObjectHideFlags: 0
@@ -343,7 +381,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: 92ff0235208cc0d4eafb7027bd27b363, type: 3}
       propertyPath: m_LocalPosition.y
-      value: -0.86254406
+      value: -0.97398424
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: 92ff0235208cc0d4eafb7027bd27b363, type: 3}
       propertyPath: m_LocalPosition.z
@@ -385,6 +423,10 @@ PrefabInstance:
       propertyPath: m_Controller
       value: 
       objectReference: {fileID: 9100000, guid: 0d9c235832635414391307deb85ac562, type: 2}
+    - target: {fileID: 5866666021909216657, guid: 92ff0235208cc0d4eafb7027bd27b363, type: 3}
+      propertyPath: m_CullingMode
+      value: 0
+      objectReference: {fileID: 0}
     - target: {fileID: 5866666021909216657, guid: 92ff0235208cc0d4eafb7027bd27b363, type: 3}
       propertyPath: m_ApplyRootMotion
       value: 0
