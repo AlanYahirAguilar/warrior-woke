@@ -11,7 +11,7 @@
 > **Fuente de diseño:** [`GDD_Awakened_Warrior.pdf`](../GDD_Awakened_Warrior.pdf) (raíz del repo, GDD final).
 > Si este documento y el GDD no coinciden, manda el GDD, y hay que corregir este documento.
 >
-> Última revisión completa: 2026-09-30.
+> Última revisión completa: 2026-10-01.
 
 ---
 
@@ -129,9 +129,11 @@ Esta tabla es **lo que pide el diseño**. El estado real de cada una está en
 | Pausa | ESC | Start / Menu |
 
 > Desde el 2026-09-30 el código usa estos controles (decisión P1), incluido el vault con
-> **Espacio**, salvo **E** (recoger arma todavía no existe) y **ESC** (no hay pausa). El slide, que
-> está fuera del GDD, usa **C** mientras se esprinta. Además, **S sin sprint camina hacia atrás sin
-> girar** (P16). Gamepad: no. Ver `features.md` → "Diferencias GDD vs. implementación".
+> **Espacio**, salvo **E** (recoger arma todavía no existe) y **ESC** (no hay pausa). Espacio actúa
+> según el contexto: vault ante un obstáculo bajo, agarre ante una cornisa al alcance (fuera del GDD,
+> P2) y, si no hay nada, salto. El slide, que está fuera del GDD, usa **C** mientras se esprinta.
+> Además, **S sin sprint camina hacia atrás sin girar** (P16). Gamepad: no. Ver `features.md` →
+> "Diferencias GDD vs. implementación".
 
 ## 5. Enemigos y jefes (GDD §12, §13, §21)
 
@@ -209,7 +211,9 @@ Comandante (fin del juego y reencuentro con la familia).
     caminar hacia atrás, salto, rolls, combate), **Dynamic Parkour System** (walk, jog, run, caída,
     aterrizajes, vault, slide y cornisa; licencia MIT, animaciones de Mixamo; ver
     `Assets/ThirdParty/DynamicParkourSystem/README.md`) y dos transiciones de guardia de Ch45.
-    **No se conoce el origen ni la licencia de las animaciones `LowPoly`** (arquitectura T15).
+    Las animaciones `LowPoly` vienen del paquete gratuito *FREE Low Poly Human - RPG Character* de
+    la Unity Asset Store (lo indica el bloque `AssetOrigin` de sus `.meta`). Falta confirmar su
+    licencia en la página del paquete antes de publicar el juego (arquitectura T15).
 
 ## 9. Alcance (GDD §25) y criterios de terminado (GDD §30)
 
@@ -258,10 +262,13 @@ final · SFX y música básica · build para Windows.
    2026-09-30: los controles del GDD **ya están implementados** (P1; el slide pasó a C); el wall jump
    se eliminó (ledge grab/climb y slide siguen activos); **no hay XP, estamina ni HUD** (GDD §7,
    §5.2, §16); los enemigos se rehacen en 3D con NavMeshAgent; la cámara se extiende con control de
-   ratón; la iluminación horneada no se versiona; el personaje se anima con clips retargeteados y sin
-   root motion (P11–P14). El parkour se basa en el Dynamic Parkour System adaptado a nuestra FSM
-   (P15–P20): vault con Espacio, slide, auto step y cornisa. La migración a `.inputactions` sigue
-   pendiente.
+   ratón; la iluminación horneada no se versiona; el personaje se anima con clips retargeteados
+   (P11–P14). El parkour se basa en el Dynamic Parkour System adaptado a nuestra FSM (P15–P20): vault
+   con Espacio, slide, auto step y cornisa. Desde el 2026-10-01 el parkour usa root motion solo
+   mientras dura cada acción, warpeado con `MatchTarget` e IK de manos y pies sobre el contacto
+   medido (P22). El movimiento base tiene escala humana: salto de ~1 m, inercia en el aire y
+   aterrizaje según la altura (P23). `Level-1` es el Parkour Test Area (P24). La migración a
+   `.inputactions` sigue pendiente.
 3. **No se implementa nada fuera del MVP** sin que antes funcione el MVP (GDD §25 y §28).
 
 ## 11. Cómo abrir el proyecto
@@ -270,26 +277,31 @@ final · SFX y música básica · build para Windows.
   romper materiales o prefabs. La versión está en `ProjectSettings/ProjectVersion.txt`.
 - Unity Hub → **Add** → selecciona la carpeta `warrior-woke/`. La primera importación tarda varios
   minutos.
-- **Escena del juego:** `Assets/Scenes/Level-1.unity` (la única en Build Settings).
+- **Escena del juego:** `Assets/Scenes/Level-1.unity` (la única en Build Settings). Desde el
+  2026-10-01 es el **Parkour Test Area** (P24): un suelo plano con perímetro y siete secciones, una
+  por movimiento, sin textos (01 locomoción · 02 vault · 03 slide · 04 ledge grab · 05 climb ·
+  06 salto y aterrizaje · 07 combinado; ver `features.md` F32). Al dar Play apareces en su entrada,
+  mirando hacia las secciones. Los niveles reales del GDD (§10) todavía no existen.
   `Assets/LowPolyCity/Scenes/CartoonLowPolyCityLite_01.unity` es solo la demo del asset pack y no
   tiene lógica del juego.
-- **Circuito de pruebas de parkour:** dentro de `Level-1`, objeto `ParkourTestCircuit`, al sur de la
-  casa. Al dar Play apareces en su entrada, frente a los carteles: VAULT · SLIDE · AUTO STEP ·
-  LEDGE · COMBINADO (ver `features.md` F32).
 - **Auto-loader:** `Assets/scripts/Editor/SceneAutoLoader.cs` abre `Level-1.unity` al iniciar el
   Editor, **una vez por sesión** (`SessionState`), así que no interrumpe si luego abres otra escena
   a propósito.
 - **Controles actuales** (GDD §14, P1): WASD/flechas correr (acelera pasando por caminar) ·
-  S sin sprint caminar hacia atrás sin girar · Shift (mantener) sprint · Espacio saltar, o vault
-  junto a un obstáculo bajo · J ataque ligero · K ataque fuerte · L bloquear (mantener) ·
-  Q + dirección esquivar · C deslizarse (solo mientras esprintas, fuera del GDD) · contra un muro
-  alto: saltar para colgarse, Espacio para subir, dirección contraria para soltarse. E (recoger
-  arma) y ESC (pausa) todavía no hacen nada.
+  S sin sprint caminar hacia atrás sin girar · Shift (mantener) sprint · Espacio, según el contexto:
+  vault junto a un obstáculo de 0.45–1.2 m, agarrarse de una cornisa cuya cima está a 1.9–2.7 m de
+  los pies, o saltar (y agarrarse en el aire si la cornisa queda al alcance de las manos) ·
+  J ataque ligero · K ataque fuerte · L bloquear (mantener) · Q + dirección esquivar · C deslizarse
+  (solo mientras esprintas, fuera del GDD) · colgado: Espacio para subir (se puede pulsar durante el
+  agarre y sube sin detenerse), dirección contraria al muro para soltarse. E (recoger arma) y ESC
+  (pausa) todavía no hacen nada.
 - **Si cambias animaciones o el modelo:** corre **Tools → Warrior Woke → Configurar Animaciones del
   Jugador** (y **Validar Personaje** para revisar). Ver `arquitectura.md` §5.10.
 - **Pruebas automáticas:** **Tools → Warrior Woke → Probar Personaje en Play Mode** recorre el
-  circuito con teclado simulado y reporta cada comprobación en la consola (`[PlayModeTest]`).
-  También en batch (ver `arquitectura.md` §5.9).
+  Parkour Test Area con teclado simulado y reporta cada comprobación en la consola
+  (`[PlayModeTest]`): el flujo de estados y el contacto físico medido sobre el esqueleto (manos en
+  el borde, pies que no atraviesan nada, etc.). También en batch (ver `arquitectura.md` §5.9). Si
+  cambias la escena, regenérala con **Tools → Warrior Woke → Construir Parkour Test Area**.
 
 ### "Hice pull y no veo los cambios"
 

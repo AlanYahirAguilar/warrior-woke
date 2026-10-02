@@ -5,9 +5,9 @@
 > implementado y buenas prácticas). Los estados (✅ 🟡 🔧 📋 ⬜ ⚠️ ⏸️) y las marcas ✔/❓ se
 > definen en `contexto.md` §1.
 >
-> Este documento describe el **estado real del código** al 2026-09-30 (limpieza contra el GDD e
-> integración del personaje jugable; ver el historial en `features.md` §5). Lo que todavía no existe aparece marcado como 📋 Planeado
-> o ⬜ Pendiente.
+> Este documento describe el **estado real del código** al 2026-10-01 (pasada de contacto físico del
+> parkour y Parkour Test Area; ver el historial en `features.md` §5). Lo que todavía no existe
+> aparece marcado como 📋 Planeado o ⬜ Pendiente.
 
 ---
 
@@ -28,7 +28,7 @@
 | Lenguaje | C# puro, sin ECS/DOTS ni Visual Scripting | — |
 | Namespaces | Solo las herramientas de Editor (`WarriorWoke.EditorTools`). El runtime está en el namespace global | — |
 | Assembly definitions | Ninguna (todo compila en `Assembly-CSharp`) | — |
-| Tests | Ninguno | — |
+| Tests | Sin assembly de Test Framework. Pruebas propias de Editor: validación en batch y recorrido en Play Mode real (§5.9) | `scripts/Editor/` |
 
 ### Capas y tags (`ProjectSettings/TagManager.asset`)
 
@@ -56,7 +56,8 @@ Assets/
       StateMachine/           EnemyState, EnemyStateMachine, States/EnemyGroundedStates.cs
     Player/
       Player.cs, PlayerMovement.cs, PlayerInputHandler.cs,
-      PlayerAnimator.cs, PlayerAnimatorIds.cs, PlayerAnimatorIK.cs, VaultInfo.cs,
+      PlayerAnimator.cs, PlayerAnimatorIds.cs, PlayerAnimatorIK.cs, PlayerContactIK.cs,
+      IParkourAnimationProgress.cs, ParkourTimings.cs, VaultInfo.cs, LedgeInfo.cs,
       GroundChecker.cs, EnvironmentChecker.cs
       StateMachine/           PlayerState, PlayerStateMachine,
                               States/{PlayerGroundedStates, PlayerAirStates,
@@ -70,14 +71,14 @@ Assets/
                               PlayerAnimator.controller (generado),
                               Textures/ (5 texturas extraídas de character.fbx),
                               Animations/ (2 transiciones de guardia Ch45)
-  LowPoly/                    Animations/*.fbx (clips Humanoid usados por el jugador),
-                              HumanPlayer.prefab y LowPolyHumanAnimator.controller (sin uso)
+  LowPoly/                    Animations/*.fbx (clips Humanoid usados por el jugador; paquete
+                              "FREE Low Poly Human - RPG Character" de la Asset Store)
   ThirdParty/DynamicParkourSystem/
                               Animations/ (11 clips Mixamo del Dynamic Parkour System),
                               LICENSE.txt (MIT), README.md (qué se tomó y cómo se adaptó)
-  Tests/ParkourCircuit/       Materials/ del circuito de pruebas
+  Tests/ParkourCircuit/       Materials/ del Parkour Test Area (un color por sección)
   LowPolyCity/                asset pack de entorno (placeholder) + escena demo
-  material/                   ball, enemy, floors, metal (.mat), ZeroFriction.physicMaterial
+  material/                   enemy, floors (.mat), ZeroFriction.physicMaterial
   ProBuilder Data/, URPDefaultResources/, Adaptive Performance/
 docs/                         contexto.md, arquitectura.md, features.md
 GDD_Awakened_Warrior.pdf      GDD final
@@ -98,31 +99,36 @@ GDD_Awakened_Warrior.pdf      GDD final
 
 ## 3. Escena y prefabs (estado real)
 
-### `Level-1.unity` (única escena en Build Settings)
+### `Level-1.unity` (única escena en Build Settings): Parkour Test Area
 
-Contiene instancias de `GameManager`, `Spawner`, `Main Camera`, `Directional Light` y `Enemy`, el
-objeto `Ground` (layer Ground, material `floors.mat`), un muro de ProBuilder (`wall`), dos casas de
-LowPolyCity y el circuito de pruebas `ParkourTestCircuit`. **El Player no está colocado en la
-escena:** lo crea el `Spawner` al iniciar (ver §5.6). La escena no referencia datos de iluminación
-horneada (`m_LightingDataAsset` vacío); la luz direccional es Mixed y alumbra en tiempo real.
+Desde el 2026-10-01 (decisión P24) la escena es el área de pruebas del parkour. La construye
+`ParkourTestCircuitBuilder` (**Tools → Warrior Woke → Construir Parkour Test Area**) y contiene:
+instancias de `GameManager`, `Spawner`, `Main Camera` y `Directional Light`, y el objeto
+`ParkourTestArea` (suelo, perímetro y siete secciones). **El Player no está colocado en la escena:**
+lo crea el `Spawner` al iniciar (ver §5.6). La escena no referencia datos de iluminación horneada
+(`m_LightingDataAsset` vacío); la luz direccional es Mixed y alumbra en tiempo real.
 
-Medido el 2026-09-30 con **Tools → Warrior Woke → Listar límites de la escena**:
+Se eliminaron los objetos del blockout anterior: las dos casas `House_01_cyber`, el muro de
+ProBuilder `wall` y el `Enemy`, que flotaban a 35–45 m (T21), y el `Ground` hecho con una malla
+Capsule (cúpula de 0.5 m, T19). La validación comprueba que no queda ningún collider fuera del área.
 
-| Objeto | Límites reales (colliders) | Nota |
-|---|---|---|
-| `Ground` | x −35…65, z −52.5…47.5, y hasta 0.5 | ⚠️ Usa la malla **Capsule** escalada 100×1×100 (no un plano): es una **cúpula** de 0.5 m en el centro (15, −2.5) que baja a 0 en el borde (T19). |
-| `House_01_cyber` | x −12.5…12.5, z −12.4…9.6, y hasta 43 | Encierra el spawn original (0, 2, −2.5): desde ahí no se podía salir caminando (T20). |
-| `House_01_cyber_2` | x 22.5…47.5, z −12.4…9.6 | — |
-| `wall`, `Enemy` | y 35…45 | ⚠️ Flotan sobre el nivel (T21). |
-| `ParkourTestCircuit` | x −10…20, z −14.5…−49.5 | Losa propia con top en y = 0.55, por encima de la cúpula. |
-| `Spawner` | (2, 2, −13.5), mirando a −Z | Movido a la entrada del circuito el 2026-09-30 (P20). Antes: (0, 2, −2.5). |
+| Objeto | Qué es |
+|---|---|
+| `Suelo` | Caja de 62 × 80 m con la cara superior en y = 0 (layer Ground), x −34…28, z 15…−65. |
+| `Perimetro` | Muros de 1.5 m alrededor del suelo, en layer **Ground**: demasiado altos para el vault, demasiado bajos para agarrarse, y nunca candidatos a cornisa (las cornisas solo se buscan en Obstacle). |
+| `S01_Locomocion` … `S07_Combinado` | Carriles paralelos que empiezan en z = 0 y avanzan hacia −Z. Contenido en `features.md` F32. |
+| `Spawner` | (0, 1.2, 8), mirando a −Z, en la entrada del área. |
+
+Layers del área: el suelo, las escaleras, los bordillos y las plataformas de aterrizaje son
+**Ground** (el auto step puede subirlos, y no son vault ni cornisa); los obstáculos de vault, los
+muros de cornisa y escalada, las barras del slide y los pilares son **Obstacle**.
 
 ### Prefabs y sus componentes
 
 | Prefab | Componentes de scripts propios | Notas |
 |---|---|---|
-| `Player` | `Player`, `PlayerMovement`, `PlayerInputHandler`, `PlayerAnimator`, `GroundChecker`, `EnvironmentChecker`, `HealthSystem` (i-frames 0.5 s), `Hitbox` (radio 0.6, `localOffset` z = 0.6, layer Enemy), `WeaponHolder` (sin arma inicial); en `Model`: `PlayerAnimatorIK` | Tag `Player`, layer 8. Rigidbody 70 kg, **Interpolate: None**, rotaciones congeladas. Hijos `CenterPoint`, `HeadPoint`, `Model` (character.fbx). El `Animator` de `Model` usa `PlayerAnimator.controller` con **Apply Root Motion desactivado**. `PlayerMovement.stepLayer` y `EnvironmentChecker.landingLayer` = Ground + Obstacle. |
-| `Enemy` | `HealthSystem` (100 HP, i-frames 0.2 s), `Hitbox` (daño 5) | Tag `Untagged`, layer 9. ⚠️ **No tiene `Enemy.cs`**, así que la IA no corre, y `Hitbox.targetLayers = 0`. La vida y el daño no son valores del GDD: el prefab se rehace con P4. |
+| `Player` | `Player`, `PlayerMovement`, `PlayerInputHandler`, `PlayerAnimator`, `PlayerContactIK`, `GroundChecker`, `EnvironmentChecker`, `HealthSystem` (i-frames 0.5 s), `Hitbox` (radio 0.6, `localOffset` z = 0.6, layer Enemy), `WeaponHolder` (sin arma inicial); en `Model`: `PlayerAnimatorIK` | Tag `Player`, layer 8. Rigidbody 70 kg, **Interpolate**, rotaciones congeladas. Hijos `CenterPoint`, `HeadPoint`, `Model` (character.fbx, en y = −0.974: las suelas de la pose idle tocan la base del collider). El `Animator` de `Model` usa `PlayerAnimator.controller`, culling **Always Animate** y Apply Root Motion desactivado por defecto (`PlayerAnimator` lo activa solo en parkour, P22). `stepLayer`, `ceilingLayer`, `landingLayer` y las capas de `PlayerContactIK` = Ground + Obstacle (los muros del IK, solo Obstacle). |
+| `Enemy` | `HealthSystem` (100 HP, i-frames 0.2 s), `Hitbox` (daño 5) | Tag `Untagged`, layer 9. ⚠️ **No tiene `Enemy.cs`**, así que la IA no corre, y `Hitbox.targetLayers = 0`. La vida y el daño no son valores del GDD: el prefab se rehace con P4. Desde P24 no está colocado en ninguna escena. |
 | `GameManager` | `ObjectPoolManager` | Pools: `player` → Player.prefab (1), `spawnVFX` → Particle System (1). |
 | `Spawner` | `Spawner` | `entityId: player`, `triggerType: OnStart`. |
 | `Main Camera` | `CameraFollow` | `autoDetectTarget` activo. |
@@ -139,6 +145,9 @@ flowchart LR
       PM --> FSM[PlayerStateMachine<br/>+ 12 estados]
       PM -- evento StateChanged --> PA[PlayerAnimator]
       PA --> AN[Animator de Model<br/>PlayerAnimator.controller]
+      PA -- root motion en parkour --> PM
+      PA --> CIK[PlayerContactIK<br/>IK de manos y pies]
+      PA -. IParkourAnimationProgress .-> PM
       HS -. IDamageModifier .-> PM
       PM --> GC[GroundChecker<br/>IGroundChecker]
       PM --> EC[EnvironmentChecker]
@@ -181,27 +190,42 @@ Player (Facade)                 FixedUpdate → RouteInputToMovement()
 - **`PlayerMovement.cs`**: cachea `Rigidbody`, `CapsuleCollider`, `GroundChecker`,
   `EnvironmentChecker`, `HealthSystem` y `Camera.main.transform` en `Awake`, y construye las 12
   instancias de estado. Expone el estado de input (`InputX`, `InputZ`, `HasMoveInput`,
-  `IsSprintHeld`, `JumpTriggered`, …), `AirTime` (segundos sin suelo), `IsBackpedaling`, `FeetY`,
-  `StandingHalfHeight`, `PendingVault`, el evento `StateChanged` y helpers de física
-  (`SetVelocity(Vector3, float)`, `StopHorizontal(float)`, `AccelerateHorizontal(Vector3)`,
-  `FaceDirection`, `TryAutoStep`, `SetKinematic`, `ShrinkCollider`, `ResetCollider`,
-  `HasCeilingOverhead`). Velocidades: `BaseSpeed` 5 (correr), `SprintSpeed = BaseSpeed ×
-  SprintMultiplier (1.4)`, `BackpedalSpeed` 1.5, `SlideSpeed` 9; `Acceleration` 12 m/s² y
-  `Deceleration` 16 m/s² en el suelo. Implementa `IDamageModifier` y lo delega en
-  `BlockState` (ver §5.4). Escucha `HealthSystem.OnDamageReceived` para cancelar el sprint.
-  **Regla:** los estados solo mueven el cuerpo a través de estos helpers o de `Rb.MovePosition`.
+  `IsSprintHeld`, `JumpTriggered`, …), `AirTime` (segundos sin suelo), `AirPeakFeetY` (punto más
+  alto desde que dejó el suelo), `IsBackpedaling`, `FeetY`, `HorizontalSpeed`,
+  `StandingHalfHeight`, `PendingVault`, `CurrentLedge`, `ParkourProgress`, el evento
+  `StateChanged`, el evento `Stepped` y helpers de física (`SetVelocity(Vector3, float)`,
+  `StopHorizontal(float)`, `AccelerateHorizontal(Vector3)`, `AccelerateAir(Vector3)`,
+  `FaceDirection`, `TryAutoStep`, `TryStepDown`, `SetKinematic`, `ShrinkCollider`,
+  `ResetCollider`, `HasCeilingOverhead`, `BeginRootMotion`, `ApplyRootMotion`, `EndRootMotion`,
+  `RegisterLanding`). Velocidades: `BaseSpeed` 5 (correr), `SprintSpeed = BaseSpeed ×
+  SprintMultiplier (1.4)`, `BackpedalSpeed` 1.5, `JumpSpeed` 4.5 (~1 m de salto); `Acceleration`
+  10 m/s² y `Deceleration` 13 m/s² en el suelo; `AirAcceleration` 4 m/s² y `AirDrag` 0.5 m/s² en
+  el aire; slide: entra con la velocidad que lleva (máximo `SlideSpeed` 7.5) y pierde
+  `SlideFriction` 4 m/s² hasta `SlideMinSpeed` 2.5 (P23). Implementa `IDamageModifier` y lo delega
+  en `BlockState` (ver §5.4). Escucha `HealthSystem.OnDamageReceived` para cancelar el sprint.
+  **Regla:** los estados mueven el cuerpo con estos helpers. Mientras `IsRootMotionDriven` (vault,
+  cornisa, subida), el cuerpo es kinemático, sin interpolación, y lo mueve la animación a través de
+  `ApplyRootMotion` (ver §5.10).
 - **Flujo de un tick:** `LogicUpdate` y `PhysicsUpdate` corren los dos dentro del paso de física
   (el input se enruta desde `Player.FixedUpdate`), así que la lógica de estados corre a 50 Hz y no
   por frame. El input se captura en `Update` y se **bufferiza** con métodos `Consume*()`, para que un
   tap no se pierda entre frames ni se procese dos veces.
 - **Movimiento relativo a cámara:** `MoveDirection` es el input proyectado sobre el
-  forward/right aplanado de la cámara. La rotación usa `Mathf.SmoothDampAngle` (`turnSmoothTime`) y
-  se bloquea en Vault, LedgeGrab, LedgeClimb, Block, Dodge y los ataques. **Caminar hacia atrás**
-  (`IsBackpedaling`: input con componente atrás y sin sprint, en `Run`): el cuerpo mira al forward
-  aplanado de la cámara en lugar de girar hacia `MoveDirection`, y avanza a `BackpedalSpeed`.
+  forward/right aplanado de la cámara. La rotación usa `Mathf.SmoothDampAngle` aplicado con
+  `Rigidbody.MoveRotation` (interpolado como el movimiento); el tiempo de giro pasa de
+  `turnSmoothTime` (0.12 s) corriendo a `sprintTurnSmoothTime` (0.2 s) esprintando, porque un cuerpo
+  rápido gira más abierto. Se bloquea en Vault, LedgeGrab, LedgeClimb, Slide, Block, Dodge y los
+  ataques. **Caminar hacia atrás** (`IsBackpedaling`: input con componente atrás y sin sprint, en
+  `Run`): el cuerpo mira al forward aplanado de la cámara en lugar de girar hacia `MoveDirection`, y
+  avanza a `BackpedalSpeed`.
 - **Aceleración:** `Run` y `Idle` no escriben la velocidad de golpe: `AccelerateHorizontal` la lleva
   hacia la velocidad objetivo con `Acceleration`/`Deceleration`, de modo que el blend de locomoción
-  pasa por Walk y Jog al arrancar y al frenar.
+  pasa por Walk y Jog al arrancar y al frenar. En el aire, `AccelerateAir` solo corrige el impulso
+  con el input (`AirAcceleration`); sin input lo conserva casi intacto.
+- **Aterrizaje (P23):** al tocar el suelo, `Fall` llama `RegisterLanding`: la caída desde
+  `AirPeakFeetY` define una severidad (0 bajo 0.6 m, 1 hacia 3.2 m). En ese instante se absorbe
+  parte de la velocidad horizontal y el resto vuelve durante la recuperación
+  (`RecoverySpeedScale`, hasta 0.7 s). El control nunca se bloquea.
 - **Transiciones:** cada estado decide sus salidas en `LogicUpdate`. `PlayerStateMachine` es
   genérica y no conoce estados concretos. Un estado nuevo se agrega creando la clase, instanciándola
   en `PlayerMovement.BuildStateMachine()` y agregando sus transiciones en los estados de origen.
@@ -223,6 +247,7 @@ Player (Facade)                 FixedUpdate → RouteInputToMovement()
 stateDiagram-v2
     Idle --> Run: input
     Idle --> Vault: Espacio + obstáculo bajo delante
+    Idle --> LedgeGrab: Espacio + cornisa a 1.9–2.7 m
     Idle --> Jump: Espacio + suelo
     Idle --> Fall: sin suelo > 0.15 s
     Idle --> Block: L
@@ -230,23 +255,26 @@ stateDiagram-v2
     Idle --> LightAttack: J
     Idle --> HeavyAttack: K
     Run --> Vault: Espacio + obstáculo bajo delante
+    Run --> LedgeGrab: Espacio + cornisa a 1.9–2.7 m
     Run --> Slide: C + sprint
     Run --> Dodge: Q + cooldown 1 s
     Run --> Jump: conserva el sprint
     Run --> Fall: sin suelo > 0.15 s, conserva el sprint
     Run --> Idle: sin input
-    Jump --> LedgeGrab: cornisa detectada
+    Jump --> LedgeGrab: cornisa al alcance de las manos
     Jump --> Fall: apex en el aire
     Jump --> Idle: apex ya en el suelo
-    Fall --> LedgeGrab: cornisa detectada
-    Fall --> Run: aterriza con input
-    Fall --> Idle: aterriza sin input
-    LedgeGrab --> LedgeClimb: Espacio
-    LedgeGrab --> Fall: dirección opuesta
-    LedgeClimb --> Idle
-    Vault --> Run: con input
-    Vault --> Idle: sin input
-    Slide --> Run: 0.7 s sin techo
+    Fall --> LedgeGrab: cornisa al alcance de las manos
+    Fall --> Run: aterriza con input (RegisterLanding)
+    Fall --> Idle: aterriza sin input (RegisterLanding)
+    LedgeGrab --> LedgeClimb: Espacio (también pulsado durante el agarre)
+    LedgeGrab --> Fall: dirección contraria al muro
+    LedgeClimb --> Run: clip al 97 %, con input
+    LedgeClimb --> Idle: clip al 97 %, sin input
+    Vault --> Run: clip al 82 %, con input
+    Vault --> Idle: clip al 82 %, sin input
+    Slide --> Run: 0.8 s sin techo, con input
+    Slide --> Idle: 0.8 s sin techo, sin input
     LightAttack --> LightAttack: J en ventana (máx 3)
     LightAttack --> HeavyAttack: K en ventana
     LightAttack --> Idle
@@ -278,21 +306,36 @@ No hay ningún asset `.inputactions` en el proyecto (la plantilla por defecto se
 
 ### 5.3 Detección de entorno — ✅ Implementado
 
-- **`GroundChecker : IGroundChecker`**: un `Physics.Raycast` hacia abajo desde
-  `bounds.min.y + 0.1` con longitud `0.1 + extraDistance` contra `groundLayer` (Ground + Obstacle).
-- **`EnvironmentChecker`**: pre-filtro `Physics.OverlapSphereNonAlloc` (buffer de 4, radio 1.2)
-  antes de los raycasts. Cornisa = golpean centro y cabeza, más un raycast hacia abajo desde arriba
-  y adelante para encontrar la esquina. **Vault (`TryFindVault`, adaptado del Dynamic Parkour
-  System, ver §5.12):** 4 rayos sin allocations en layer Obstacle: (1) cara frontal a la altura de
-  la rodilla dentro de `vaultReach` (1.1 m) y de frente (`Dot ≥ 0.6`); (2) cima entre
-  `minVaultHeight` (0.45 m) y `vaultHeightCheck` (1.2 m) sobre los pies; (3) profundidad ≤
-  `maxVaultDepth` (1.5 m), con un rayo de regreso desde detrás; (4) suelo de aterrizaje en
-  `landingLayer` a `vaultLandOffset` (0.6 m) detrás de la cara trasera. Devuelve un `VaultInfo`
-  (dirección, punto de aterrizaje, punto de la mano, altura de la cima).
+- **`GroundChecker : IGroundChecker`**: un `Physics.SphereCast` corto hacia abajo con radio del 90 %
+  del collider, desde justo encima de los pies, contra `groundLayer` (Ground + Obstacle). Cubre la
+  huella de los pies, no solo un rayo bajo el centro, así que el cuerpo sigue "en el suelo" sobre el
+  borde de un escalón en lugar de parpadear al aire.
+- **`EnvironmentChecker`**: pre-filtro `Physics.OverlapSphereNonAlloc` (buffer de 4, radio 1.4)
+  antes de los raycasts, y una comprobación de espacio libre (`CheckCapsule` de un cuerpo de pie).
+  Todo lo que devuelve está medido sobre la geometría real.
+  - **Vault (`TryFindVault`, adaptado del Dynamic Parkour System, ver §5.12):** rayos sin
+    allocations en layer Obstacle: (1) cara frontal a la altura de la rodilla dentro de `vaultReach`
+    (1.1 m) y de frente (`Dot ≥ 0.6`); **la dirección del vault es perpendicular a la cara**, no la
+    del input; (2) cima entre `minVaultHeight` (0.45 m) y `vaultHeightCheck` (1.2 m) sobre los pies;
+    (3) profundidad ≤ `maxVaultDepth` (1.5 m), con un rayo de regreso desde detrás; (4) aterrizaje:
+    prueba a 1.6 m de la cara trasera (donde aterriza el clip corriendo), luego 1.1 y 0.6 m, y acepta
+    el primero con suelo y espacio para estar de pie. Devuelve un `VaultInfo`: dirección, punto de
+    aterrizaje, punto de la mano izquierda (sobre la cima, 0.12 m tras el borde y 0.3 m a la
+    izquierda, como en el clip), altura de la cima, borde frontal, profundidad y distancia a la mano.
+  - **Cornisa (`TryFindLedge`):** cara del muro con rayos a 1.2 m y 1.75 m sobre los pies (alcance
+    1.0 m desde el suelo, 0.75 m en el aire) que mire al jugador (`Dot ≥ 0.5`); cima plana entre una
+    altura mínima y máxima sobre los pies (1.9–2.7 m desde el suelo, 1.5–2.6 m en el aire); el
+    **borde exacto** con un rayo horizontal justo bajo la cima; y espacio para estar de pie en el
+    punto donde termina la subida (0.45 m tras el borde). Devuelve un `LedgeInfo`: borde, normal,
+    cima, punto de pie, rotación de frente al muro y `EdgeAt(punto)` (el borde a la altura lateral
+    de cualquier mano).
 - **Auto step (`PlayerMovement.TryAutoStep`, adaptado del DPS):** en `Run`, si un rayo a 5 cm del
   suelo choca en la dirección de movimiento y otro a `StepHeight` (0.4 m) no, busca la cima con un
   rayo hacia abajo y sube el cuerpo hasta ella (`stepLayer` = Ground + Obstacle). Los obstáculos de
-  vault (≥ 0.45 m) no se suben así.
+  vault (≥ 0.45 m) no se suben así. **Step down (`TryStepDown`):** al bajar un escalón de hasta
+  0.4 m, el cuerpo baja con él en lugar de pasar a `Fall` en cada peldaño (no actúa durante 0.3 s
+  después de subir un escalón). Los dos disparan `Stepped`, y `PlayerAnimator` suaviza el modelo en
+  0.1 s para que el salto de posición no se vea.
 
 ### 5.4 Combate — 🟡 Parcial
 
@@ -362,6 +405,8 @@ jugador), camera shake, encuadre de combate y ajuste de zoom.
 | Estamina y HUD (`PlayerStamina`, `PlayerHUD`) | GDD §5.2 (sprint sin recurso) y §16 (sin barras de vida) | 2026-09-30 | P7 |
 | Enemigos `Looter`/`Brute` | GDD anterior; los tipos del GDD final llegan con P4 | 2026-09-30 | P8 |
 | `initial_floor.prefab`, `InputSystem_Actions.inputactions` | Sin uso | 2026-09-30 | P8 |
+| Blockout anterior de `Level-1` (casas `House_01_cyber`, `wall`, instancia de `Enemy`, `Ground` cápsula) y carteles del circuito | `Level-1` es el Parkour Test Area | 2026-10-01 | P24 |
+| `LowPoly/HumanPlayer.prefab`, `LowPolyHumanAnimator.controller`, `ball.mat`, `metal.mat`, `Sign.mat`, 10 FBX Ch45 de la raíz | Sin uso ni referencias | 2026-10-01 | P8, P24 |
 
 ### 5.9 Herramientas de Editor — ✅ Implementado
 
@@ -371,23 +416,27 @@ jugador), camera shake, encuadre de combate y ajuste de zoom.
   reescala si hace falta y ajusta `CapsuleCollider` y `HeadPoint`. Es idempotente.
 - `PlayerAnimationSetup` (menús **Tools → Warrior Woke → Configurar Animaciones del Jugador** y
   **Validar Personaje**; también en batch con `-executeMethod
-  WarriorWoke.EditorTools.PlayerAnimationSetup.SetupAndValidateBatch`): extrae las texturas
-  embebidas de `character.fbx`, importa las transiciones de guardia Ch45, regenera
-  `PlayerAnimator.controller` (conserva su GUID) y lo asigna al prefab. La validación revisa Avatar,
-  material, clips de cada estado, Missing Scripts (prefab y `Level-1`) y muestrea cada clip sobre
-  Ch45 con `AnimationMode` en 5 momentos para detectar poses rotas. Es idempotente. Ver §5.10.
-  Desde el 2026-09-30 también importa los clips del Dynamic Parkour System (Avatar propio, root
-  motion horneado), activa el IK Pass y agrega `PlayerAnimatorIK`. El batch construye además el
-  circuito.
-- `ParkourTestCircuitBuilder` (menús **Construir Circuito de Parkour** y **Listar límites de la
-  escena**): reconstruye `ParkourTestCircuit` en `Level-1`, coloca el `Spawner` en su entrada y
-  valida que ningún otro objeto de la escena lo invada. Ver `features.md` F32.
+  WarriorWoke.EditorTools.PlayerAnimationSetup.SetupAndValidateBatch` o `ValidateBatch`): extrae
+  las texturas embebidas de `character.fbx`, importa las transiciones de guardia Ch45, configura el
+  root motion de cada clip que usa el jugador (§5.10) y restaura la curva `LHandCurve`, regenera
+  `PlayerAnimator.controller` (conserva su GUID) y lo asigna al prefab: coloca el `Model` con las
+  suelas en la base del collider (medidas con `SkinnedMeshRenderer.BakeMesh` sobre la pose idle),
+  activa la interpolación del Rigidbody, el IK Pass y agrega `PlayerAnimatorIK` y
+  `PlayerContactIK`. La validación revisa Avatars, material, clips de cada estado, la curva del
+  vault, el contacto de las suelas, Missing Scripts (prefab y `Level-1`), el Parkour Test Area y
+  muestrea cada clip sobre Ch45 con `AnimationMode` en 5 momentos para detectar poses rotas (73
+  comprobaciones). Es idempotente. El batch construye además el área.
+- `ParkourTestCircuitBuilder` (menús **Construir Parkour Test Area** y **Listar límites de la
+  escena**): reconstruye `ParkourTestArea` en `Level-1`, elimina los objetos del blockout anterior
+  si siguen ahí, coloca el `Spawner` en la entrada y valida que no quede ningún collider fuera del
+  área. Ver `features.md` F32.
 - `ParkourPlayModeTest` (menú **Probar Personaje en Play Mode**; batch sin `-quit`:
   `-executeMethod WarriorWoke.EditorTools.ParkourPlayModeTest.RunBatch`): entra a Play Mode, agrega
-  un teclado virtual del Input System y recorre el circuito (36 comprobaciones). Sale con código 0 si
-  todo pasa.
+  un teclado virtual del Input System y recorre las siete secciones. Además del flujo de estados,
+  mide el contacto sobre el esqueleto animado (140 comprobaciones; detalle en `features.md` F32).
+  Sale con código 0 si todo pasa.
 
-### 5.10 Animación — 🟡 Parcial (funciona, con clips provisionales)
+### 5.10 Animación y contacto físico — 🟡 Parcial (funciona, con clips provisionales)
 
 **Modelo y materiales.** `character.fbx` es el personaje Ch45 de Mixamo (rig `mixamorig1:`, 1
 material `Ch45_Body`), importado como **Humanoid** con su propio Avatar. Sus 5 texturas (Diffuse,
@@ -397,61 +446,107 @@ hasta extraerlas: por eso el personaje se veía sin textura. Se extrajeron a
 materiales de URP las asigna al material del FBX (`_BaseMap` = Diffuse, `_BumpMap` = Normal,
 emisión activa). El material del FBX se conserva; no hay materiales propios.
 
-**Arquitectura.** La FSM es la única fuente de verdad (decisión D10):
+**Colocación del modelo.** El `Model` se había centrado con los bounds del `SkinnedMeshRenderer`,
+que traen margen, y de pie las suelas quedaban **11 cm sobre el suelo**. Ahora `PlayerAnimationSetup`
+mide el vértice más bajo de la pose idle y coloca el modelo en y = −0.974, con las suelas en la base
+del collider.
+
+**Arquitectura.** La FSM es la única fuente de verdad (D10); el parkour usa root motion (P22):
 
 ```
 PlayerStateMachine.OnStateChanged → PlayerMovement.StateChanged → PlayerAnimator
-PlayerAnimator: CrossFadeInFixedTime(estado del Animator, 0.15 s; 0.05 s en ataques,
-                aterrizajes y acciones de parkour) + Speed cada frame
-Model/PlayerAnimatorIK.OnAnimatorIK → PlayerAnimator.ApplyIK (mano izquierda en el vault)
+PlayerAnimator: CrossFadeInFixedTime(estado del Animator, 0.2 s por defecto; 0.05–0.1 s en ataques,
+                aterrizajes y parkour; 0.3 s hacia la caída) + Speed cada frame + MatchTarget
+Model/PlayerAnimatorIK.OnAnimatorMove → PlayerAnimator.ApplyRootMotion → PlayerMovement.ApplyRootMotion
+Model/PlayerAnimatorIK.OnAnimatorIK   → PlayerAnimator.ApplyIK → PlayerContactIK.Solve
+PlayerAnimator implementa IParkourAnimationProgress → PlayerMovement.ParkourProgress (lo leen los estados)
 ```
 
-- `PlayerAnimator` (en la raíz del Player) busca el `Animator` de `Model`, desactiva root motion y
-  traduce cada estado de la FSM a un estado del Animator. Los estados de la FSM no llaman al Animator.
+- `PlayerAnimator` (en la raíz del Player) busca el `Animator` de `Model` y traduce cada estado de
+  la FSM a un estado del Animator. Los estados de la FSM no llaman al Animator: leen el progreso del
+  clip de su acción por la interfaz `IParkourAnimationProgress` y terminan o encadenan en momentos
+  medidos (`ParkourTimings`), no tras un tiempo fijo.
 - `PlayerAnimatorIds` guarda nombres y hashes (`Animator.StringToHash`, una sola vez); los comparten
   `PlayerAnimator` y la herramienta de Editor.
-- **Sin root motion:** el Rigidbody lo mueven los estados (D1). Todos los clips tienen el
-  desplazamiento de la cadera horneado en la pose (*Bake Into Pose*).
-- `Speed` lleva signo: velocidad a lo largo del frente del personaje / `BaseSpeed` cuando retrocede
-  (negativa), y magnitud horizontal / `BaseSpeed` en los demás casos.
-- **Aterrizaje solo visual (P19):** al pasar de `Fall` a `Idle`/`Run` tras más de 0.35 s de caída,
-  `PlayerAnimator` reproduce `Land` o `LandRun`, que vuelven solos a `Locomotion`. El control nunca
-  se bloquea.
+- `Speed` es positiva salvo al caminar hacia atrás (velocidad a lo largo del frente / `BaseSpeed`),
+  así que un giro brusco a velocidad nunca muestra la caminata hacia atrás.
+
+**Root motion por clip (P22).** Como `PlayerAnimatorIK` implementa `OnAnimatorMove`, Unity nunca
+aplica el root motion por su cuenta: lo decide `PlayerAnimator`.
+
+| Modo | Clips | Qué pasa |
+|---|---|---|
+| En el sitio (el avance horizontal no queda en la pose; la altura sí) | Walk, Jog Forward, Run, Fall A Loop, Falling To Landing, Fall A Land To Run Forward, Slide Down, Slide, Slide Up | El Rigidbody mueve el cuerpo. Antes Walk y Jog tenían horneado en la pose un avance de 1.6–2.2 m por ciclo: la pose patinaba y regresaba en cada ciclo. |
+| Root motion (horizontal según el centro de masa) | Vault1, Idle To Braced Hang, Braced Hang To Crouch, Jump_Up | Vault, agarre y subida: `PlayerAnimator` aplica el movimiento del clip al cuerpo (kinemático) y lo warpea con `MatchTarget`. Jump_Up: su subida no se aplica (la hace la física), así la pose ya no flota 0.58 m sobre el collider. "Centro de masa": Vault1 empieza a mitad de una carrera y, con la base "Original", su pose arrancaba 0.9 m por delante del cuerpo. |
+| Todo en la pose | Hanging Idle, transiciones de guardia Ch45, clips LowPoly en el sitio | Bucles y clips sin desplazamiento. |
+
+Los ajustes de importación se escriben con `SerializedObject` sobre `m_ClipAnimations`: en esta
+versión de Unity el getter `ModelImporter.clipAnimations` falla (`Cannot unmarshal intptr objects in
+structs`) y devuelve los clips sin sus curvas. Al reescribirlos se perdió `LHandCurve` (el peso de la
+mano del vault), así que el IK de la mano del vault nunca había funcionado. Ahora se restaura desde
+el `.meta` original del DPS (T22).
+
+**MatchTarget (warp del root motion hacia el contacto medido).** Unity acepta un match a la vez;
+`PlayerAnimator` los encola por fases. Las rotaciones no se warpean (peso 0, como en el DPS):
+`ApplyRootMotion` gira el cuerpo a 540°/s hasta quedar de frente a la cara del obstáculo o del muro.
+
+| Acción | Fase | Parte | Destino | Ventana (tiempo normalizado del clip) |
+|---|---|---|---|---|
+| Vault | Despegue (solo si la cima supera 0.8 m) | Raíz, solo Y | Sube lo que el obstáculo excede, antes de que llegue la pierna delantera | inicio → 0.16 |
+| Vault | Apoyo | Mano izquierda | Punto de la mano sobre la cima (+ altura de la muñeca) | inicio → 0.30 |
+| Vault | Aterrizaje | Raíz | Punto de aterrizaje medido | 0.53 → 0.78 |
+| LedgeGrab | Agarre | Mano izquierda | Borde medido (+ muñeca, a la izquierda del cuerpo) | 0.30 desde el suelo, o desde la entrada en el aire → 0.56 |
+| LedgeClimb | Cima | Raíz | Punto de pie sobre la cima | 0.40 → 0.95 |
+
+El vault se reproduce a la velocidad de la aproximación (`ParkourSpeed` = velocidad / 4.35 m/s del
+clip, entre 0.8 y 1.5) y empieza más tarde si el obstáculo está más cerca de lo que espera el clip.
+El agarre desde el suelo reproduce el clip desde 0.12 (incluye el salto); en el aire entra en 0.40,
+con los brazos ya arriba.
+
+**`PlayerContactIK` (IK Pass Humanoid).** Mantiene manos y pies sobre las superficies reales:
+
+| Situación | Manos | Pies |
+|---|---|---|
+| Vault | Izquierda sobre la cima, con el peso de `LHandCurve` | Un pie que pasa sobre el obstáculo (o está por entrar) nunca baja de la cima |
+| Colgado | Ambas en el borde, a su altura lateral; el cuerpo se desplaza para que la mano animada llegue sola y el IK solo corrija los últimos centímetros | Apoyados en el muro (tobillo a 0.13 m); un pie dentro del muro siempre se saca |
+| Subida | En el borde mientras tira del cuerpo (el cuerpo sigue a las manos), luego apoyadas sobre la cima sin atravesarla | En el muro al inicio, luego libres |
+| En el suelo (Idle, Run, Slide, Block, ataques) | — | Siguen el terreno (escalones, bordillos) y nunca se hunden en él; la pelvis baja hasta 0.35 m si un pie pisa más abajo (enfoque del IK de pies del DPS). Se aplica de inmediato al aterrizar y se apaga al entrar en una acción de parkour. |
 
 **`PlayerAnimator.controller`** (generado por `PlayerAnimationSetup`, IK Pass activo). Parámetros:
-`Speed`, `DodgeX`, `DodgeY`, `LHandCurve` (lo escribe la curva del clip de vault). Transiciones
-propias, todas por exit time hacia un bucle: `BlockEnter → BlockLoop`, `BlockExit → Locomotion`,
-`Land → Locomotion`, `LandRun → Locomotion`, `LedgeGrab → LedgeHang`. El resto los decide la FSM.
-17 estados.
+`Speed`, `DodgeX`, `DodgeY`, `LHandCurve` (lo escribe la curva del clip de vault) y `ParkourSpeed`
+(velocidad del estado Vault, 1 por defecto). Transiciones propias, todas por exit time hacia un
+bucle o hacia la locomoción: `BlockEnter → BlockLoop`, `BlockExit → Locomotion`,
+`Land / LandRun / LandHard → Locomotion`, `Slide → SlideLoop`, `SlideExit → Locomotion`,
+`LedgeGrab → LedgeHang`. El resto los decide la FSM. 20 estados.
 
 | Estado del Animator | Estado FSM | Clip (origen) | Velocidad |
 |---|---|---|---|
 | `Locomotion` (Blend 1D por `Speed`) | Idle, Run | RunBackward −0.3 (LowPoly, ×0.6) · Idle 0 (LowPoly) · Walk 0.34 · Jog Forward 0.52 · Run 1 (DPS) · Sprint 1.4 (LowPoly) | 1 |
 | `Jump` | Jump | Jump_Up — LowPoly | 1 |
 | `Fall` | Fall | Fall A Loop — DPS | 1 |
-| `Land` / `LandRun` | (al aterrizar) | Falling To Landing / Fall A Land To Run Forward — DPS | ajustadas a 0.45 / 0.4 s |
-| `Vault` | Vault | Vault1 (VaultFence) — DPS, con curva `LHandCurve` para el IK | ajustada a 0.6 s |
-| `Slide` | Slide | Running Slide — DPS | ajustada a 0.8 s |
-| `LedgeGrab` → `LedgeHang` | LedgeGrab | Idle To Braced Hang → Hanging Idle — DPS | 0.35 s / 1 |
-| `LedgeClimb` | LedgeClimb | Braced Hang To Crouch — DPS | ajustada a 0.9 s |
+| `Land` / `LandRun` / `LandHard` | (al aterrizar, según la severidad) | Falling To Landing / Fall A Land To Run Forward / Falling To Landing — DPS | 0.45 s / 0.4 s / 0.9 s |
+| `Vault` | Vault | Vault1 (VaultFence) — DPS, root motion, curva `LHandCurve` | `ParkourSpeed` |
+| `Slide` → `SlideLoop`; `SlideExit` | Slide; al salir del slide | Slide Down → Slide (bucle); Slide Up — DPS | 0.3 s → 1; 0.5 s |
+| `LedgeGrab` → `LedgeHang` | LedgeGrab | Idle To Braced Hang (root motion) → Hanging Idle — DPS | 1.1 / 1 |
+| `LedgeClimb` | LedgeClimb | Braced Hang To Crouch (root motion) — DPS | 1.1 |
 | `LightAttackRight` / `LightAttackLeft` | LightAttack (golpes 1-3 / 2) | PunchRight / PunchLeft — LowPoly | ajustada a 0.5 s |
 | `HeavyAttack` | HeavyAttack | MeleeAttack_OneHanded — LowPoly (**placeholder: no hay patada**) | ajustada a 0.8 s |
 | `BlockEnter` → `BlockLoop` → `BlockExit` | Block | Standing Idle To Fight Idle (Ch45) → BlockingLoop (LowPoly) → Fight Idle To Standing Idle (Ch45) | transiciones a 0.3 s |
 | `Dodge` (Blend 2D `DodgeX`/`DodgeY`) | Dodge | RollForward/Backward/Left/Right — LowPoly | ajustada a 0.5 s |
 
+Aterrizaje: severidad < 0.35 → `LandRun` con input o `Land` sin input; 0.35–0.75 → `Land`;
+≥ 0.75 → `LandHard` (absorción completa, y la transición a la locomoción dura 0.3 s).
+
 Los umbrales del blend son la velocidad del clip / `BaseSpeed`: Walk (1.7 m/s) y Jog (2.6 m/s) se
 midieron con el desplazamiento de la cadera de los clips del DPS; caminar hacia atrás es
-`BackpedalSpeed` (1.5 m/s). Las velocidades "ajustadas" hacen que el clip dure lo mismo que el
-estado de la FSM.
+`BackpedalSpeed` (1.5 m/s).
 
 **Clips que existen pero no se usan:** de LowPoly, `GetHit`, `Death`, `IdleCombat`, `StunnedLoop`,
 `BowShot`, `Buff`, `CastingLoop`, `SpellCast`, `Gathering`, `MiningLoop`, `MeleeAttack_TwoHanded`,
 `RunForward`, `FallingLoop`, `JumpWhileRunning`, `Jump_Down`, `Run*`/`Strafe*` direccionales.
 `GetHit`/`Death` tendrán uso con F19/F29. De Ch45, solo están en el proyecto las 2 transiciones de
-guardia; los otros 10 FBX (caminatas, strafes, *Great Sword Walk*, *Left Turn W_Briefcase*,
-*Walk Backward Arc*) siguen fuera de `Assets/`. *Walk Backward Arc* se probó como caminata hacia
-atrás y se descartó: la validación midió la cabeza a ~1.0 m de los pies en todo el clip (es una
-caminata agachada).
+guardia (los demás FBX descargados se borraron el 2026-10-01). Dentro de `Slide.fbx`, *Running
+Slide* (el slide completo) se dejó de usar al pasar a las tres fases.
 
 ### 5.11 Sistemas que no existen todavía — ⬜ Pendiente
 
@@ -468,29 +563,30 @@ Es un controlador completo (`ThirdPersonController` exige `InputCharacterControl
 `CameraController` con Cinemachine y `VaultingController`) y todas sus acciones dependen de él.
 
 **Decisión P15: adaptar, no reemplazar.** No se importó ningún script del recurso. Se portó su
-lógica a nuestra FSM y se usan 11 de sus animaciones:
+lógica a nuestra FSM y se usan 11 de sus FBX (13 clips):
 
 | Del DPS | En el proyecto |
 |---|---|
-| `VaultObstacle`: rayo de rodilla → aterrizaje detrás → cuerpo kinemático interpolado durante el clip, IK de mano izquierda con la curva `LHandCurve` | `EnvironmentChecker.TryFindVault` + `PlayerVaultState` + `PlayerAnimator.ApplyIK`. Mide altura y profundidad con rayos (el original usa `localScale` y tags) y suma un arco si el obstáculo es más alto que el salto del clip. |
-| `MovementCharacterController.AutoStep` | `PlayerMovement.TryAutoStep` (sube hasta la cima medida, no 0.2 m por tick) |
-| `VaultSlide` (slide bajo obstáculos) | Se conservó nuestro `PlayerSlideState` (collider al 50 %, no se levanta bajo techo), que ya pasa bajo obstáculos por física; solo se usa la animación *Running Slide*. |
-| `ClimbController` (braced hang) | Se conservó nuestro ledge grab/climb; se usan las animaciones *Idle To Braced Hang*, *Hanging Idle* y *Braced Hang To Crouch*. |
+| `VaultObstacle`: rayo de rodilla → aterrizaje detrás → cuerpo movido durante el clip, IK de mano izquierda con la curva `LHandCurve` | `EnvironmentChecker.TryFindVault` + `PlayerVaultState` + `PlayerContactIK`. Mide la cara, la altura y la profundidad con rayos (el original usa `localScale` y tags). El cuerpo lo mueve el root motion del clip warpeado con `MatchTarget` (el original interpola la posición), con la fase extra de despegue. |
+| `AnimationCharacterController`: root motion activo en estados con tag "Root" y `MatchTarget` | `PlayerAnimator`: root motion solo en Vault, LedgeGrab y LedgeClimb, aplicado por `OnAnimatorMove` al cuerpo kinemático, y `MatchTarget` por fases (§5.10). |
+| `ClimbController` (braced hang): `MatchTarget` de la mano al agarrar y del pie al subir; IK de manos en el borde y de pies en el muro | `PlayerLedgeGrabState` / `PlayerLedgeClimbState` + `TryFindLedge` + `PlayerContactIK`. Agarre desde el suelo (como el original) o en el aire; la subida warpea la raíz hacia el punto de pie medido. Animaciones *Idle To Braced Hang*, *Hanging Idle* y *Braced Hang To Crouch*. |
+| `MovementCharacterController`: `AutoStep`, IK de pies con ajuste de pelvis | `PlayerMovement.TryAutoStep` (sube hasta la cima medida, no 0.2 m por tick) y `TryStepDown`; IK de pies en el suelo en `PlayerContactIK`, con la regla extra de no penetración. |
+| `VaultSlide` (slide bajo obstáculos) | Se conservó nuestro `PlayerSlideState` (collider al 50 %, no se levanta bajo techo); se usan los sub-clips *Slide Down*, *Slide* y *Slide Up*. |
 | Animaciones de locomoción y aire | *Walk*, *Jog Forward*, *Run*, *Fall A Loop*, *Falling To Landing*, *Fall A Land To Run Forward* |
 
 **No se usó (fuera del GDD §28, que limita el parkour a salto, sprint y vault):** escalar paredes
-y obstáculos (`ClimbController`, `HandlePoints`), saltar a postes y la predicción de saltos
+y obstáculos (`HandlePoints`), saltar a postes y la predicción de saltos
 (`JumpPredictionController`, `VaultJumpPrediction`), salto de cornisa a cornisa, *drop* a cornisa
-(`VaultDown`), braced/free hang con desplazamiento lateral, *Vault Over* (caja) y *Reach*.
-**Tampoco:** su cámara Cinemachine (usamos `CameraFollow`), su input (usamos `PlayerInputHandler`),
-su IK de pies (no se pidió y nuestro suelo de pruebas es plano) ni su prevención de caídas en
-bordes (`CheckBoundaries`), que cambiaría el control.
+(`VaultDown`), free hang, desplazamiento lateral colgado, *Vault Over* (caja) y *Reach*.
+**Tampoco:** su cámara Cinemachine (usamos `CameraFollow`), su input (usamos `PlayerInputHandler`)
+ni su prevención de caídas en bordes (`CheckBoundaries`), que cambiaría el control. Las curvas de
+pies de Walk/Jog/Run del original no se restauraron: nuestro IK de pies no las necesita.
 
 ## 6. Decisiones técnicas vigentes
 
 | # | Decisión | Motivo |
 |---|---|---|
-| D1 | Jugador con **Rigidbody dinámico** + velocidad escrita por los estados (no `CharacterController`) | Ya implementado y funcionando; permite `MovePosition` kinemático en parkour. |
+| D1 | Jugador con **Rigidbody dinámico** + velocidad escrita por los estados (no `CharacterController`). En parkour el cuerpo pasa a kinemático y lo mueve el root motion (P22) | Ya implementado y funcionando; el modo kinemático permite que la animación lleve el cuerpo sin pelear con la física. |
 | D2 | **FSM por clases** (una clase por estado, transiciones dentro del estado) para jugador y enemigos | Coincide con lo que pide el GDD para la IA (§21) y mantiene los estados testeables y aislados. |
 | D3 | **Facade** (`Player`) + **contexto** (`PlayerMovement`) | Separa el enrutado de input de la física y la lógica. |
 | D4 | **Interfaces** para desacoplar (`IDamageable`, `IInputProvider`, `IGroundChecker`, `IPoolable`) | `Hitbox` no conoce al jugador ni al enemigo; el input se puede cambiar sin tocar el movimiento. |
@@ -499,7 +595,7 @@ bordes (`CheckBoundaries`), que cambiaría el control.
 | D7 | **Eventos C# (`System.Action`)** para notificar (`OnDeath`, `OnHealthChanged`, `OnPlayerSpawned`) | La UI, el audio y la cámara se enganchan sin acoplarse. Se suscriben en `OnEnable` y se desuscriben en `OnDisable`. |
 | D8 | Movimiento **relativo a cámara** y cámara que sigue el `forward` del jugador | Controlador estándar de tercera persona. La cámara libre con ratón llega con P5. |
 | D9 | Cero allocations en código caliente (`NonAlloc`, buffers prealocados, sin LINQ ni strings en loops) | Ver buenas prácticas en `features.md`. |
-| D10 | **Animación dirigida por la FSM:** `PlayerAnimator` hace cross-fade al estado del Animator según el estado de la FSM; el controller casi no tiene transiciones y no se usa root motion | Evita duplicar la lógica de transiciones en dos sistemas que podrían desincronizarse, y respeta D1 (el Rigidbody lo mueve el código). |
+| D10 | **Animación dirigida por la FSM:** `PlayerAnimator` hace cross-fade al estado del Animator según el estado de la FSM; el controller casi no tiene transiciones. Root motion solo en las acciones de parkour (P22), y los estados de parkour terminan según el progreso de su clip | Evita duplicar la lógica de transiciones en dos sistemas que podrían desincronizarse. Fuera del parkour, el Rigidbody lo mueve el código (D1). |
 
 ## 7. Plan técnico para lo que falta — 📋 Propuesta
 
@@ -536,31 +632,33 @@ bordes (`CheckBoundaries`), que cambiaría el control.
 | P10 | Identidad del producto | `productName` = Awakened Warrior, `companyName` = SUNUX GAMES. | 2026-09-30 | ✅ Implementada |
 | P11 | Animaciones del jugador | Usar los clips Humanoid `LowPoly` del proyecto retargeteados a Ch45, más las transiciones de guardia Ch45 en el bloqueo. Solo esos 2 FBX Ch45 entran al proyecto; los otros 10 (caminatas, strafes, maletín, mandoble) quedan fuera. No se descarga nada. Hit y Death quedan para F19/F29. | 2026-09-30 | ✅ Implementada |
 | P12 | Locomoción | WASD = correr (`BaseSpeed` 5) y Shift = sprint (+40 %). Actualizada el mismo día: la velocidad acelera y frena gradualmente y el blend pasa por Walk y Jog (clips del DPS); los controles y las velocidades finales no cambian. | 2026-09-30 | ✅ Implementada (T16) |
-| P13 | Root motion | Todo el movimiento por código; Apply Root Motion desactivado. Estado de caída nuevo (`PlayerFallState`, resuelve T13). | 2026-09-30 | ✅ Implementada |
+| P13 | Root motion | Todo el movimiento por código; Apply Root Motion desactivado. Estado de caída nuevo (`PlayerFallState`, resuelve T13). **Modificada por P22**: el parkour usa root motion. | 2026-09-30 | ✅ Implementada (salvo el parkour) |
 | P14 | Alcance de la pasada "personaje jugable" | Animaciones de ataques, bloqueo real −70 % frontal, esquiva direccional con roll. Parkour solo con animaciones placeholder (el vault seguía automático; lo reemplazó P17). Color del personaje: extraer texturas embebidas y subir la luz direccional de 0.3 a 1. | 2026-09-30 | ✅ Implementada |
 | P15 | Integración del Dynamic Parkour System | Adaptar su lógica y animaciones a nuestra FSM + Rigidbody. No se importan sus scripts, su cámara Cinemachine ni su input. Ver §5.12. | 2026-09-30 | ✅ Implementada |
 | P16 | Caminar hacia atrás | Con S (y diagonales atrás) sin sprint el personaje retrocede mirando al frente a 1.5 m/s. Con sprint gira y esprinta normal. Clip: LowPoly *RunBackward* a ×0.6 (la caminata Ch45 resultó agachada). | 2026-09-30 | ✅ Implementada |
 | P17 | Alcance del parkour | Vault con Espacio (GDD), slide con animación del DPS (P2), auto step y ledge con animaciones del DPS (P2). Fuera: escalar, postes, predicción de saltos, cornisa a cornisa, drops. | 2026-09-30 | ✅ Implementada |
 | P18 | Combate más dinámico | Con los clips existentes: giro hacia el input e impulso hacia adelante al atacar, daño sincronizado con el golpe, buffer de input en el combo, cross-fades cortos. | 2026-09-30 | ✅ Implementada |
-| P19 | Aterrizaje | Solo visual (Land / LandRun del DPS); no bloquea el control. | 2026-09-30 | ✅ Implementada |
-| P20 | Circuito de pruebas | Zona `ParkourTestCircuit` dentro de `Level-1` (losa propia) y `Spawner` movido a su entrada, porque el spawn original quedaba encerrado por la casa. Revertir el `Spawner` cuando se diseñe el nivel real. | 2026-09-30 | ✅ Implementada |
-| P21 | `Ground` con malla Capsule | Solo documentarlo (T19); no se cambia la malla. | 2026-09-30 | ✔ Aprobada |
+| P19 | Aterrizaje | Solo visual (Land / LandRun del DPS); no bloquea el control. **Reemplazada por P23** (aterrizaje según la altura, con recuperación). | 2026-09-30 | ⏸️ Reemplazada |
+| P20 | Circuito de pruebas | Zona `ParkourTestCircuit` dentro de `Level-1` (losa propia) y `Spawner` movido a su entrada, porque el spawn original quedaba encerrado por la casa. **Reemplazada por P24.** | 2026-09-30 | ⏸️ Reemplazada |
+| P21 | `Ground` con malla Capsule | Solo documentarlo (T19); no se cambia la malla. **Obsoleta:** el `Ground` se eliminó con P24. | 2026-09-30 | ⏸️ Obsoleta |
+| P22 | Contacto físico del parkour | Root motion solo durante vault, agarre y subida, warpeado con `Animator.MatchTarget` hacia los puntos medidos, más IK de manos y pies (`PlayerContactIK`). Como hace el DPS; sin paquetes nuevos (ni Animation Rigging). | 2026-10-01 | ✅ Implementada |
+| P23 | Movimiento humano y aterrizaje | Salto de ~1 m (`JumpSpeed` 4.5), inercia en el aire, aceleración 10 / frenado 13 m/s², giro más abierto a mayor velocidad, slide con fricción y sin impulso extra, step down, y aterrizaje según la altura: Fall → Landing → Recovery → Locomotion (absorbe velocidad y la devuelve en hasta 0.7 s, sin bloquear el control). | 2026-10-01 | ✅ Implementada |
+| P24 | Parkour Test Area | `Level-1` pasa a ser el área de pruebas: suelo plano, perímetro y siete secciones sin textos. Se eliminan el blockout anterior (casas, `wall`, `Enemy` de la escena, `Ground` cápsula), los carteles y, como recursos sin uso, `HumanPlayer.prefab`, `LowPolyHumanAnimator.controller`, `ball.mat`, `metal.mat`, `Sign.mat` y los 10 FBX Ch45 de la raíz del repo. | 2026-10-01 | ✅ Implementada |
 
 ## 9. Deuda técnica y bugs conocidos
 
 Solo se listan los abiertos. Los IDs no se reutilizan; los resueltos están en el historial de
 `features.md` §5 (T1, T5, T6, T8–T12 se resolvieron el 2026-09-30; T4 y T13, también el 30-sep en
-la integración del personaje; T14, en la integración del parkour).
+la integración del personaje; T14, en la integración del parkour; T7, T19, T20 y T21, el
+2026-10-01 en la pasada de contacto físico).
 
 | # | Problema | Dónde | Impacto |
 |---|---|---|---|
-| T2 | `Enemy.prefab` no tiene `Enemy.cs`, `Hitbox.targetLayers = 0`, y su vida (100) y daño (5) no son del GDD | `Prefabs/Enemy.prefab` | El enemigo de la escena no tiene IA ni puede hacer daño. Se rehace con P4. |
+| T2 | `Enemy.prefab` no tiene `Enemy.cs`, `Hitbox.targetLayers = 0`, y su vida (100) y daño (5) no son del GDD | `Prefabs/Enemy.prefab` | El prefab no tiene IA ni puede hacer daño. Se rehace con P4. |
 | T3 | Enemigos 2.5D (freeze Z, eje X) | `Enemy.cs`, `EnemyGroundedStates.cs` | Incompatible con el jugador 3D. Se rehace con P4. |
-| T7 | Rigidbody sin interpolación mientras la cámara sigue en `LateUpdate` | Player.prefab, `CameraFollow` | Posible jitter visual. Según la documentación oficial, la interpolación se activa solo si se observa jitter. Hay que verificarlo en Play. |
-| T15 | Origen y licencia de las animaciones `LowPoly` desconocidos | `Assets/LowPoly/` | No hay README ni licencia en el repo (las agregó el commit `2d10078`). Hay que confirmarlos antes de publicar el juego. |
+| T15 | Licencia de las animaciones `LowPoly` sin confirmar | `Assets/LowPoly/` | Su origen ya se conoce: el `AssetOrigin` de los `.meta` indica el paquete gratuito *FREE Low Poly Human - RPG Character* de la Unity Asset Store (productId 219979). Falta confirmar sus términos en la página del paquete antes de publicar. |
 | T16 | La velocidad de correr y esprintar no se midió contra el clip | `Player.prefab` → `PlayerMovement` | *Run* (DPS) y *Sprint* (LowPoly) son clips *in place*, sin velocidad medible; Walk y Jog sí se midieron. Si los pies patinan a 5 o 7 m/s, ajustar `BaseSpeed` o los umbrales del blend. |
-| T17 | Animaciones provisionales | `PlayerAnimator.controller` | No hay patada (K usa un ataque de arma). Caminar hacia atrás usa un trote hacia atrás ralentizado. Las transiciones de guardia Ch45 se aceleran de ~1 s a 0.3 s y el vault del DPS de ~1 s a 0.6 s. |
+| T17 | Animaciones provisionales | `PlayerAnimator.controller` | No hay patada (K usa un ataque de arma). Caminar hacia atrás usa un trote hacia atrás ralentizado. Las transiciones de guardia Ch45 se aceleran de ~1 s a 0.3 s. Solo hay un clip de vault (de una mano) y solo braced hang: si no hay muro bajo el borde, los pies quedan colgando. |
 | T18 | Los FBX de las transiciones Ch45 incluyen la malla y las texturas | `Characters/Player/Animations/` | ~16 MB cada uno y el importador avisa de polígonos autointersectados de esa malla, que no se usa. Re-descargarlos de Mixamo "Without Skin" los reduciría a ~1 MB. |
-| T19 | `Ground` es una cápsula aplastada, no un plano | `Level-1` → `Ground` | Malla Capsule 100×1×100: cúpula de 0.5 m (centro en 15, −2.5). La documentación anterior decía "plano con top en Y = 0". Los objetos apoyados en y = 0 quedan hundidos hasta 0.5 m. El circuito usa su propia losa (P21: solo documentarlo). |
-| T20 | El spawn original estaba encerrado por `House_01_cyber` | `Level-1` | Sus colliders cubren x −12.5…12.5, z −12.4…9.6; desde (0, 2, −2.5) el jugador quedaba atrapado. El `Spawner` se movió a la entrada del circuito (P20). |
-| T21 | `wall` y `Enemy` flotan a 35–45 m | `Level-1` | Sin efecto en las pruebas, pero no están sobre el nivel. Se revisa con P4 y el diseño del nivel. |
+| T22 | `ModelImporter.clipAnimations` falla en Unity 6000.6 | API de Editor | El getter registra `Cannot unmarshal intptr objects in structs` y devuelve los clips sin curvas; reescribirlos borra las curvas (así se perdió `LHandCurve`). **Regla:** editar los clips con `SerializedObject` sobre `m_ClipAnimations`, como `PlayerAnimationSetup`. |
+| T23 | Las constantes del parkour dependen de los clips | `ParkourTimings.cs` | Los tiempos de contacto y los offsets se midieron muestreando los clips con una herramienta temporal (ya eliminada). Si se cambia un clip de vault, agarre o subida, hay que volver a medir; la prueba de Play Mode detecta el desajuste (manos lejos del borde, pies dentro de la geometría). |
