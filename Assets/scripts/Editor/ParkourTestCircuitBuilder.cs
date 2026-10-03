@@ -6,111 +6,103 @@ using UnityEngine.SceneManagement;
 namespace WarriorWoke.EditorTools
 {
     /// <summary>
-    /// Builds Level-1 as the Parkour Test Area (decision P24): a flat floor and seven sections, one
-    /// per movement, laid out as parallel lanes that run toward −Z from the spawn point. No signs or
-    /// text: each section is color-coded and the layout is documented in docs/features.md (F32).
-    ///   S01 Locomotion (x = −24) · S02 Vault (x = −14) · S03 Slide (x = −8) · S04 Ledge grab (x = −2)
-    ///   S05 Climb (x = 4) · S06 Jump / Landing (x = 10) · S07 Combined (x = 17)
-    /// Obstacle sizes match the detection limits in EnvironmentChecker, PlayerLedgeGrabState and
-    /// PlayerMovement. Rebuilding replaces the area and removes the objects of the old blockout
-    /// (houses, floating wall and enemy, capsule-shaped Ground) if they are still there.
+    /// Builds Level-1 as the Parkour Test Area (decisions P24, P25): a flat floor, a perimeter and nine
+    /// lanes that run toward −Z from the spawn point, one per standard obstacle. Every obstacle is an
+    /// instance of a standard prefab (ParkourObstaclePrefabs, Parkour Obstacle Standard); only the
+    /// floor, the stairs, the platforms and the pillars are plain test fixtures. No signs or text:
+    /// each family has a color and the layout is documented in docs/features.md (F32).
+    ///   Locomotion (x = −25) · LowVault (−16) · MediumVault (−10) · HighVault (−4) · Slide (2)
+    ///   Ledge (8) · ClimbWall (14) · Jump (20) · Combined (26) · Flow lab (32)
     /// Menu: Tools → Warrior Woke → Construir Parkour Test Area.
     /// </summary>
     internal static class ParkourTestCircuitBuilder
     {
-        private const string ScenePath       = "Assets/Scenes/Level-1.unity";
-        public  const string RootName        = "ParkourTestArea";
-        private const string LegacyRootName  = "ParkourTestCircuit";
-        private const string MaterialsFolder = "Assets/Tests/ParkourCircuit/Materials";
-        private const float  LaneWidth       = 4f;
-        public  const float  FloorTop        = 0f;
+        private const string ScenePath      = "Assets/Scenes/Level-1.unity";
+        public  const string RootName       = "ParkourTestArea";
+        private const string FloorMaterial  = "Assets/Tests/ParkourTestArea/Materials/Losa.mat";
+        private const string FixtureMaterial = ParkourObstaclePrefabs.Folder + "/Materials/Step.mat";
+        private const float  LaneWidth      = ParkourStandard.PrefabWidth;
+        public  const float  FloorTop       = 0f;
+        private const int    LaneCount      = 11;
+
+        // Floor and perimeter (x and z limits of the walkable area)
+        private const float MinX = -34f, MaxX = 44f, MinZ = -65f, MaxZ = 15f;
 
         // Lane centers (x). Every lane starts at z = 0 and runs toward −Z.
-        public const float LocomotionX = -24f, VaultX = -14f, SlideX = -8f, LedgeX = -2f, ClimbX = 4f, LandingX = 10f, ComboX = 17f;
+        public const float LocomotionX = -25f, LowVaultX = -16f, MediumVaultX = -10f, HighVaultX = -4f, SlideX = 2f,
+                           LedgeX = 8f, ClimbX = 14f, JumpX = 20f, ComboX = 26f, FlowX = 32f, MantleX = 38f;
+
+        // Front faces (z) of the obstacles the Play Mode test uses
+        public const float VaultFront = -8f, MediumDeepFront = -20f, MediumDeepDepth = 1.4f;
+        public const float SlideBarFront = -9.5f, TunnelFront = -20f, TunnelDepth = 4f;
+        public const float LedgeFront = -8f, LedgeAngledFront = -20f, LedgeAngle = 30f;
+        public const float ClimbWallFront = -8f, StackFront = -20f, StackDepth = 11f, StackUpperFront = -24f, StackUpperDepth = 3f;
+        public const float JumpGapFront = -8f;
+        public const float FlowVaultFront = -14f, FlowRunwayStart = -20f;
+        public const float MantleFront = -8f, MantleLowFront = -18f, MantleLowHeight = 0.9f, MantleHighFront = -28f, MantleHighHeight = 1.5f;
 
         public static readonly Vector3 SpawnPosition = new Vector3(0f, 1.2f, 8f);
 
+        /// <summary>Lanes face −Z: the prefab's +Z (approach) turns toward −Z.</summary>
+        private static readonly Quaternion LaneFacing = Quaternion.Euler(0f, 180f, 0f);
+
         private static int _ground;
-        private static int _obstacle;
 
         [MenuItem("Tools/Warrior Woke/Construir Parkour Test Area")]
         private static void BuildMenu() => Build();
 
         public static bool Build()
         {
-            _ground   = LayerMask.NameToLayer("Ground");
-            _obstacle = LayerMask.NameToLayer("Obstacle");
-            if (_ground < 0 || _obstacle < 0)
+            _ground = LayerMask.NameToLayer("Ground");
+            if (_ground < 0 || LayerMask.NameToLayer("Obstacle") < 0)
             {
                 Debug.LogError("[ParkourTestArea] Faltan las layers Ground u Obstacle.");
                 return false;
             }
+            if (ParkourObstaclePrefabs.Load(ParkourObstacleType.Combined) == null && !ParkourObstaclePrefabs.Generate())
+                return false;
 
             Scene scene = SceneManager.GetActiveScene();
             if (scene.path != ScenePath)
                 scene = EditorSceneManager.OpenScene(ScenePath, OpenSceneMode.Single);
 
             foreach (GameObject go in scene.GetRootGameObjects())
-            {
-                if (go.name == RootName || IsLegacyBlockout(go))
-                {
-                    Debug.Log($"[ParkourTestArea] Se elimina '{go.name}'.");
-                    Object.DestroyImmediate(go);
-                }
-            }
+                if (go.name == RootName) Object.DestroyImmediate(go);
 
             var root = new GameObject(RootName).transform;
-            Material floor   = GetMaterial("Losa", new Color(0.45f, 0.45f, 0.42f));
-            Material moveMat = GetMaterial("Step", new Color(0.3f, 0.75f, 0.3f));
-            Material vault   = GetMaterial("Vault", new Color(0.95f, 0.55f, 0.15f));
-            Material slide   = GetMaterial("Slide", new Color(0.2f, 0.5f, 0.95f));
-            Material ledge   = GetMaterial("Ledge", new Color(0.95f, 0.85f, 0.2f));
-            Material combo   = GetMaterial("Combo", new Color(0.6f, 0.6f, 0.65f));
+            Material floor   = AssetDatabase.LoadAssetAtPath<Material>(FloorMaterial);
+            Material fixture = AssetDatabase.LoadAssetAtPath<Material>(FixtureMaterial);
 
-            GameObject floorGo = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            floorGo.name = "Suelo";
-            floorGo.layer = _ground;
-            floorGo.isStatic = true;
-            floorGo.transform.SetParent(root, false);
-            floorGo.transform.localPosition = new Vector3(-3f, FloorTop - 0.25f, -25f);
-            floorGo.transform.localScale = new Vector3(62f, 0.5f, 80f);
-            floorGo.GetComponent<MeshRenderer>().sharedMaterial = floor;
-            BuildPerimeter(root, floor);
+            Box(root, "Suelo", new Vector3((MinX + MaxX) * 0.5f, FloorTop - 0.25f, (MinZ + MaxZ) * 0.5f), new Vector3(MaxX - MinX, 0.5f, MaxZ - MinZ), floor);
+            BuildPerimeter(root);
 
-            BuildLocomotion(Lane(root, "S01_Locomocion", LocomotionX), moveMat);
-            BuildVault(Lane(root, "S02_Vault", VaultX), vault);
-            BuildSlide(Lane(root, "S03_Slide", SlideX), slide);
-            BuildLedge(Lane(root, "S04_LedgeGrab", LedgeX), ledge);
-            BuildClimb(Lane(root, "S05_Climb", ClimbX), ledge, moveMat);
-            BuildLanding(Lane(root, "S06_SaltoAterrizaje", LandingX), moveMat);
-            BuildCombined(Lane(root, "S07_Combinado", ComboX), combo, vault, slide, ledge);
+            BuildLocomotion(Lane(root, "S01_Locomocion", LocomotionX), fixture);
+            BuildVault(Lane(root, "S02_LowVault", LowVaultX), ParkourObstacleType.LowVault);
+            BuildVault(Lane(root, "S03_MediumVault", MediumVaultX), ParkourObstacleType.MediumVault);
+            BuildVault(Lane(root, "S04_HighVault", HighVaultX), ParkourObstacleType.HighVault);
+            BuildSlide(Lane(root, "S05_Slide", SlideX));
+            BuildLedge(Lane(root, "S06_Ledge", LedgeX));
+            BuildClimb(Lane(root, "S07_ClimbWall", ClimbX), fixture);
+            BuildJump(Lane(root, "S08_Jump", JumpX), fixture);
+            Place(Lane(root, "S09_Combinado", ComboX), ParkourObstacleType.Combined, 0f);
+            BuildFlow(Lane(root, "S10_Fluidez", FlowX));
+            BuildMantle(Lane(root, "S11_Mantle", MantleX));
 
             PlaceSpawner(scene);
 
             EditorSceneManager.MarkSceneDirty(scene);
             EditorSceneManager.SaveScene(scene);
-            Debug.Log($"[ParkourTestArea] Área construida en {ScenePath} (suelo, perímetro y {root.childCount - 2} secciones).");
+            Debug.Log($"[ParkourTestArea] Área construida en {ScenePath} (suelo, perímetro y {LaneCount} secciones).");
             return true;
-        }
-
-        /// <summary>Objects of the old Level-1 blockout that the test area replaces (removed by decision P24).</summary>
-        private static bool IsLegacyBlockout(GameObject go)
-        {
-            return go.name == LegacyRootName || go.name == "Ground" || go.name == "wall" || go.name == "Enemy" ||
-                   go.name.StartsWith("House_01_cyber");
         }
 
         public static bool Validate(Scene scene)
         {
             GameObject area = null;
-            bool legacy = false;
             foreach (GameObject go in scene.GetRootGameObjects())
-            {
                 if (go.name == RootName) area = go;
-                legacy |= IsLegacyBlockout(go);
-            }
-            bool ok = PlayerAnimationSetup.Check(area != null && area.transform.childCount == 9, "Parkour Test Area en Level-1 (suelo, perímetro y 7 secciones)");
-            ok &= PlayerAnimationSetup.Check(!legacy, "Sin objetos del blockout anterior (casas, muro, enemigo, Ground cápsula)");
+            bool ok = PlayerAnimationSetup.Check(area != null && area.transform.childCount == LaneCount + 2,
+                                                 $"Parkour Test Area en Level-1 (suelo, perímetro y {LaneCount} secciones)");
 
             // Nothing else in the scene has colliders: the area is the whole level
             foreach (GameObject go in scene.GetRootGameObjects())
@@ -122,6 +114,10 @@ namespace WarriorWoke.EditorTools
                     ok = false;
                 }
             }
+
+            bool standard = ParkourObstaclePrefabs.ValidateSceneObstacles(out int count);
+            ok &= PlayerAnimationSetup.Check(standard && count > 0, $"Los {count} obstáculos del área cumplen el Parkour Obstacle Standard");
+            ok &= ParkourObstaclePrefabs.ValidatePrefabs();
             return ok;
         }
 
@@ -147,117 +143,130 @@ namespace WarriorWoke.EditorTools
             foreach (GameObject go in scene.GetRootGameObjects())
             {
                 if (go.GetComponent<Spawner>() == null) continue;
-                go.transform.SetPositionAndRotation(SpawnPosition, Quaternion.Euler(0f, 180f, 0f));
+                go.transform.SetPositionAndRotation(SpawnPosition, LaneFacing);
                 return;
             }
             Debug.LogWarning("[ParkourTestArea] No se encontró el Spawner en la escena.");
         }
 
-        /// <summary>
-        /// 1.5 m walls around the floor so nobody runs off the area. Layer Ground: too high to vault,
-        /// too low to grab, and never a ledge candidate (ledges are only searched on Obstacle).
-        /// </summary>
-        private static void BuildPerimeter(Transform root, Material mat)
+        /// <summary>Standard barriers (1.5 m, layer Ground) around the floor, facing inward.</summary>
+        private static void BuildPerimeter(Transform root)
         {
             var perimeter = new GameObject("Perimetro").transform;
             perimeter.SetParent(root, false);
-            const float minX = -34f, maxX = 28f, minZ = -65f, maxZ = 15f, height = 1.5f, thick = 0.5f;
-            Wall(perimeter, "Norte", new Vector3((minX + maxX) * 0.5f, height * 0.5f, maxZ + thick * 0.5f), new Vector3(maxX - minX + 2f * thick, height, thick), mat);
-            Wall(perimeter, "Sur", new Vector3((minX + maxX) * 0.5f, height * 0.5f, minZ - thick * 0.5f), new Vector3(maxX - minX + 2f * thick, height, thick), mat);
-            Wall(perimeter, "Oeste", new Vector3(minX - thick * 0.5f, height * 0.5f, (minZ + maxZ) * 0.5f), new Vector3(thick, height, maxZ - minZ), mat);
-            Wall(perimeter, "Este", new Vector3(maxX + thick * 0.5f, height * 0.5f, (minZ + maxZ) * 0.5f), new Vector3(thick, height, maxZ - minZ), mat);
+            float depth = ParkourStandard.Spec(ParkourObstacleType.Barrier).Depth;
+            float height = ParkourStandard.Spec(ParkourObstacleType.Barrier).Height;
+            float lengthX = MaxX - MinX + 2f * depth, lengthZ = MaxZ - MinZ;
+            Barrier(perimeter, "Norte", new Vector3((MinX + MaxX) * 0.5f, 0f, MaxZ), 0f, lengthX, height, depth);
+            Barrier(perimeter, "Sur", new Vector3((MinX + MaxX) * 0.5f, 0f, MinZ), 180f, lengthX, height, depth);
+            Barrier(perimeter, "Oeste", new Vector3(MinX, 0f, (MinZ + MaxZ) * 0.5f), -90f, lengthZ, height, depth);
+            Barrier(perimeter, "Este", new Vector3(MaxX, 0f, (MinZ + MaxZ) * 0.5f), 90f, lengthZ, height, depth);
         }
 
-        private static void Wall(Transform parent, string name, Vector3 center, Vector3 size, Material mat)
+        private static void Barrier(Transform parent, string name, Vector3 pivot, float yaw, float width, float height, float depth)
         {
-            GameObject go = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            GameObject go = Instantiate(ParkourObstacleType.Barrier, parent, pivot, Quaternion.Euler(0f, yaw, 0f));
             go.name = name;
-            go.layer = _ground;
-            go.isStatic = true;
-            go.transform.SetParent(parent, false);
-            go.transform.localPosition = center;
-            go.transform.localScale = size;
-            go.GetComponent<MeshRenderer>().sharedMaterial = mat;
+            ParkourObstaclePrefabs.SetBoxSize(go, width, height, depth);
         }
 
         // ─── Sections ────────────────────────────────────────────────────────────────
 
-        // S01: acceleration, braking, turns and backpedal in the open; curbs and stairs for the feet IK.
-        private static void BuildLocomotion(Transform lane, Material mat)
+        // S01: acceleration, braking, turns and backpedal in the open; steps across the standard range
+        // (auto step) and stairs for the feet IK. The pillars are plain fixtures to run around.
+        private static void BuildLocomotion(Transform lane, Material fixture)
         {
             const float width = 8f;
-            Box(lane, "Bordillo_0.15", -8f, 0f, width, 0.15f, 0.6f, _ground, mat);
-            Box(lane, "Bordillo_0.25", -11f, 0f, width, 0.25f, 0.6f, _ground, mat);
-            Box(lane, "Bordillo_0.35", -14f, 0f, width, 0.35f, 0.6f, _ground, mat);
-            for (int i = 0; i < 4; i++)
+            float[] heights = { 0.15f, 0.25f, 0.35f };
+            for (int i = 0; i < heights.Length; i++)
             {
-                GameObject pillar = Box(lane, $"Pilar_{i + 1}", -20f - i * 5f, 0f, 0.6f, 2.5f, 0.6f, _obstacle, mat);
-                pillar.transform.localPosition += new Vector3(i % 2 == 0 ? -1.6f : 1.6f, 0f, 0f);
+                GameObject step = Place(lane, ParkourObstacleType.Step, -8f - i * 3f);
+                step.name = $"Escalon_{heights[i]:0.00}";
+                ParkourObstaclePrefabs.SetBoxSize(step, width, heights[i], ParkourStandard.Spec(ParkourObstacleType.Step).Depth);
             }
-            Stairs(lane, "Escalera", -40f, 0f, 1.0f, 4, 0.6f, width, mat, true);
-            Box(lane, "Plataforma_1m", -44.4f, 0f, width, 1.0f, 4f, _ground, mat);
-            Stairs(lane, "Escalera_Bajada", -46.4f, 1.0f, 0f, 4, 0.6f, width, mat, false);
+            for (int i = 0; i < 4; i++)
+                Box(lane, $"Pilar_{i + 1}", new Vector3(i % 2 == 0 ? -1.6f : 1.6f, 1.25f, -20f - i * 5f), new Vector3(0.6f, 2.5f, 0.6f), fixture);
+            Stairs(lane, "Escalera", -40f, 0f, 1.0f, 4, 0.6f, width, fixture, true);
+            Box(lane, "Plataforma_1m", new Vector3(0f, 0.5f, -44.4f), new Vector3(width, 1.0f, 4f), fixture);
+            Stairs(lane, "Escalera_Bajada", -46.4f, 1.0f, 0f, 4, 0.6f, width, fixture, false);
         }
 
-        // S02 (GDD §5.4): vaultable heights 0.5–1.2 m and depths 0.3–1.4 m; 1.6 m is too high.
-        private static void BuildVault(Transform lane, Material mat)
+        // S02–S04 (GDD §5.4): one standard vault each; the medium lane adds a deep one (still in range).
+        private static void BuildVault(Transform lane, ParkourObstacleType type)
         {
-            Face(lane, "Vault_0.5", -8f, 0.5f, 0.3f, _obstacle, mat);
-            Face(lane, "Vault_0.75", -16f, 0.75f, 0.4f, _obstacle, mat);
-            Face(lane, "Vault_1.0", -24f, 1.0f, 0.5f, _obstacle, mat);
-            Face(lane, "Vault_1.2", -32f, 1.2f, 0.6f, _obstacle, mat);
-            Face(lane, "Vault_0.9_Ancho", -40f, 0.9f, 1.4f, _obstacle, mat);
-            Face(lane, "NoVault_1.6", -50f, 1.6f, 0.5f, _obstacle, mat);
+            Place(lane, type, VaultFront);
+            if (type != ParkourObstacleType.MediumVault) return;
+            GameObject deep = Place(lane, type, MediumDeepFront);
+            deep.name += "_Fondo1.4";
+            ParkourObstaclePrefabs.SetBoxSize(deep, LaneWidth, ParkourStandard.Spec(type).Height, MediumDeepDepth);
         }
 
-        // S03 (P2): C while sprinting under a 1.2 m bar and through a 4 m tunnel.
-        private static void BuildSlide(Transform lane, Material mat)
+        // S05 (P2): C while sprinting under the standard bar and through a 4 m tunnel of the same bar.
+        private static void BuildSlide(Transform lane)
         {
-            Bar(lane, "Barra_1.2", -10f, 1.2f, 1f, mat);
-            Bar(lane, "Tunel_1.2", -22f, 1.2f, 4f, mat);
+            Place(lane, ParkourObstacleType.SlideBar, SlideBarFront);
+            GameObject tunnel = Place(lane, ParkourObstacleType.SlideBar, TunnelFront);
+            tunnel.name += "_Tunel";
+            ParkourObstaclePrefabs.BuildSlideBar(tunnel, LaneWidth, ParkourStandard.Spec(ParkourObstacleType.SlideBar).Height, TunnelDepth,
+                                                 tunnel.GetComponentInChildren<MeshRenderer>().sharedMaterial);
         }
 
-        // S04 (P2): tops within reach from the ground (2.1, 2.5 m), from a jump (3.0 m) and an angled wall.
-        private static void BuildLedge(Transform lane, Material mat)
+        // S06 (P2): the standard ledge, square and turned 30°.
+        private static void BuildLedge(Transform lane)
         {
-            Face(lane, "Muro_2.1", -8f, 2.1f, 3f, _obstacle, mat);
-            Face(lane, "Muro_2.5", -18f, 2.5f, 3f, _obstacle, mat);
-            Face(lane, "Muro_3.0_Salto", -28f, 3.0f, 3f, _obstacle, mat);
-            GameObject angled = Face(lane, "Muro_2.4_Angulo30", -40f, 2.4f, 3f, _obstacle, mat);
-            angled.transform.localRotation = Quaternion.Euler(0f, 30f, 0f);
+            Place(lane, ParkourObstacleType.Ledge, LedgeFront);
+            GameObject angled = Place(lane, ParkourObstacleType.Ledge, LedgeAngledFront);
+            angled.name += "_Angulo30";
+            angled.transform.localRotation = Quaternion.Euler(0f, 180f + LedgeAngle, 0f);
         }
 
-        // S05 (P2): climb a 2.2 m wall, then a second wall from its top (4.4 m), drop onto a 2.2 m
-        // terrace and walk down the stairs.
-        private static void BuildClimb(Transform lane, Material wall, Material stairs)
+        // S07 (P2): the standard climb wall (jump + grab), then a chained climb: a ledge whose top is a
+        // terrace and a second ledge standing on it (4.4 m), and stairs down from the terrace.
+        private static void BuildClimb(Transform lane, Material fixture)
         {
-            Face(lane, "Muro_A_2.2", -8f, 2.2f, 4f, _obstacle, wall);
-            Face(lane, "Muro_B_4.4", -12f, 4.4f, 3f, _obstacle, wall);
-            Face(lane, "Terraza_2.2", -15f, 2.2f, 4f, _obstacle, wall);
-            Stairs(lane, "Escalera_Bajada", -19f, 2.2f, 0f, 9, 0.45f, LaneWidth, stairs, false);
+            Place(lane, ParkourObstacleType.ClimbWall, ClimbWallFront);
+            float h = ParkourStandard.Spec(ParkourObstacleType.Ledge).Height;
+            GameObject terrace = Place(lane, ParkourObstacleType.Ledge, StackFront);
+            terrace.name += "_Terraza";
+            ParkourObstaclePrefabs.SetBoxSize(terrace, LaneWidth, h, StackDepth);
+            GameObject upper = Place(lane, ParkourObstacleType.Ledge, StackUpperFront, h);
+            upper.name += "_Superior";
+            ParkourObstaclePrefabs.SetBoxSize(upper, LaneWidth, h, StackUpperDepth);
+            Stairs(lane, "Escalera_Bajada", StackFront - StackDepth, h, 0f, 9, 0.45f, LaneWidth, fixture, false);
         }
 
-        // S06: stairs up to platforms of 1, 2 and 3 m to drop from (soft, medium, heavy landing) and a
-        // 2 m gap between two 1 m platforms to jump across.
-        private static void BuildLanding(Transform lane, Material mat)
+        // S08: the standard gap (stairs up to it), then platforms of 2 and 3 m to drop from (medium and
+        // heavy landing; the gap's platform gives the light one).
+        private static void BuildJump(Transform lane, Material fixture)
         {
-            Stairs(lane, "Escalera_1m", -6f, 0f, 1.0f, 4, 0.5f, LaneWidth, mat, true);
-            Face(lane, "Plataforma_1m_A", -8f, 1.0f, 4f, _ground, mat);
-            Face(lane, "Plataforma_1m_B", -14f, 1.0f, 4f, _ground, mat);
-            Stairs(lane, "Escalera_2m", -22f, 0f, 2.0f, 8, 0.5f, LaneWidth, mat, true);
-            Face(lane, "Plataforma_2m", -26f, 2.0f, 3f, _ground, mat);
-            Stairs(lane, "Escalera_3m", -33f, 0f, 3.0f, 12, 0.45f, LaneWidth, mat, true);
-            Face(lane, "Plataforma_3m", -38.4f, 3.0f, 3f, _ground, mat);
+            float h = ParkourStandard.Spec(ParkourObstacleType.JumpGap).Height;
+            Stairs(lane, "Escalera_Hueco", JumpGapFront + 2f, 0f, h, 4, 0.5f, LaneWidth, fixture, true);
+            Place(lane, ParkourObstacleType.JumpGap, JumpGapFront);
+            Stairs(lane, "Escalera_2m", -22f, 0f, 2.0f, 8, 0.5f, LaneWidth, fixture, true);
+            Box(lane, "Plataforma_2m", new Vector3(0f, 1.0f, -27.5f), new Vector3(LaneWidth, 2.0f, 3f), fixture);
+            Stairs(lane, "Escalera_3m", -33f, 0f, 3.0f, 12, 0.45f, LaneWidth, fixture, true);
+            Box(lane, "Plataforma_3m", new Vector3(0f, 1.5f, -39.9f), new Vector3(LaneWidth, 3.0f, 3f), fixture);
         }
 
-        // S07: curb → vault → slide → ledge grab and climb → drop → vault, in one run.
-        private static void BuildCombined(Transform lane, Material mat, Material vault, Material slide, Material ledge)
+        // S10: movement-quality lab. A low vault 14 m from the start (sprint, slide toward it: the slide
+        // stops short of it, or Space chains into the vault) and an open runway behind it for stops,
+        // turns, reversals and slides at different speeds.
+        private static void BuildFlow(Transform lane)
         {
-            Box(lane, "C_Bordillo", -6f, 0f, LaneWidth, 0.2f, 0.6f, _ground, mat);
-            Face(lane, "C_Vault_1.0", -12f, 1.0f, 0.4f, _obstacle, vault);
-            Bar(lane, "C_Barra", -21f, 1.2f, 1f, slide);
-            Face(lane, "C_Muro_2.2", -30f, 2.2f, 3f, _obstacle, ledge);
-            Face(lane, "C_Vault_0.75", -42f, 0.75f, 0.4f, _obstacle, vault);
+            Place(lane, ParkourObstacleType.LowVault, FlowVaultFront);
+        }
+
+        // S11 (P28): blocks to climb onto, at the standard height and at both ends of the mantle range.
+        private static void BuildMantle(Transform lane)
+        {
+            ParkourObstacleSpec spec = ParkourStandard.Spec(ParkourObstacleType.Mantle);
+            Place(lane, ParkourObstacleType.Mantle, MantleFront);
+            GameObject low = Place(lane, ParkourObstacleType.Mantle, MantleLowFront);
+            low.name += "_Bajo";
+            ParkourObstaclePrefabs.SetBoxSize(low, LaneWidth, MantleLowHeight, spec.Depth);
+            GameObject high = Place(lane, ParkourObstacleType.Mantle, MantleHighFront);
+            high.name += "_Alto";
+            ParkourObstaclePrefabs.SetBoxSize(high, LaneWidth, MantleHighHeight, spec.Depth);
         }
 
         // ─── Builders ────────────────────────────────────────────────────────────────
@@ -270,37 +279,34 @@ namespace WarriorWoke.EditorTools
             return lane;
         }
 
-        /// <summary>Box resting on <paramref name="bottomY"/>, centered on the lane at z.</summary>
-        private static GameObject Box(Transform lane, string name, float z, float bottomY, float width, float height, float depth, int layer, Material mat)
+        /// <summary>Standard obstacle on the lane axis whose approach face is at <paramref name="frontZ"/>, facing the lane.</summary>
+        private static GameObject Place(Transform lane, ParkourObstacleType type, float frontZ, float baseY = 0f)
         {
-            GameObject go = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            go.name = name;
-            go.layer = layer;
-            go.transform.SetParent(lane, false);
-            go.transform.localPosition = new Vector3(0f, bottomY + height * 0.5f, z);
-            go.transform.localScale = new Vector3(width, height, depth);
-            go.GetComponent<MeshRenderer>().sharedMaterial = mat;
-            go.isStatic = true;
+            GameObject go = Instantiate(type, lane, new Vector3(0f, baseY, frontZ), LaneFacing);
+            go.name = $"{ParkourStandard.Label(type).Replace(' ', '_')}_{-frontZ:0.#}";
             return go;
         }
 
-        /// <summary>Block on the floor whose front face (toward the player, +Z) is at <paramref name="frontZ"/>.</summary>
-        private static GameObject Face(Transform lane, string name, float frontZ, float height, float depth, int layer, Material mat)
+        private static GameObject Instantiate(ParkourObstacleType type, Transform parent, Vector3 localPosition, Quaternion localRotation)
         {
-            return Box(lane, name, frontZ - depth * 0.5f, 0f, LaneWidth, height, depth, layer, mat);
+            var go = (GameObject)PrefabUtility.InstantiatePrefab(ParkourObstaclePrefabs.Load(type), parent);
+            go.transform.localPosition = localPosition;
+            go.transform.localRotation = localRotation;
+            return go;
         }
 
-        /// <summary>Overhead bar (bottom at bottomY) on two posts outside the lane, for sliding under.</summary>
-        private static void Bar(Transform lane, string name, float z, float bottomY, float depth, Material mat)
+        /// <summary>Plain test fixture (layer Ground): not a parkour obstacle.</summary>
+        private static GameObject Box(Transform parent, string name, Vector3 center, Vector3 size, Material mat)
         {
-            const float thickness = 0.3f;
-            Box(lane, name, z, bottomY, LaneWidth + 0.4f, thickness, depth, _obstacle, mat);
-            float postX = LaneWidth * 0.5f + 0.1f;
-            foreach (float side in new[] { -1f, 1f })
-            {
-                GameObject post = Box(lane, name + "_Poste", z, 0f, 0.2f, bottomY, 0.2f, _obstacle, mat);
-                post.transform.localPosition += new Vector3(side * postX, 0f, 0f);
-            }
+            GameObject go = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            go.name = name;
+            go.layer = _ground;
+            go.isStatic = true;
+            go.transform.SetParent(parent, false);
+            go.transform.localPosition = center;
+            go.transform.localScale = size;
+            go.GetComponent<MeshRenderer>().sharedMaterial = mat;
+            return go;
         }
 
         /// <summary>
@@ -315,25 +321,8 @@ namespace WarriorWoke.EditorTools
             for (int i = 0; i < steps; i++)
             {
                 float top = fromY + rise * (i + 1);
-                float z = startZ - stepDepth * (i + 0.5f);
-                Box(lane, $"{name}_{i + 1}", z, 0f, width, top, stepDepth, _ground, mat);
+                Box(lane, $"{name}_{i + 1}", new Vector3(0f, top * 0.5f, startZ - stepDepth * (i + 0.5f)), new Vector3(width, top, stepDepth), mat);
             }
-        }
-
-        private static Material GetMaterial(string name, Color color)
-        {
-            string path = $"{MaterialsFolder}/{name}.mat";
-            var mat = AssetDatabase.LoadAssetAtPath<Material>(path);
-            if (mat != null) return mat;
-
-            if (!AssetDatabase.IsValidFolder("Assets/Tests")) AssetDatabase.CreateFolder("Assets", "Tests");
-            if (!AssetDatabase.IsValidFolder("Assets/Tests/ParkourCircuit")) AssetDatabase.CreateFolder("Assets/Tests", "ParkourCircuit");
-            if (!AssetDatabase.IsValidFolder(MaterialsFolder)) AssetDatabase.CreateFolder("Assets/Tests/ParkourCircuit", "Materials");
-
-            mat = new Material(Shader.Find("Universal Render Pipeline/Lit"));
-            mat.SetColor("_BaseColor", color);
-            AssetDatabase.CreateAsset(mat, path);
-            return mat;
         }
     }
 }

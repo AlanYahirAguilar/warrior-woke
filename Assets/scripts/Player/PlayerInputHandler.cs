@@ -6,8 +6,10 @@ using UnityEngine.InputSystem;
 /// Input layout (GDD §14, decision P1):
 ///   Movement  : W/A/S/D or Arrow Keys (camera-relative forward/back/strafe)
 ///   Sprint    : Shift (held)
+///   Walk      : Left Ctrl (held) — slow, oriented movement: strafe and walking backward (P28)
 ///   Jump      : Space
-///   Slide     : C (while sprinting — outside the GDD, kept by decision P2)
+///   C         : slide when running with momentum, otherwise crouch / stand up (P2, P28)
+///   Camera    : mouse (CameraFollow)
 ///   LightAtk  : J
 ///   HeavyAtk  : K
 ///   Block     : L (held)
@@ -34,6 +36,7 @@ public class PlayerInputHandler : MonoBehaviour, IInputProvider
     private float _horizontalMove;
     private float _verticalMove;
     private bool _isSprintHeld;
+    private bool _isWalkHeld;
     private bool _isJumpTriggered;
     private bool _isSlideTriggered;
     private bool _isLightAttackTriggered;
@@ -45,6 +48,7 @@ public class PlayerInputHandler : MonoBehaviour, IInputProvider
     public float HorizontalMove => _horizontalMove;
     public float VerticalMove => _verticalMove;
     public bool IsSprintHeld => _isSprintHeld;
+    public bool IsWalkHeld => _isWalkHeld;
     public bool IsJumpTriggered => _isJumpTriggered;
     public bool IsSlideTriggered => _isSlideTriggered;
     public bool IsLightAttackTriggered => _isLightAttackTriggered;
@@ -95,6 +99,8 @@ public class PlayerInputHandler : MonoBehaviour, IInputProvider
         else
             _isSprintHeld = Keyboard.current != null &&
                             (Keyboard.current.leftShiftKey.isPressed || Keyboard.current.rightShiftKey.isPressed);
+
+        _isWalkHeld = Keyboard.current != null && Keyboard.current.leftCtrlKey.isPressed;
 
         if (moveActionReference?.action != null)
         {

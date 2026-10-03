@@ -83,6 +83,7 @@ public class Player : MonoBehaviour
             _inputProvider.HorizontalMove,
             _inputProvider.VerticalMove,
             _inputProvider.IsSprintHeld,
+            _inputProvider.IsWalkHeld,
             _inputProvider.ConsumeJumpTrigger(),
             _inputProvider.ConsumeSlideTrigger(),
             _inputProvider.ConsumeLightAttackTrigger(),

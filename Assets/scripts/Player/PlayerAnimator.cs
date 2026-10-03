@@ -29,14 +29,27 @@ public class PlayerAnimator : MonoBehaviour, IParkourAnimationProgress
     [Tooltip("Cross-fade time (seconds) into the fall loop: the body eases into the air pose.")]
     [SerializeField] private float fallCrossFadeTime = 0.3f;
 
-    [Tooltip("Damping (seconds) applied to the Speed parameter.")]
+    [Tooltip("Damping (seconds) applied to the MoveX/MoveZ parameters.")]
     [SerializeField] private float speedDampTime = 0.1f;
+
+    [Tooltip("Measured ground speed (m/s) of the fastest locomotion clip (Run). Faster than this, the locomotion plays faster instead of sliding. Written by PlayerAnimationSetup from ClipMeasurement.")]
+    [SerializeField] private float fastestClipSpeed = 5.9f;
 
     [Tooltip("Time (seconds) the model takes to catch up with the body after an auto step lifts it.")]
     [SerializeField] private float stepSmoothTime = 0.1f;
 
     [Tooltip("Degrees per second the body turns to square up with the obstacle or wall during a parkour action.")]
     [SerializeField] private float parkourTurnSpeed = 540f;
+
+    [Header("Posture (weight and momentum)")]
+    [Tooltip("Fraction of the physical lean (atan of acceleration / g) the torso shows. 0 disables the lean.")]
+    [SerializeField] private float leanAmount = 0.6f;
+    [Tooltip("Largest sideways lean into a turn (degrees).")]
+    [SerializeField] private float maxLeanRoll = 10f;
+    [Tooltip("Largest forward lean when accelerating / backward lean when braking (degrees).")]
+    [SerializeField] private float maxLeanForward = 8f, maxLeanBack = 6f;
+    [Tooltip("Seconds the lean takes to settle.")]
+    [SerializeField] private float leanSmoothTime = 0.15f;
 
     private PlayerMovement  _movement;
     private PlayerContactIK _contactIK;
@@ -50,6 +63,10 @@ public class PlayerAnimator : MonoBehaviour, IParkourAnimationProgress
     private int             _matchPhase;
     private float           _vaultClipLength = 1f;
     private float           _grabClipLength  = 1f;
+    private Transform       _spine, _chest, _footL, _footR;
+    private int             _groundMask;
+    private float           _lastYaw, _lastForwardSpeed, _yawRate, _forwardAccel, _forwardSpeed;
+    private float           _roll, _pitch, _rollVel, _pitchVel, _leanWeight, _leanWeightVel;
 
     // ─── Lifecycle ───────────────────────────────────────────────────────────────
 
@@ -78,6 +95,15 @@ public class PlayerAnimator : MonoBehaviour, IParkourAnimationProgress
             if (clip.name == PlayerAnimatorIds.VaultClip) _vaultClipLength = clip.length;
             if (clip.name == PlayerAnimatorIds.LedgeGrabClip) _grabClipLength = clip.length;
         }
+        if (animator.isHuman)
+        {
+            _spine = animator.GetBoneTransform(HumanBodyBones.Spine);
+            _chest = animator.GetBoneTransform(HumanBodyBones.Chest);
+            _footL = animator.GetBoneTransform(HumanBodyBones.LeftFoot);
+            _footR = animator.GetBoneTransform(HumanBodyBones.RightFoot);
+            _groundMask = LayerMask.GetMask("Ground", "Obstacle");
+        }
+        _lastYaw = transform.eulerAngles.y;
 
         // OnAnimatorIK and OnAnimatorMove are only sent to the Animator's own GameObject, so a relay forwards them here.
         var relay = animator.GetComponent<PlayerAnimatorIK>();
@@ -102,14 +128,15 @@ public class PlayerAnimator : MonoBehaviour, IParkourAnimationProgress
     {
         if (animator == null || _movement.Rb == null) return;
 
-        // Normalized (1 = run, SprintMultiplier = sprint). Negative only while backpedaling, so a
-        // sharp turn at speed never flashes the backward walk.
+        // The directional blend reads the real velocity under the body (m/s, local right/forward):
+        // walking forward, backward, strafing or in a diagonal picks the clips whose measured pace and
+        // direction match. Beyond the fastest clip (a sprint), the locomotion plays faster instead.
         Vector3 velocity = _movement.Rb.linearVelocity;
-        Vector3 horizontal = new Vector3(velocity.x, 0f, velocity.z);
-        bool backpedal = _movement.IsBackpedaling && _movement.StateMachine.CurrentState == _movement.RunState;
-        float speed = backpedal ? Mathf.Min(0f, Vector3.Dot(horizontal, transform.forward)) : horizontal.magnitude;
-        float normalizedSpeed = _movement.BaseSpeed > 0f ? speed / _movement.BaseSpeed : 0f;
-        animator.SetFloat(PlayerAnimatorIds.SpeedParam, normalizedSpeed, speedDampTime, Time.deltaTime);
+        Vector3 local = transform.InverseTransformDirection(new Vector3(velocity.x, 0f, velocity.z));
+        animator.SetFloat(PlayerAnimatorIds.MoveXParam, local.x, speedDampTime, Time.deltaTime);
+        animator.SetFloat(PlayerAnimatorIds.MoveZParam, local.z, speedDampTime, Time.deltaTime);
+        float rate = fastestClipSpeed > 0f ? Mathf.Max(1f, local.z / fastestClipSpeed) : 1f;
+        animator.SetFloat(PlayerAnimatorIds.LocomotionRateParam, rate, speedDampTime, Time.deltaTime);
 
         UpdateMatchTargets();
         UpdateStepSmoothing();
@@ -145,6 +172,8 @@ public class PlayerAnimator : MonoBehaviour, IParkourAnimationProgress
 
         _matchPhase = 0;
         _parkourStateHash = state == m.VaultState      ? PlayerAnimatorIds.Vault
+                          : state == m.MantleState     ? PlayerAnimatorIds.Mantle
+                          : state == m.LedgeDropState  ? PlayerAnimatorIds.LedgeDrop
                           : state == m.LedgeGrabState  ? PlayerAnimatorIds.LedgeGrab
                           : state == m.LedgeClimbState ? PlayerAnimatorIds.LedgeClimb
                           : 0;
@@ -153,7 +182,21 @@ public class PlayerAnimator : MonoBehaviour, IParkourAnimationProgress
         if (state == m.VaultState)
         {
             animator.SetFloat(PlayerAnimatorIds.ParkourSpeedParam, m.VaultState.SpeedMultiplier);
-            animator.CrossFadeInFixedTime(PlayerAnimatorIds.Vault, 0.05f, 0, m.VaultState.StartOffset * _vaultClipLength); // short: the take-off match starts right away
+            animator.CrossFadeInFixedTime(PlayerAnimatorIds.Vault, ParkourTimings.VaultCrossFade, 0, m.VaultState.StartOffset * _vaultClipLength); // short: the take-off match starts right away
+        }
+        else if (state == m.SlideState)
+        {
+            // The animation follows the slide: a faster entry drops faster; the slide itself is a true
+            // loop that lasts as long as the momentum and the space do
+            float speed01 = Mathf.InverseLerp(m.SlideMinEntrySpeed, m.SlideSpeed, m.SlideState.EntrySpeed);
+            animator.SetFloat(PlayerAnimatorIds.SlideEnterRateParam, Mathf.Lerp(0.85f, 1.2f, speed01));
+            animator.CrossFadeInFixedTime(PlayerAnimatorIds.Slide, fastCrossFadeTime);
+        }
+        else if (state == m.LedgeGrabState && m.LedgeGrabState.FromDrop)
+        {
+            // Lowered from the top: the hands already hold the edge, settle into the hang
+            _matchPhase = 1;
+            animator.CrossFadeInFixedTime(PlayerAnimatorIds.LedgeHang, 0.15f);
         }
         else if (state == m.LedgeGrabState)
         {
@@ -180,30 +223,37 @@ public class PlayerAnimator : MonoBehaviour, IParkourAnimationProgress
             // Leaving the guard plays the Ch45 "fight idle → standing idle" transition first
             if (_previousState == m.BlockState) return PlayerAnimatorIds.BlockExit;
 
-            // Leaving the slide gets up from the ground before running ("Slide Up")
-            if (_previousState == m.SlideState) { fade = 0.1f; return PlayerAnimatorIds.SlideExit; }
+            // Leaving the slide gets up from the ground before running
+            if (_previousState == m.SlideState) { fade = 0.15f; return PlayerAnimatorIds.SlideExit; }
+
+            // Standing up from a crouch blends straight into the locomotion
+            if (_previousState == m.CrouchState) { fade = 0.25f; return PlayerAnimatorIds.Locomotion; }
 
             // Landing: its weight follows the drop height (Fall → Landing → Recovery → Locomotion)
             if (_previousState == m.FallState && m.LandingSeverity > 0f)
             {
                 fade = fastCrossFadeTime;
+                if (m.LandedWithRoll) return PlayerAnimatorIds.LandRoll;                                // at speed: roll it out
                 if (m.LandingSeverity >= 0.75f) return PlayerAnimatorIds.LandHard;                      // heavy: full absorb
                 if (m.LandingSeverity >= 0.35f || state != m.RunState) return PlayerAnimatorIds.Land; // medium: absorb, then go
                 return PlayerAnimatorIds.LandRun;                                                       // light: roll into the run
             }
 
             if (_previousState == m.LedgeClimbState) fade = 0.3f; // crouch on top → stand
+            if (_previousState == m.MantleState) fade = 0.2f;     // the mantle ends standing, moving
             return PlayerAnimatorIds.Locomotion;
         }
 
+        if (state == m.CrouchState)      { fade = 0.25f; return PlayerAnimatorIds.Crouch; }
         if (state == m.JumpState)        { fade = 0.1f; return PlayerAnimatorIds.Jump; }
         if (state == m.FallState)
         {
             fade = _previousState == m.LedgeGrabState ? fastCrossFadeTime : fallCrossFadeTime;
             return PlayerAnimatorIds.Fall;
         }
-        if (state == m.SlideState)       { fade = fastCrossFadeTime; return PlayerAnimatorIds.Slide; }
         if (state == m.LedgeClimbState)  { fade = 0.15f; return PlayerAnimatorIds.LedgeClimb; }
+        if (state == m.MantleState)      { fade = 0.05f; return PlayerAnimatorIds.Mantle; } // short: the hand match starts right away
+        if (state == m.LedgeDropState)   { fade = 0.15f; return PlayerAnimatorIds.LedgeDrop; }
         if (state == m.HeavyAttackState) { fade = 0.05f; return PlayerAnimatorIds.HeavyAttack; }
         if (state == m.BlockState)       return PlayerAnimatorIds.BlockEnter;
 
@@ -287,6 +337,27 @@ public class PlayerAnimator : MonoBehaviour, IParkourAnimationProgress
             if (n < start) return;
             Match(AvatarTarget.LeftHand, LeftHandOnLedge(m.CurrentLedge), m.CurrentLedge.FacingRotation, Vector3.one, 0f, n, start, ParkourTimings.GrabHandContact);
         }
+        else if (_parkourStateHash == PlayerAnimatorIds.Mantle)
+        {
+            Quaternion facing = m.CurrentLedge.FacingRotation;
+            if (_matchPhase == 0)
+            {
+                // The supporting hand onto the measured top: corrects both the distance to the edge and
+                // a top taller or lower than the clip's 1 m, so the hand plants on the block, not in the air
+                Match(AvatarTarget.LeftHand, m.MantleState.HandTarget, facing, Vector3.one, 0f, n, 0f, ParkourTimings.MantleHandMatchEnd);
+            }
+            else if (_matchPhase == 1 && n >= ParkourTimings.MantleHandRelease)
+            {
+                // Feet onto the measured stand point on top
+                Vector3 stand = m.CurrentLedge.StandPoint + Vector3.up * _rootAboveFeet;
+                Match(AvatarTarget.Root, stand, facing, Vector3.one, 0f, n, ParkourTimings.MantleHandRelease, ParkourTimings.MantleStand);
+            }
+        }
+        else if (_parkourStateHash == PlayerAnimatorIds.LedgeDrop && _matchPhase == 0 && n >= ParkourTimings.DropMatchStart)
+        {
+            // Lowering: the left hand ends on the measured edge
+            Match(AvatarTarget.LeftHand, LeftHandOnLedge(m.CurrentLedge), m.CurrentLedge.FacingRotation, Vector3.one, 0f, n, ParkourTimings.DropMatchStart, ParkourTimings.DropHang);
+        }
         else if (_parkourStateHash == PlayerAnimatorIds.LedgeClimb && _matchPhase == 0 && n >= ParkourTimings.ClimbMatchStart)
         {
             // Feet onto the stand point on top of the ledge
@@ -326,6 +397,92 @@ public class PlayerAnimator : MonoBehaviour, IParkourAnimationProgress
         if (Mathf.Abs(_stepOffset) < 0.001f) _stepOffset = 0f;
         _model.localPosition = _modelBaseLocalPosition + Vector3.up * _stepOffset;
     }
+
+    // ─── Posture: lean into turns, acceleration and braking ───────────────────────
+
+    /// <summary>
+    /// After the animation (and the IK) the torso leans with the body's real acceleration: into a
+    /// turn (centripetal acceleration = speed × turn rate), forward when speeding up and back when
+    /// braking. Only the spine and chest rotate, so the feet and the pelvis keep their contact. It
+    /// fades out in every other state and is off during parkour, where the clip and the contacts rule.
+    /// </summary>
+    private void LateUpdate()
+    {
+        if (animator == null || _spine == null || Time.deltaTime <= 0f) return;
+        float yawRate = _yawRate, accel = _forwardAccel, forwardSpeed = _forwardSpeed;
+
+        PlayerState s = _movement.StateMachine.CurrentState;
+        bool locomotion = (s == _movement.RunState || s == _movement.IdleState) && !_movement.IsRootMotionDriven && _movement.IsGrounded;
+        // The lean runs after the IK: in any other state it would move limbs off their contacts
+        // (a sliding hand into the floor), so it switches off at once — hidden in the cross-fade
+        _leanWeight = locomotion ? Mathf.SmoothDamp(_leanWeight, 1f, ref _leanWeightVel, 0.1f) : 0f;
+
+        float roll  = Mathf.Clamp(-Mathf.Atan2(forwardSpeed * yawRate, 9.81f) * Mathf.Rad2Deg * leanAmount, -maxLeanRoll, maxLeanRoll);
+        float pitch = Mathf.Clamp(Mathf.Atan2(accel, 9.81f) * Mathf.Rad2Deg * leanAmount, -maxLeanBack, maxLeanForward);
+        _roll  = Mathf.SmoothDamp(_roll, locomotion ? roll : 0f, ref _rollVel, leanSmoothTime);
+        _pitch = Mathf.SmoothDamp(_pitch, locomotion ? pitch : 0f, ref _pitchVel, leanSmoothTime);
+
+        float w = _leanWeight;
+        if (w >= 0.001f)
+        {
+            // Split between spine and chest so the back curves instead of bending at one joint
+            Quaternion lean = Quaternion.AngleAxis(_roll * w * 0.5f, transform.forward) * Quaternion.AngleAxis(_pitch * w * 0.5f, transform.right);
+            _spine.rotation = lean * _spine.rotation;
+            if (_chest != null) _chest.rotation = lean * _chest.rotation;
+        }
+
+        GuardFeetAboveGround();
+    }
+
+    /// <summary>
+    /// Last line of the contact rules, on the final pose (after the animation, the IK and the lean):
+    /// on the ground, a sole never ends below the surface under it. While the Animator blends two
+    /// states the IK goals did not always reach the bones (measured on the slide and on landings
+    /// that run up stairs), so if a foot is still inside a surface the model rises by that much for
+    /// this frame. It never lowers the model and does nothing while parkour drives the body.
+    /// </summary>
+    private void GuardFeetAboveGround()
+    {
+        if (_footL == null || _movement.IsRootMotionDriven || !(_movement.IsGrounded || _movement.AirTime < _movement.FallGraceTime))
+            return;
+        float lift = Mathf.Max(SoleDepth(_footL, animator.leftFeetBottomHeight), SoleDepth(_footR, animator.rightFeetBottomHeight));
+        if (lift > 0f)
+            _model.position += Vector3.up * Mathf.Min(lift, MaxGroundGuard);
+    }
+
+    /// <summary>How deep (m) a sole is inside the surface under it (0 if it is above).</summary>
+    private float SoleDepth(Transform foot, float bottomHeight)
+    {
+        Vector3 p = foot.position;
+        if (!Physics.Raycast(p + Vector3.up * 0.5f, Vector3.down, out RaycastHit hit, 1.0f, _groundMask, QueryTriggerInteraction.Ignore) || hit.normal.y < 0.6f)
+            return 0f;
+        return Mathf.Max(0f, hit.point.y + bottomHeight - p.y);
+    }
+
+    /// <summary>Most the ground guard lifts the model in one frame (m): more means something else is wrong.</summary>
+    private const float MaxGroundGuard = 0.3f;
+
+    /// <summary>
+    /// Turn rate and forward acceleration of the body, measured at the physics rate (the Rigidbody's
+    /// velocity only changes there; per-frame differences would be spikes and zeros).
+    /// </summary>
+    private void FixedUpdate()
+    {
+        if (_movement.Rb == null) return;
+        float dt = Time.fixedDeltaTime;
+        float yaw = _movement.Rb.rotation.eulerAngles.y;
+        Vector3 v = _movement.Rb.linearVelocity;
+        Vector3 forward = _movement.Rb.rotation * Vector3.forward;
+        float forwardSpeed = Vector3.Dot(new Vector3(v.x, 0f, v.z), forward);
+        _yawRate      = Mathf.Lerp(_yawRate, Mathf.DeltaAngle(_lastYaw, yaw) * Mathf.Deg2Rad / dt, 0.5f);
+        _forwardAccel = Mathf.Lerp(_forwardAccel, (forwardSpeed - _lastForwardSpeed) / dt, 0.5f);
+        _forwardSpeed = forwardSpeed;
+        _lastYaw = yaw;
+        _lastForwardSpeed = forwardSpeed;
+    }
+
+    /// <summary>Current torso lean (degrees: roll into the turn, pitch forward) for tests.</summary>
+    public Vector2 Lean => new Vector2(_roll * _leanWeight, _pitch * _leanWeight);
 
     // ─── IK (called by PlayerAnimatorIK on the model) ────────────────────────────
 

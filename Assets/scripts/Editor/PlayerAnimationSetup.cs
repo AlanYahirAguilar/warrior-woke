@@ -48,22 +48,24 @@ namespace WarriorWoke.EditorTools
         private const float HeavyAttackTime       = 0.8f;  // PlayerHeavyAttackState / GDD §5.7
         private const float DodgeTime             = 0.5f;  // PlayerDodgeState / GDD §5.5
         private const float ParkourClipSpeed      = 1.1f;  // ledge grab and climb: natural pace, slightly brisk
-        private const float SlideTime             = 0.8f;  // PlayerMovement.SlideDuration (shortest slide)
-        private const float SlideEnterTime        = 0.3f;  // "Slide Down": the body drops to the ground
-        private const float SlideExitTime         = 0.5f;  // "Slide Up": back on the feet, running
+        private const float LandRollTime          = 1.1f;  // landing roll (Quaternius "Roll", 1.47 s natural)
         private const float GuardTransitionTime   = 0.3f;  // Ch45 guard enter/exit, sped up from ~1 s
         private const float LandTime              = 0.45f; // soft landing
         private const float LandRunTime           = 0.4f;  // landing into a run
         private const float LandHardTime          = 0.9f;  // heavy landing: the whole absorb, natural pace
 
-        // Locomotion blend thresholds = clip speed / BaseSpeed (5 m/s). Walk and Jog speeds were
-        // measured from the DPS clips' root travel; walking backward is PlayerMovement.BackpedalSpeed.
-        private const float BaseSpeed          = 5f;
-        private const float WalkBackThreshold  = -1.5f / BaseSpeed;
-        private const float WalkThreshold      = 1.7f / BaseSpeed;
-        private const float JogThreshold       = 2.6f / BaseSpeed;
-        private const float RunThreshold       = 1f;
-        private const float SprintThreshold    = 1.4f; // PlayerMovement.SprintMultiplier
+        // Quaternius Universal Animation Library (CC0): crouch, slide, mantle and landing roll (P28)
+        private const string QuaterniusFolder = "Assets/ThirdParty/Quaternius/Animations/";
+        private const string Ual1 = QuaterniusFolder + "UAL1_Standard.fbx";
+        private const string Ual2 = QuaterniusFolder + "UAL2_Standard.fbx";
+
+        // Clips generated from other clips (reversed): walking backward from the DPS walk
+        private const string GeneratedFolder  = "Assets/Characters/Player/Animations/Generated";
+        private const string WalkBackwardPath = GeneratedFolder + "/WalkBackward.anim";
+        private const string DropToHangPath   = GeneratedFolder + "/CrouchToBracedHang.anim";
+
+        /// <summary>Measured ground speed of the fastest locomotion clip (Run), written to PlayerAnimator.</summary>
+        private static float _fastestClipSpeed = 5.9f;
 
         // ─── Menu / batch entry points ───────────────────────────────────────────────
 
@@ -78,7 +80,7 @@ namespace WarriorWoke.EditorTools
 
         public static void SetupAndValidateBatch()
         {
-            bool ok = Setup() && ParkourTestCircuitBuilder.Build() && Validate();
+            bool ok = Setup() && ParkourObstaclePrefabs.Generate() && ParkourTestCircuitBuilder.Build() && Validate();
             EditorApplication.Exit(ok ? 0 : 1);
         }
 
@@ -103,6 +105,9 @@ namespace WarriorWoke.EditorTools
             ConfigureCh45Clip(GuardEnterPath, PlayerAnimatorIds.BlockEnterName, false, avatar);
             ConfigureCh45Clip(GuardExitPath, PlayerAnimatorIds.BlockExitName, false, avatar);
             ConfigureClipImports();
+            ConfigureQuaternius();
+            GenerateReversedClip(LoadClip(DpsFolder + "Walk.fbx", "Walk"), WalkBackwardPath);
+            GenerateReversedClip(LoadClip(DpsFolder + "Braced Hang Climb.fbx", "Braced Hang To Crouch"), DropToHangPath);
 
             var clips = new ClipSet();
             if (!clips.Load()) return false;
@@ -223,9 +228,6 @@ namespace WarriorWoke.EditorTools
             new ClipImport(DpsFolder + "Fall Idle.fbx", "Fall A Loop", RootMode.InPlace, true, true),
             new ClipImport(DpsFolder + "Falling To Landing.fbx", "Falling To Landing", RootMode.InPlace, false, true),
             new ClipImport(DpsFolder + "Land To Run Forward.fbx", "Fall A Land To Run Forward", RootMode.InPlace, false, true),
-            new ClipImport(DpsFolder + "Slide.fbx", "Slide Down", RootMode.InPlace, false, true),
-            new ClipImport(DpsFolder + "Slide.fbx", "Slide", RootMode.InPlace, true, true),
-            new ClipImport(DpsFolder + "Slide.fbx", "Slide Up", RootMode.InPlace, false, true),
             new ClipImport(DpsFolder + "VaultFence.fbx", "Vault1", RootMode.RootMotion, false, false),
             new ClipImport(DpsFolder + "Idle To Braced Hang.fbx", "Idle To Braced Hang", RootMode.RootMotion, false, false),
             new ClipImport(DpsFolder + "Braced Hanging Idle.fbx", "Hanging Idle", RootMode.Baked, true, false),
@@ -301,6 +303,121 @@ namespace WarriorWoke.EditorTools
             }
         }
 
+        /// <summary>One take of a Quaternius library and how it is imported.</summary>
+        private readonly struct QuaterniusClip
+        {
+            public readonly string File, Take, Name;
+            public readonly RootMode Mode;
+            public readonly bool Loop;
+            public QuaterniusClip(string file, string take, string name, RootMode mode, bool loop)
+            {
+                File = file; Take = take; Name = name; Mode = mode; Loop = loop;
+            }
+        }
+
+        private static readonly QuaterniusClip[] QuaterniusClips =
+        {
+            new QuaterniusClip(Ual1, "Rig|Crouch_Idle_Loop", "Crouch_Idle", RootMode.Baked, true),
+            new QuaterniusClip(Ual1, "Rig|Crouch_Fwd_Loop", "Crouch_Fwd", RootMode.InPlace, true),
+            new QuaterniusClip(Ual1, "Rig|Roll", "Roll", RootMode.InPlace, false),
+            new QuaterniusClip(Ual2, "Armature|Slide_Start", "Slide_Start", RootMode.InPlace, false),
+            new QuaterniusClip(Ual2, "Armature|Slide_Loop", "Slide_Loop", RootMode.InPlace, true),
+            new QuaterniusClip(Ual2, "Armature|Slide_Exit", "Slide_Exit", RootMode.InPlace, false),
+            new QuaterniusClip(Ual2, "Armature|ClimbUp_1m_RM", PlayerAnimatorIds.MantleClip, RootMode.RootMotion, false),
+        };
+
+        /// <summary>
+        /// Imports the Quaternius libraries as Humanoid (their own Avatar) with only the takes the player
+        /// uses. Their rig faces −Z in the raw file, so the root keeps its original orientation (like
+        /// the LowPoly and DPS clips) turned 180°: the clip faces and moves forward. (With the root based
+        /// on the body orientation, the result depended on the pose and came out facing backward.) Only
+        /// the clip setter is used (T22).
+        /// </summary>
+        private static void ConfigureQuaternius()
+        {
+            foreach (string path in new[] { Ual1, Ual2 })
+            {
+                if (!(AssetImporter.GetAtPath(path) is ModelImporter importer))
+                {
+                    Debug.LogError($"[PlayerAnimationSetup] No se encontró {path}.");
+                    continue;
+                }
+                importer.animationType      = ModelImporterAnimationType.Human;
+                importer.avatarSetup        = ModelImporterAvatarSetup.CreateFromThisModel;
+                importer.materialImportMode = ModelImporterMaterialImportMode.None;
+                importer.importAnimation    = true;
+                importer.importBlendShapes  = false;
+                importer.importCameras      = false;
+                importer.importLights       = false;
+
+                var clips = new List<ModelImporterClipAnimation>();
+                foreach (ModelImporterClipAnimation take in importer.defaultClipAnimations)
+                {
+                    foreach (QuaterniusClip q in QuaterniusClips)
+                    {
+                        if (q.File != path || q.Take != take.takeName) continue;
+                        take.name                   = q.Name;
+                        take.loopTime               = q.Loop;
+                        take.rotationOffset         = 180f;
+                        take.lockRootRotation       = true;                          // the code turns the body
+                        take.lockRootHeightY        = q.Mode != RootMode.RootMotion;
+                        take.lockRootPositionXZ     = q.Mode == RootMode.Baked;
+                        take.keepOriginalOrientation = true;
+                        take.keepOriginalPositionY  = false;
+                        take.keepOriginalPositionXZ = false;
+                        take.heightFromFeet         = true;
+                        clips.Add(take);
+                    }
+                }
+                importer.clipAnimations = clips.ToArray();
+                importer.SaveAndReimport();
+            }
+        }
+
+        /// <summary>
+        /// Writes <paramref name="path"/> as <paramref name="source"/> played backward (every curve,
+        /// muscles and root, mirrored in time), keeping the asset's GUID when it already exists. A
+        /// forward walk reversed is a convincing backward walk with the same pace and footfall.
+        /// </summary>
+        private static void GenerateReversedClip(AnimationClip source, string path)
+        {
+            if (source == null) return;
+            if (!AssetDatabase.IsValidFolder(GeneratedFolder))
+                AssetDatabase.CreateFolder("Assets/Characters/Player/Animations", "Generated");
+
+            var reversed = new AnimationClip { frameRate = source.frameRate };
+            float length = source.length;
+            int curves = 0;
+            foreach (EditorCurveBinding binding in AnimationUtility.GetCurveBindings(source))
+            {
+                AnimationCurve curve = AnimationUtility.GetEditorCurve(source, binding);
+                var keys = new Keyframe[curve.length];
+                for (int i = 0; i < curve.length; i++)
+                {
+                    Keyframe k = curve.keys[curve.length - 1 - i];
+                    keys[i] = new Keyframe(length - k.time, k.value, -k.outTangent, -k.inTangent, k.outWeight, k.inWeight);
+                }
+                AnimationUtility.SetEditorCurve(reversed, binding, new AnimationCurve(keys));
+                curves++;
+            }
+            AnimationClipSettings settings = AnimationUtility.GetAnimationClipSettings(source);
+            AnimationUtility.SetAnimationClipSettings(reversed, settings);
+
+            var existing = AssetDatabase.LoadAssetAtPath<AnimationClip>(path);
+            if (existing != null)
+            {
+                EditorUtility.CopySerialized(reversed, existing);
+                existing.name = System.IO.Path.GetFileNameWithoutExtension(path);
+                EditorUtility.SetDirty(existing);
+            }
+            else
+            {
+                AssetDatabase.CreateAsset(reversed, path);
+            }
+            AssetDatabase.SaveAssets();
+            Debug.Log($"[PlayerAnimationSetup] {path}: '{source.name}' invertido ({curves} curvas).");
+        }
+
         private static void SetClipCurve(SerializedProperty clip, string curveName, AnimationCurve curve)
         {
             SerializedProperty curves = clip.FindPropertyRelative("curves");
@@ -353,7 +470,14 @@ namespace WarriorWoke.EditorTools
             controller.layers = layers;
             sm = controller.layers[0].stateMachine;
 
-            controller.AddParameter(PlayerAnimatorIds.Speed, AnimatorControllerParameterType.Float);
+            controller.AddParameter(PlayerAnimatorIds.MoveX, AnimatorControllerParameterType.Float);
+            controller.AddParameter(PlayerAnimatorIds.MoveZ, AnimatorControllerParameterType.Float);
+            controller.AddParameter(new AnimatorControllerParameter
+            {
+                name = PlayerAnimatorIds.LocomotionRate,
+                type = AnimatorControllerParameterType.Float,
+                defaultFloat = 1f,
+            });
             controller.AddParameter(PlayerAnimatorIds.DodgeX, AnimatorControllerParameterType.Float);
             controller.AddParameter(PlayerAnimatorIds.DodgeY, AnimatorControllerParameterType.Float);
             controller.AddParameter(PlayerAnimatorIds.LHandCurve, AnimatorControllerParameterType.Float);
@@ -363,22 +487,38 @@ namespace WarriorWoke.EditorTools
                 type = AnimatorControllerParameterType.Float,
                 defaultFloat = 1f,
             });
+            controller.AddParameter(new AnimatorControllerParameter { name = PlayerAnimatorIds.SlideEnterRate, type = AnimatorControllerParameterType.Float, defaultFloat = 1f });
 
-            // Locomotion: signed speed (1 = BaseSpeed). Backpedal < 0 < Walk < Jog < Run < Sprint.
+            // Locomotion: 2D directional blend on the velocity under the body (MoveX right, MoveZ
+            // forward, m/s). Every clip sits at its measured ground velocity (ClipMeasurement), so the
+            // blend picks the clips whose pace and direction match the real movement: walk, jog, run,
+            // walking and running backward, strafes and diagonals. Beyond the run, LocomotionRate
+            // plays it faster (sprint) instead of sliding the feet.
+            Dictionary<AnimationClip, Vector2> pace = ClipMeasurement.GroundVelocities(c.Locomotion);
             AnimatorState locomotion = controller.CreateBlendTreeInController(PlayerAnimatorIds.LocomotionName, out BlendTree locoTree, 0);
-            locoTree.blendType = BlendTreeType.Simple1D;
-            locoTree.blendParameter = PlayerAnimatorIds.Speed;
-            locoTree.useAutomaticThresholds = false;
-            locoTree.AddChild(c.WalkBackward, WalkBackThreshold);
-            locoTree.AddChild(c.Idle, 0f);
-            locoTree.AddChild(c.Walk, WalkThreshold);
-            locoTree.AddChild(c.Jog, JogThreshold);
-            locoTree.AddChild(c.Run, RunThreshold);
-            locoTree.AddChild(c.Sprint, SprintThreshold);
-            ChildMotion[] loco = locoTree.children;
-            loco[0].timeScale = WalkBackTimeScale; // backward jog clip played at walking pace
-            locoTree.children = loco;
+            locoTree.blendType = BlendTreeType.FreeformDirectional2D;
+            locoTree.blendParameter = PlayerAnimatorIds.MoveX;
+            locoTree.blendParameterY = PlayerAnimatorIds.MoveZ;
+            locoTree.AddChild(c.Idle, Vector2.zero);
+            foreach (AnimationClip clip in c.Locomotion)
+            {
+                if (clip == c.Idle) continue;
+                locoTree.AddChild(clip, pace[clip]);
+                Debug.Log($"[PlayerAnimationSetup] Locomoción: '{clip.name}' en ({pace[clip].x:F2}, {pace[clip].y:F2}) m/s");
+            }
+            _fastestClipSpeed = pace[c.Run].y;
+            locomotion.speedParameter = PlayerAnimatorIds.LocomotionRate;
+            locomotion.speedParameterActive = true;
             sm.defaultState = locomotion;
+
+            // Crouch: idle and crouched walk at its measured pace (the body turns toward where it moves)
+            Dictionary<AnimationClip, Vector2> crouchPace = ClipMeasurement.GroundVelocities(new[] { c.CrouchFwd });
+            AnimatorState crouch = controller.CreateBlendTreeInController(PlayerAnimatorIds.CrouchName, out BlendTree crouchTree, 0);
+            crouchTree.blendType = BlendTreeType.FreeformDirectional2D;
+            crouchTree.blendParameter = PlayerAnimatorIds.MoveX;
+            crouchTree.blendParameterY = PlayerAnimatorIds.MoveZ;
+            crouchTree.AddChild(c.CrouchIdle, Vector2.zero);
+            crouchTree.AddChild(c.CrouchFwd, new Vector2(0f, Mathf.Max(0.3f, crouchPace[c.CrouchFwd].y)));
 
             // Air
             AddState(sm, PlayerAnimatorIds.JumpName, c.JumpUp, 1f, new Vector2(500, 0));
@@ -389,6 +529,8 @@ namespace WarriorWoke.EditorTools
             AddExitTimeTransition(land, locomotion);
             AddExitTimeTransition(landRun, locomotion);
             AddExitTimeTransition(landHard, locomotion, 0.8f, 0.3f); // the recovery blends into locomotion
+            AnimatorState landRoll = AddState(sm, PlayerAnimatorIds.LandRollName, c.Roll, Fit(c.Roll, LandRollTime), new Vector2(500, 300));
+            AddExitTimeTransition(landRoll, locomotion, 0.8f, 0.25f); // the roll comes up running
 
             // Parkour (Dynamic Parkour System clips)
             // Vault: playback speed = approach speed / clip speed (ParkourSpeed, set by PlayerAnimator)
@@ -396,16 +538,26 @@ namespace WarriorWoke.EditorTools
             vault.speedParameter = PlayerAnimatorIds.ParkourSpeed;
             vault.speedParameterActive = true;
 
-            // Slide in three phases: drop to the ground → slide (loop, as long as the FSM slides) → get up
-            AnimatorState slide     = AddState(sm, PlayerAnimatorIds.SlideName, c.SlideEnter, Fit(c.SlideEnter, SlideEnterTime), new Vector2(800, 60));
+            // Slide (Quaternius, measured): the drop reaches the ground at 0.42 of "Slide_Start" (0.35 s,
+            // faster for a faster entry), "Slide_Loop" is a true loop that lasts as long as the FSM's
+            // contextual slide, and "Slide_Exit" gets up into the run
+            AnimatorState slide     = AddState(sm, PlayerAnimatorIds.SlideName, c.SlideEnter, 1f, new Vector2(800, 60));
+            slide.speedParameter = PlayerAnimatorIds.SlideEnterRate;
+            slide.speedParameterActive = true;
             AnimatorState slideLoop = AddState(sm, PlayerAnimatorIds.SlideLoopName, c.SlideLoop, 1f, new Vector2(1050, 60));
-            AnimatorState slideExit = AddState(sm, PlayerAnimatorIds.SlideExitName, c.SlideExit, Fit(c.SlideExit, SlideExitTime), new Vector2(1050, 120));
-            AddExitTimeTransition(slide, slideLoop, 0.9f, 0.1f);
-            AddExitTimeTransition(slideExit, locomotion, 0.75f, 0.2f);
+            AnimatorState slideExit = AddState(sm, PlayerAnimatorIds.SlideExitName, c.SlideExit, 1f, new Vector2(1050, 120));
+            // The last frame of "Slide_Start" is the first of "Slide_Loop" (measured): no blend needed,
+            // and a blend there let a hand sink into the floor (the IK did not hold it mid-transition)
+            AddExitTimeTransition(slide, slideLoop, 1f, 0f);
+            AddExitTimeTransition(slideExit, locomotion, 0.85f, 0.15f);
+
+            // Mantle: Quaternius "ClimbUp_1m" with root motion, warped onto the measured top
+            AddState(sm, PlayerAnimatorIds.MantleName, c.Mantle, 1f, new Vector2(800, 120));
 
             AnimatorState ledgeGrab = AddState(sm, PlayerAnimatorIds.LedgeGrabName, c.LedgeEnter, ParkourClipSpeed, new Vector2(800, 180));
             AnimatorState ledgeHang = AddState(sm, PlayerAnimatorIds.LedgeHangName, c.LedgeHang, 1f, new Vector2(1050, 180));
             AddState(sm, PlayerAnimatorIds.LedgeClimbName, c.LedgeClimb, ParkourClipSpeed, new Vector2(800, 240));
+            AddState(sm, PlayerAnimatorIds.LedgeDropName, c.LedgeDrop, 1f, new Vector2(800, 300));
             AddExitTimeTransition(ledgeGrab, ledgeHang, 0.9f, 0.15f);
 
             // Combat
@@ -433,6 +585,7 @@ namespace WarriorWoke.EditorTools
 
             PlaceState(sm, locomotion, new Vector2(100, 0));
             PlaceState(sm, dodge, new Vector2(100, 200));
+            PlaceState(sm, crouch, new Vector2(100, 100));
 
             EditorUtility.SetDirty(controller);
             AssetDatabase.SaveAssets();
@@ -483,12 +636,12 @@ namespace WarriorWoke.EditorTools
                     playerAnimator = root.AddComponent<PlayerAnimator>();
                 var so = new SerializedObject(playerAnimator);
                 so.FindProperty("animator").objectReferenceValue = animator;
+                so.FindProperty("fastestClipSpeed").floatValue = _fastestClipSpeed;
                 so.ApplyModifiedPropertiesWithoutUndo();
 
                 // Movement values of the human-scale tuning (P23) and the auto step layers
                 var movement = new SerializedObject(root.GetComponent<PlayerMovement>());
                 movement.FindProperty("SlideSpeed").floatValue = 7.5f;
-                movement.FindProperty("SlideDuration").floatValue = SlideTime;
                 movement.FindProperty("JumpSpeed").floatValue = 4.5f;
                 movement.FindProperty("Acceleration").floatValue = 10f;
                 movement.FindProperty("Deceleration").floatValue = 13f;
@@ -530,6 +683,13 @@ namespace WarriorWoke.EditorTools
                 Avatar a = LoadAvatar(path);
                 ok &= Check(a != null && a.isValid && a.isHuman, $"Avatar Humanoid válido en {path}");
             }
+
+            foreach (string path in new[] { Ual1, Ual2 })
+            {
+                Avatar a = LoadAvatar(path);
+                ok &= Check(a != null && a.isValid && a.isHuman, $"Avatar Humanoid válido en {path}");
+            }
+            ok &= Check(AssetDatabase.LoadAssetAtPath<AnimationClip>(WalkBackwardPath) != null, $"Existe el clip generado {WalkBackwardPath}");
 
             ReportMaterials();
 
@@ -601,7 +761,8 @@ namespace WarriorWoke.EditorTools
         // Clips whose mid pose is standing; the others (rolls, falls, vault, slide, hanging, landing) are not.
         private static readonly HashSet<string> UprightClips = new HashSet<string>
         {
-            "Idle", "Walk", "Jog Forward", "Run", "Sprint", "RunBackward", "Jump_Up",
+            "Idle", "Walk", "Jog Forward", "Run", "RunBackward", "RunBackwardLeft", "RunBackwardRight", "RunLeft", "RunRight",
+            "StrafeLeft", "StrafeRight", "WalkBackward", "Jump_Up",
             "PunchRight", "PunchLeft", "MeleeAttack_OneHanded",
             PlayerAnimatorIds.BlockEnterName, "BlockingLoop", PlayerAnimatorIds.BlockExitName,
         };
@@ -809,9 +970,13 @@ namespace WarriorWoke.EditorTools
         /// <summary>Every clip the controller uses, loaded from the assets already in the project.</summary>
         private sealed class ClipSet
         {
-            public AnimationClip Idle, Walk, Jog, Run, Sprint, WalkBackward;
+            public AnimationClip Idle, Walk, Jog, Run, WalkBackward, RunBackward, RunBackLeft, RunBackRight, RunDiagA, RunDiagB, StrafeLeft, StrafeRight;
+            public AnimationClip CrouchIdle, CrouchFwd, Roll, Mantle, LedgeDrop;
             public AnimationClip JumpUp, FallLoop, Land, LandRun;
             public AnimationClip Vault, SlideEnter, SlideLoop, SlideExit, LedgeEnter, LedgeHang, LedgeClimb;
+
+            /// <summary>Clips of the directional locomotion blend (placed at their measured velocity).</summary>
+            public AnimationClip[] Locomotion => new[] { Idle, Walk, Jog, Run, WalkBackward, RunBackward, RunBackLeft, RunBackRight, RunDiagA, RunDiagB, StrafeLeft, StrafeRight };
             public AnimationClip RollForward, RollBackward, RollLeft, RollRight;
             public AnimationClip PunchRight, PunchLeft, HeavyAttack, Blocking, GuardEnter, GuardExit;
 
@@ -821,16 +986,27 @@ namespace WarriorWoke.EditorTools
                 Walk         = LoadClip(DpsFolder + "Walk.fbx", "Walk");
                 Jog          = LoadClip(DpsFolder + "Jog Forward.fbx", "Jog Forward");
                 Run          = LoadClip(DpsFolder + "Run.fbx", "Run");
-                Sprint       = LoadClip(LowPolyMove + "Sprint.fbx", "Sprint");
-                WalkBackward = LoadClip(LowPolyMove + "RunBackward.fbx", "RunBackward");
+                WalkBackward = AssetDatabase.LoadAssetAtPath<AnimationClip>(WalkBackwardPath);
+                RunBackward  = LoadClip(LowPolyMove + "RunBackward.fbx", "RunBackward");
+                RunBackLeft  = LoadClip(LowPolyMove + "RunBackwardLeft.fbx", "RunBackwardLeft");
+                RunBackRight = LoadClip(LowPolyMove + "RunBackwardRight.fbx", "RunBackwardRight");
+                RunDiagA     = LoadClip(LowPolyMove + "RunLeft.fbx", "RunLeft");   // measured: a forward diagonal
+                RunDiagB     = LoadClip(LowPolyMove + "RunRight.fbx", "RunRight"); // measured: the other forward diagonal
+                StrafeLeft   = LoadClip(LowPolyMove + "StrafeLeft.fbx", "StrafeLeft");
+                StrafeRight  = LoadClip(LowPolyMove + "StrafeRight.fbx", "StrafeRight");
+                CrouchIdle   = LoadClip(Ual1, "Crouch_Idle");
+                CrouchFwd    = LoadClip(Ual1, "Crouch_Fwd");
+                Roll         = LoadClip(Ual1, "Roll");
+                Mantle       = LoadClip(Ual2, PlayerAnimatorIds.MantleClip);
+                LedgeDrop    = AssetDatabase.LoadAssetAtPath<AnimationClip>(DropToHangPath);
                 JumpUp       = LoadClip(LowPolyMove + "Jumps.fbx", "Jump_Up");
                 FallLoop     = LoadClip(DpsFolder + "Fall Idle.fbx", "Fall A Loop");
                 Land         = LoadClip(DpsFolder + "Falling To Landing.fbx", "Falling To Landing");
                 LandRun      = LoadClip(DpsFolder + "Land To Run Forward.fbx", "Fall A Land To Run Forward");
                 Vault        = LoadClip(DpsFolder + "VaultFence.fbx", "Vault1");
-                SlideEnter   = LoadClip(DpsFolder + "Slide.fbx", "Slide Down");
-                SlideLoop    = LoadClip(DpsFolder + "Slide.fbx", "Slide");
-                SlideExit    = LoadClip(DpsFolder + "Slide.fbx", "Slide Up");
+                SlideEnter   = LoadClip(Ual2, "Slide_Start");
+                SlideLoop    = LoadClip(Ual2, "Slide_Loop");
+                SlideExit    = LoadClip(Ual2, "Slide_Exit");
                 LedgeEnter   = LoadClip(DpsFolder + "Idle To Braced Hang.fbx", "Idle To Braced Hang");
                 LedgeHang    = LoadClip(DpsFolder + "Braced Hanging Idle.fbx", "Hanging Idle");
                 LedgeClimb   = LoadClip(DpsFolder + "Braced Hang Climb.fbx", "Braced Hang To Crouch");
@@ -845,7 +1021,8 @@ namespace WarriorWoke.EditorTools
                 GuardEnter   = LoadClip(GuardEnterPath, PlayerAnimatorIds.BlockEnterName);
                 GuardExit    = LoadClip(GuardExitPath, PlayerAnimatorIds.BlockExitName);
 
-                foreach (AnimationClip clip in new[] { Idle, Walk, Jog, Run, Sprint, WalkBackward, JumpUp, FallLoop, Land,
+                foreach (AnimationClip clip in new[] { Idle, Walk, Jog, Run, WalkBackward, RunBackward, RunBackLeft, RunBackRight, RunDiagA, RunDiagB,
+                                                       StrafeLeft, StrafeRight, CrouchIdle, CrouchFwd, Roll, Mantle, LedgeDrop, JumpUp, FallLoop, Land,
                                                        LandRun, Vault, SlideEnter, SlideLoop, SlideExit, LedgeEnter, LedgeHang, LedgeClimb,
                                                        RollForward, RollBackward, RollLeft, RollRight, PunchRight,
                                                        PunchLeft, HeavyAttack, Blocking, GuardEnter, GuardExit })

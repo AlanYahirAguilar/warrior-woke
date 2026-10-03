@@ -16,12 +16,15 @@ public interface IInputProvider
     /// <summary>Sprint — Shift held (GDD §5.2). True while the key is held.</summary>
     bool IsSprintHeld { get; }
 
+    /// <summary>Walk — Left Ctrl held (P28): slow, oriented movement (strafe and walking backward).</summary>
+    bool IsWalkHeld { get; }
+
     // ─── Parkour ─────────────────────────────────────────────────────────────────
 
     /// <summary>Indicates whether jump input was pressed this cycle.</summary>
     bool IsJumpTriggered { get; }
 
-    /// <summary>Indicates whether slide input was pressed this cycle.</summary>
+    /// <summary>C pressed this cycle: slide when running with momentum, crouch toggle otherwise (P28).</summary>
     bool IsSlideTriggered { get; }
 
     /// <summary>Consumes the pending jump trigger to prevent repeated executions across physics steps.</summary>

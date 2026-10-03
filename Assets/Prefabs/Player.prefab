@@ -156,17 +156,21 @@ MonoBehaviour:
   SlideSpeed: 7.5
   JumpSpeed: 4.5
   BackpedalSpeed: 1.5
+  WalkSpeed: 1.7
+  CrouchSpeed: 1
+  CrouchHeightFactor: 0.62
   Acceleration: 10
   Deceleration: 13
   AirAcceleration: 4
   AirDrag: 0.5
-  SlideDuration: 0.8
   SlideFriction: 4
+  SlideBrakeFriction: 9
   SlideMinSpeed: 2.5
+  SlideMinTime: 0.35
+  SlideMaxTime: 2
   ceilingLayer:
     serializedVersion: 2
     m_Bits: 192
-  StepHeight: 0.4
   stepLayer:
     serializedVersion: 2
     m_Bits: 192
@@ -175,10 +179,17 @@ MonoBehaviour:
   HardLandingHeight: 3.2
   HardLandingSpeedKept: 0.3
   HardLandingRecovery: 0.7
+  RollMinSeverity: 0.6
+  RollMinSpeed: 3
+  RollSpeedKept: 0.7
+  RollRecovery: 0.45
   LedgeRegrabDelay: 0.4
   faceMovementDirection: 1
   turnSmoothTime: 0.12
   sprintTurnSmoothTime: 0.2
+  maxTurnRateStill: 720
+  maxLateralAcceleration: 9
+  pivotAngle: 135
   moveInputDeadzone: 0.1
 --- !u!114 &5207809015301318550
 MonoBehaviour:
@@ -234,18 +245,9 @@ MonoBehaviour:
     m_Bits: 128
   centerPoint: {fileID: 2536802766306766105}
   headPoint: {fileID: 6393255762420653973}
-  vaultHeightCheck: 1.2
-  minVaultHeight: 0.45
-  maxVaultDepth: 1.5
-  vaultReach: 1.1
-  vaultLandOffset: 0.6
   landingLayer:
     serializedVersion: 2
     m_Bits: 192
-  ledgeReachGround: 1
-  ledgeReachAir: 0.75
-  standInset: 0.45
-  proximityCheckRadius: 1.2
 --- !u!114 &2155071560513528099
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -310,8 +312,14 @@ MonoBehaviour:
   fastCrossFadeTime: 0.05
   fallCrossFadeTime: 0.3
   speedDampTime: 0.1
+  fastestClipSpeed: 5.9148426
   stepSmoothTime: 0.1
   parkourTurnSpeed: 540
+  leanAmount: 0.6
+  maxLeanRoll: 10
+  maxLeanForward: 8
+  maxLeanBack: 6
+  leanSmoothTime: 0.15
 --- !u!114 &7729443631634034740
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -381,7 +389,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: 92ff0235208cc0d4eafb7027bd27b363, type: 3}
       propertyPath: m_LocalPosition.y
-      value: -0.97398424
+      value: -0.97398376
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: 92ff0235208cc0d4eafb7027bd27b363, type: 3}
       propertyPath: m_LocalPosition.z

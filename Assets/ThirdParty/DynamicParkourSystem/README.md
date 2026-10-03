@@ -7,7 +7,8 @@
 
 ## Qué se copió
 
-Solo las 11 animaciones que usa el jugador, con sus `.meta` originales (rangos de clip):
+Solo las animaciones que usa el jugador (10 desde el 2026-10-02: `Slide.fbx` se eliminó al reemplazar el
+slide por los clips de Quaternius, cuyo bucle sí es continuo), con sus `.meta` originales (rangos de clip):
 
 | Archivo | Clip | Uso en el proyecto |
 |---|---|---|
@@ -18,7 +19,6 @@ Solo las 11 animaciones que usa el jugador, con sus `.meta` originales (rangos d
 | `Falling To Landing.fbx` | Falling To Landing | Aterrizaje ligero sin input, medio y fuerte |
 | `Land To Run Forward.fbx` | Fall A Land To Run Forward | Aterrizaje ligero con input |
 | `VaultFence.fbx` | Vault1 | Vault, con root motion y la curva `LHandCurve` (IK de la mano) |
-| `Slide.fbx` | Slide Down · Slide · Slide Up | Slide en tres fases (bajar, deslizar en bucle, levantarse) |
 | `Idle To Braced Hang.fbx` | Idle To Braced Hang | Agarrarse de la cornisa, con root motion |
 | `Braced Hanging Idle.fbx` | Hanging Idle | Colgado de la cornisa |
 | `Braced Hang Climb.fbx` | Braced Hang To Crouch | Subir la cornisa, con root motion |
@@ -39,3 +39,6 @@ IK (`EnvironmentChecker.TryFindLedge`, `PlayerLedgeGrabState`, `PlayerLedgeClimb
 `PlayerContactIK`), del root motion por estado (`PlayerAnimator`), del auto step
 (`PlayerMovement.TryAutoStep`) y del IK de pies (`PlayerContactIK`), con créditos en sus comentarios.
 Detalle de lo usado y lo descartado: `docs/arquitectura.md` §5.12.
+Los límites de detección (alturas, alcances, fondos) ya no son campos sueltos como en el original:
+viven en el Parkour Obstacle Standard (`scripts/Parkour/ParkourStandard.cs`, `docs/arquitectura.md`
+§5.13), del que también salen los prefabs de obstáculos.

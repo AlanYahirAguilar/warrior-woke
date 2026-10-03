@@ -1,13 +1,15 @@
 using UnityEngine;
+using UnityEngine.InputSystem;
 
 /// <summary>
-/// Third-person "over-the-shoulder" camera (Sleeping Dogs / GTA style).
-/// Sits behind and above one shoulder of the target, looking slightly past it, and
-/// smoothly trails position and rotation as the target moves and turns.
-/// Player movement (see PlayerMovement) is computed relative to this camera's flattened
-/// forward/right axes, so turning the character re-orients where "forward" means next tick.
-/// Includes a simple collision pull-in so the camera never clips through geometry.
-/// Generates zero GC allocations per frame in LateUpdate.
+/// Third-person orbit camera over the shoulder (GDD §15, decision P5). The player turns it freely
+/// with the mouse: its yaw and pitch are its own, not the character's. Player movement is relative
+/// to this camera (PlayerMovement), so the camera no longer follows the body's facing — turning the
+/// character never swings the camera, and walking backward or pivoting does not drag it around.
+/// The camera moves only with the mouse: an automatic recenter behind the body brought back the loop
+/// where turning the body turns the camera, which turns "forward" again.
+/// Includes a collision pull-in so the camera never clips through geometry.
+/// Zero GC allocations per frame in LateUpdate.
 /// </summary>
 public class CameraFollow : MonoBehaviour
 {
@@ -22,21 +24,28 @@ public class CameraFollow : MonoBehaviour
     [Tooltip("Height above the target's pivot used as the shoulder/look point.")]
     [SerializeField] private float shoulderHeight = 1.6f;
 
-    [Tooltip("Sideways offset from the target (positive = right shoulder, negative = left shoulder).")]
+    [Tooltip("Sideways offset from the target, along the camera's right (positive = right shoulder).")]
     [SerializeField] private float shoulderSide = 0.5f;
 
     [Tooltip("Distance behind the shoulder point the camera sits.")]
     [SerializeField] private float distance = 3.5f;
 
-    [Tooltip("How far past the shoulder point the camera looks, to frame the direction of travel.")]
-    [SerializeField] private float lookAheadDistance = 2f;
+    [Header("Orbit")]
+    [Tooltip("Degrees of rotation per pixel of mouse movement.")]
+    [SerializeField] private float mouseSensitivity = 0.12f;
+
+    [Tooltip("Lowest and highest pitch (degrees; positive looks down).")]
+    [SerializeField] private float minPitch = -30f, maxPitch = 60f;
+
+    [Tooltip("Pitch when the camera snaps behind the target.")]
+    [SerializeField] private float defaultPitch = 10f;
+
+    [Tooltip("Lock and hide the cursor while playing (Escape releases it until the next click).")]
+    [SerializeField] private bool lockCursor = true;
 
     [Header("Smoothing")]
     [Tooltip("Position smoothing time (lower is snappier).")]
-    [SerializeField] private float positionSmoothTime = 0.12f;
-
-    [Tooltip("Rotation smoothing speed (higher snaps faster to the target look direction).")]
-    [SerializeField] private float rotationSmoothSpeed = 10f;
+    [SerializeField] private float positionSmoothTime = 0.08f;
 
     [Header("Collision")]
     [Tooltip("Layers considered solid for camera collision avoidance.")]
@@ -48,7 +57,11 @@ public class CameraFollow : MonoBehaviour
     [Tooltip("Extra pull-in distance from a collision hit point, to avoid clipping into the surface.")]
     [SerializeField] private float collisionBuffer = 0.15f;
 
-    private Vector3 _positionVelocity;
+    private Vector3   _positionVelocity;
+    private float     _yaw, _pitch;
+
+    /// <summary>Camera yaw (degrees, world). Movement input is relative to it.</summary>
+    public float Yaw => _yaw;
 
     private void OnEnable()
     {
@@ -58,10 +71,14 @@ public class CameraFollow : MonoBehaviour
     private void OnDisable()
     {
         Player.OnPlayerSpawned -= HandlePlayerSpawned;
+        if (lockCursor) Cursor.lockState = CursorLockMode.None;
     }
 
     private void Awake()
     {
+        // The camera must never collide with the character it orbits
+        int playerLayer = LayerMask.NameToLayer("Player");
+        if (playerLayer >= 0) collisionMask &= ~(1 << playerLayer);
         InitializeTarget();
     }
 
@@ -69,42 +86,65 @@ public class CameraFollow : MonoBehaviour
     {
         // Backup in case the Player spawned between Awake and Start
         if (target == null && autoDetectTarget)
-        {
             InitializeTarget();
-        }
 
         if (target != null)
-        {
             SnapToTarget();
-        }
+    }
+
+    private void Update()
+    {
+        UpdateCursor();
+        ReadLook();
     }
 
     private void LateUpdate()
     {
         if (target == null) return;
 
-        Vector3 shoulderPoint = GetShoulderPoint();
-        Vector3 desiredPosition = shoulderPoint - target.forward * distance;
+        Quaternion orbit = Quaternion.Euler(_pitch, _yaw, 0f);
+        Vector3 shoulderPoint = GetShoulderPoint(orbit);
+        Vector3 back = orbit * Vector3.back;
+        Vector3 desiredPosition = shoulderPoint + back * distance;
 
-        float allowedDistance = distance;
-        if (Physics.SphereCast(shoulderPoint, collisionRadius, (desiredPosition - shoulderPoint).normalized,
-                out RaycastHit hit, distance, collisionMask, QueryTriggerInteraction.Ignore))
-        {
-            allowedDistance = Mathf.Max(hit.distance - collisionBuffer, 0.1f);
-            desiredPosition = shoulderPoint - target.forward * allowedDistance;
-        }
+        if (Physics.SphereCast(shoulderPoint, collisionRadius, back, out RaycastHit hit, distance, collisionMask, QueryTriggerInteraction.Ignore))
+            desiredPosition = shoulderPoint + back * Mathf.Max(hit.distance - collisionBuffer, 0.1f);
 
         transform.position = Vector3.SmoothDamp(transform.position, desiredPosition, ref _positionVelocity, positionSmoothTime);
-
-        Vector3 lookTarget = shoulderPoint + target.forward * lookAheadDistance;
-        Quaternion desiredRotation = Quaternion.LookRotation((lookTarget - transform.position).normalized, Vector3.up);
-        transform.rotation = Quaternion.Slerp(transform.rotation, desiredRotation, rotationSmoothSpeed * Time.deltaTime);
+        transform.rotation = orbit;
     }
 
-    private Vector3 GetShoulderPoint()
+    // ─── Orbit ───────────────────────────────────────────────────────────────────
+
+    private void ReadLook()
     {
-        return target.position + Vector3.up * shoulderHeight + target.right * shoulderSide;
+        Mouse mouse = Mouse.current;
+        if (mouse == null || (lockCursor && Cursor.lockState != CursorLockMode.Locked)) return;
+        Vector2 delta = mouse.delta.ReadValue();
+        if (delta.sqrMagnitude < 0.0001f) return;
+        _yaw   += delta.x * mouseSensitivity;
+        _pitch  = Mathf.Clamp(_pitch - delta.y * mouseSensitivity, minPitch, maxPitch);
     }
+
+    private void UpdateCursor()
+    {
+        if (!lockCursor) return;
+        Keyboard keyboard = Keyboard.current;
+        Mouse mouse = Mouse.current;
+        if (keyboard != null && keyboard.escapeKey.wasPressedThisFrame)
+            Cursor.lockState = CursorLockMode.None;
+        else if (mouse != null && mouse.leftButton.wasPressedThisFrame)
+            Cursor.lockState = CursorLockMode.Locked;
+        Cursor.visible = Cursor.lockState != CursorLockMode.Locked;
+    }
+
+    private Vector3 GetShoulderPoint(Quaternion orbit)
+    {
+        Vector3 right = Quaternion.Euler(0f, orbit.eulerAngles.y, 0f) * Vector3.right;
+        return target.position + Vector3.up * shoulderHeight + right * shoulderSide;
+    }
+
+    // ─── Target ──────────────────────────────────────────────────────────────────
 
     private void HandlePlayerSpawned(Player player)
     {
@@ -121,21 +161,22 @@ public class CameraFollow : MonoBehaviour
         if (target == null) return;
 
         if (snapImmediately)
-        {
             SnapToTarget();
-        }
     }
 
     /// <summary>
-    /// Teletransporta instantáneamente la cámara detrás del hombro del target (útil tras spawn/respawn).
+    /// Teletransporta instantáneamente la cámara detrás del hombro del target, mirando hacia donde
+    /// mira el target (útil tras spawn/respawn).
     /// </summary>
     public void SnapToTarget()
     {
         if (target == null) return;
 
-        Vector3 shoulderPoint = GetShoulderPoint();
-        transform.position = shoulderPoint - target.forward * distance;
-        transform.rotation = Quaternion.LookRotation((shoulderPoint + target.forward * lookAheadDistance - transform.position).normalized, Vector3.up);
+        _yaw   = target.eulerAngles.y;
+        _pitch = defaultPitch;
+        Quaternion orbit = Quaternion.Euler(_pitch, _yaw, 0f);
+        transform.rotation = orbit;
+        transform.position = GetShoulderPoint(orbit) + orbit * Vector3.back * distance;
         _positionVelocity = Vector3.zero;
     }
 
@@ -158,9 +199,7 @@ public class CameraFollow : MonoBehaviour
         {
             GameObject playerObj = GameObject.FindGameObjectWithTag("Player");
             if (playerObj != null)
-            {
                 SetTarget(playerObj.transform, snapImmediately: true);
-            }
         }
     }
 }

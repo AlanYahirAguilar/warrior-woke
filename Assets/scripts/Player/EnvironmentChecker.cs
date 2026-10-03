@@ -20,35 +20,12 @@ public class EnvironmentChecker : MonoBehaviour
     [SerializeField] private Transform centerPoint;
     [SerializeField] private Transform headPoint;
 
-    [Header("Vault Check")]
-    [Tooltip("Highest obstacle (m above the feet) that can be vaulted (GDD §5.4: low obstacles only).")]
-    [SerializeField] private float vaultHeightCheck = 1.2f;
-    [Tooltip("Lowest obstacle (m above the feet) that counts as a vault; lower ones are auto-stepped or jumped.")]
-    [SerializeField] private float minVaultHeight = 0.45f;
-    [Tooltip("Deepest obstacle (m along the movement) that can be vaulted in one move.")]
-    [SerializeField] private float maxVaultDepth = 1.5f;
-    [Tooltip("How far ahead (m from the feet) an obstacle is detected when Space is pressed.")]
-    [SerializeField] private float vaultReach = 1.1f;
-    [Tooltip("Closest landing (m behind the obstacle's back face) accepted when the clip's natural landing is blocked.")]
-    [SerializeField] private float vaultLandOffset = 0.6f;
+    [Header("Landing")]
     [Tooltip("Layers that count as ground for the landing point.")]
     [SerializeField] private LayerMask landingLayer;
 
-    [Header("Ledge Check")]
-    [Tooltip("How far ahead (m from the body center) a wall is detected for a grab from the ground.")]
-    [SerializeField] private float ledgeReachGround = 1.0f;
-    [Tooltip("How far ahead (m from the body center) a wall is detected for a grab in the air.")]
-    [SerializeField] private float ledgeReachAir = 0.75f;
-    [Tooltip("Inset (m) from the edge where the feet stand after climbing.")]
-    [SerializeField] private float standInset = 0.45f;
-
-    [Header("Pre-filter")]
-    [Tooltip("Sphere radius used as a cheap pre-filter before casting any rays.")]
-    [SerializeField] private float proximityCheckRadius = 1.4f;
-
-    // Standing body used for free-space checks (radius slightly below the real collider).
-    private const float BodyRadius = 0.3f;
-    private const float BodyHeight = 1.8f;
+    // Detection limits come from the Parkour Obstacle Standard (ParkourStandard), not from
+    // per-instance fields, so the obstacles, their validation and the detection never disagree.
 
     // Reusable buffer for OverlapSphere — avoids GC allocations every check
     private readonly Collider[] _proximityBuffer = new Collider[4];
@@ -60,41 +37,45 @@ public class EnvironmentChecker : MonoBehaviour
     }
 
     /// <summary>Returns true when at least one obstacle collider sits within the proximity sphere.</summary>
-    private bool HasNearbyGeometry()
+    private bool HasNearbyGeometry(float radius = ParkourStandard.ProximityRadius)
     {
         Vector3 origin = centerPoint != null ? centerPoint.position : transform.position;
-        int count = Physics.OverlapSphereNonAlloc(origin, proximityCheckRadius, _proximityBuffer, obstacleLayer, QueryTriggerInteraction.Ignore);
+        int count = Physics.OverlapSphereNonAlloc(origin, radius, _proximityBuffer, obstacleLayer, QueryTriggerInteraction.Ignore);
         return count > 0;
     }
 
     /// <summary>True when a standing body fits with its feet at <paramref name="feet"/>.</summary>
     private bool HasStandingRoom(Vector3 feet)
     {
-        Vector3 bottom = feet + Vector3.up * (BodyRadius + 0.08f);
-        Vector3 top    = feet + Vector3.up * (BodyHeight - BodyRadius);
-        return !Physics.CheckCapsule(bottom, top, BodyRadius, landingLayer, QueryTriggerInteraction.Ignore);
+        Vector3 bottom = feet + Vector3.up * (ParkourStandard.StandCheckRadius + 0.08f);
+        Vector3 top    = feet + Vector3.up * (ParkourStandard.StandCheckHeight - ParkourStandard.StandCheckRadius);
+        return !Physics.CheckCapsule(bottom, top, ParkourStandard.StandCheckRadius, landingLayer, QueryTriggerInteraction.Ignore);
     }
 
     /// <summary>
     /// Looks for a vaultable obstacle in <paramref name="direction"/> (GDD §5.4): a front face within
-    /// reach at knee height, a top between minVaultHeight and vaultHeightCheck above the feet, a depth
-    /// up to maxVaultDepth and free ground behind it. The vault direction is perpendicular to the face
+    /// reach at knee height, a top between ParkourStandard.VaultMinHeight and VaultMaxHeight above the
+    /// feet, a depth up to VaultMaxDepth and free ground behind it. The vault direction is perpendicular to the face
     /// (the body lines up with the obstacle), the hand point lies on the top surface on the left-hand
     /// side, and the landing is as far as the clip naturally lands, or closer if that spot is blocked.
     /// Allocation-free.
     /// </summary>
-    public bool TryFindVault(Vector3 direction, float feetY, out VaultInfo info)
+    public bool TryFindVault(Vector3 direction, float feetY, out VaultInfo info) =>
+        TryFindVault(direction, feetY, ParkourStandard.VaultReach, out info);
+
+    /// <summary>Same as TryFindVault, looking <paramref name="reach"/> m ahead (a fast run spots the obstacle earlier).</summary>
+    public bool TryFindVault(Vector3 direction, float feetY, float reach, out VaultInfo info)
     {
         info = default;
         direction.y = 0f;
-        if (direction.sqrMagnitude < 0.0001f || !HasNearbyGeometry()) return false;
+        if (direction.sqrMagnitude < 0.0001f || !HasNearbyGeometry(Mathf.Max(ParkourStandard.ProximityRadius, reach + 0.3f))) return false;
         direction.Normalize();
 
         Vector3 feet = new Vector3(transform.position.x, feetY, transform.position.z);
 
         // 1. Front face at knee height, roughly facing the player
-        Vector3 knee = feet + Vector3.up * (minVaultHeight * 0.6f);
-        if (!Physics.Raycast(knee, direction, out RaycastHit front, vaultReach, obstacleLayer, QueryTriggerInteraction.Ignore))
+        Vector3 knee = feet + Vector3.up * ParkourStandard.VaultKneeRay;
+        if (!Physics.Raycast(knee, direction, out RaycastHit front, reach, obstacleLayer, QueryTriggerInteraction.Ignore))
             return false;
         Vector3 faceNormal = new Vector3(front.normal.x, 0f, front.normal.z);
         if (faceNormal.sqrMagnitude < 0.25f || Vector3.Dot(-faceNormal.normalized, direction) < 0.6f) return false;
@@ -102,25 +83,25 @@ public class EnvironmentChecker : MonoBehaviour
 
         // 2. Top: cast down just past the front face, from above the highest vaultable height
         Vector3 topOrigin = front.point + dir * 0.05f;
-        topOrigin.y = feetY + vaultHeightCheck + 0.3f;
-        if (!Physics.Raycast(topOrigin, Vector3.down, out RaycastHit top, vaultHeightCheck + 0.3f, obstacleLayer, QueryTriggerInteraction.Ignore))
+        topOrigin.y = feetY + ParkourStandard.VaultMaxHeight + 0.3f;
+        if (!Physics.Raycast(topOrigin, Vector3.down, out RaycastHit top, ParkourStandard.VaultMaxHeight + 0.3f, obstacleLayer, QueryTriggerInteraction.Ignore))
             return false;
         float height = top.point.y - feetY;
-        if (top.distance < 0.01f || top.normal.y < 0.7f || height < minVaultHeight || height > vaultHeightCheck) return false;
+        if (top.distance < 0.01f || top.normal.y < 0.7f || height < ParkourStandard.VaultMinHeight || height > ParkourStandard.VaultMaxHeight) return false;
 
         // 3. Depth: cast back toward the player from beyond the deepest vaultable obstacle.
         //    If the origin is still inside the obstacle the ray hits nothing → too deep.
-        Vector3 backOrigin = front.point + dir * (maxVaultDepth + 0.05f);
+        Vector3 backOrigin = front.point + dir * (ParkourStandard.VaultMaxDepth + 0.05f);
         backOrigin.y = top.point.y - 0.1f;
-        if (!Physics.Raycast(backOrigin, -dir, out RaycastHit back, maxVaultDepth + 0.05f, obstacleLayer, QueryTriggerInteraction.Ignore))
+        if (!Physics.Raycast(backOrigin, -dir, out RaycastHit back, ParkourStandard.VaultMaxDepth + 0.05f, obstacleLayer, QueryTriggerInteraction.Ignore))
             return false;
 
         // 4. Landing: where the clip lands at run speed, or closer if that spot is not free ground
         bool landed = false;
         RaycastHit land = default;
-        for (float d = ParkourTimings.VaultClipLandDistance; d >= vaultLandOffset - 0.001f; d -= 0.5f)
+        for (float d = ParkourTimings.VaultClipLandDistance; d >= ParkourStandard.VaultMinLanding - 0.001f; d -= 0.5f)
         {
-            Vector3 landOrigin = back.point + dir * Mathf.Max(d, vaultLandOffset);
+            Vector3 landOrigin = back.point + dir * Mathf.Max(d, ParkourStandard.VaultMinLanding);
             landOrigin.y = top.point.y + 0.5f;
             if (!Physics.Raycast(landOrigin, Vector3.down, out land, top.point.y - feetY + 2.5f, landingLayer, QueryTriggerInteraction.Ignore))
                 continue;
@@ -134,9 +115,9 @@ public class EnvironmentChecker : MonoBehaviour
         // Left hand on the top surface, just past the front edge (the clip plants it left of the body line)
         Vector3 left = Vector3.Cross(dir, Vector3.up);
         Vector3 edgePoint = new Vector3(front.point.x, top.point.y, front.point.z);
-        Vector3 hand = edgePoint + dir * 0.12f + left * 0.3f;
+        Vector3 hand = edgePoint + dir * ParkourTimings.VaultHandInset + left * ParkourTimings.VaultHandLateral;
         if (!Physics.Raycast(hand + Vector3.up * 0.3f, Vector3.down, out RaycastHit handTop, 0.45f, obstacleLayer, QueryTriggerInteraction.Ignore))
-            hand = edgePoint + dir * 0.12f; // narrow obstacle: plant it on the body line
+            hand = edgePoint + dir * ParkourTimings.VaultHandInset; // narrow obstacle: plant it on the body line
         else
             hand.y = handTop.point.y;
 
@@ -160,18 +141,89 @@ public class EnvironmentChecker : MonoBehaviour
     /// </summary>
     public bool TryFindLedge(Vector3 direction, float feetY, float minRise, float maxRise, bool fromGround, out LedgeInfo ledge)
     {
+        float reach = fromGround ? ParkourStandard.LedgeReachGround : ParkourStandard.LedgeReachAir;
+        return TryFindTop(direction, feetY, ParkourStandard.LedgeChestRay, ParkourStandard.LedgeHeadRay, reach,
+                          minRise, maxRise, ParkourStandard.LedgeStandInset, out ledge);
+    }
+
+    /// <summary>
+    /// Looks for a block to climb onto with a mantle (P28): a face within reach at knee/waist height,
+    /// a flat top 0.8–1.5 m above the feet and room to stand where the mantle ends (~1 m past the edge).
+    /// </summary>
+    public bool TryFindMantle(Vector3 direction, float feetY, float reach, out LedgeInfo top)
+    {
+        return TryFindTop(direction, feetY, ParkourStandard.MantleLowRay, ParkourStandard.MantleHighRay, reach,
+                          ParkourStandard.MantleMinRise, ParkourStandard.MantleMaxRise, ParkourStandard.MantleStandInset, out top);
+    }
+
+    /// <summary>
+    /// Looks for an edge to lower onto and hang from (P28): standing on a top, walking toward its edge
+    /// in <paramref name="direction"/>, the ground ends within reach, below it the drop is at least
+    /// ParkourStandard.DropMinHeight, the block has a face to brace the feet on, and a hanging body
+    /// fits in front of it. The edge is measured like a ledge (the hands go on it), with the normal
+    /// pointing away from the block.
+    /// </summary>
+    public bool TryFindDrop(Vector3 direction, float feetY, out LedgeInfo ledge)
+    {
         ledge = default;
         direction.y = 0f;
-        if (direction.sqrMagnitude < 0.0001f || !HasNearbyGeometry()) return false;
+        if (direction.sqrMagnitude < 0.0001f) return false;
         direction.Normalize();
-
-        float reach = fromGround ? ledgeReachGround : ledgeReachAir;
         Vector3 basePos = new Vector3(transform.position.x, feetY, transform.position.z);
 
-        // 1. Wall face: chest ray first, head ray for walls that start above the chest
+        // 1. Where the ground ends ahead (within reach)
+        float d = 0.2f;
+        for (; d <= ParkourStandard.DropReach; d += 0.1f)
+        {
+            Vector3 probe = basePos + direction * d + Vector3.up * 0.3f;
+            if (!Physics.Raycast(probe, Vector3.down, ParkourStandard.DropMinHeight + 0.3f, landingLayer, QueryTriggerInteraction.Ignore))
+                break;
+        }
+        if (d > ParkourStandard.DropReach) return false;
+
+        // 2. The block's face below the edge, seen from the open side
+        Vector3 faceProbe = basePos + direction * (d + 0.4f) + Vector3.down * 0.15f;
+        if (!Physics.Raycast(faceProbe, -direction, out RaycastHit face, 0.8f, obstacleLayer, QueryTriggerInteraction.Ignore))
+            return false;
+        Vector3 normal = new Vector3(face.normal.x, 0f, face.normal.z);
+        if (normal.sqrMagnitude < 0.25f || Vector3.Dot(normal.normalized, direction) < 0.5f) return false;
+        normal.Normalize();
+
+        // 3. Room for the hanging body in front of the face
+        Vector3 edge = new Vector3(face.point.x, feetY, face.point.z);
+        Vector3 hangTop = edge + normal * (StandCheckRadiusHang + 0.05f) + Vector3.down * 0.4f;
+        Vector3 hangBottom = hangTop + Vector3.down * 1.4f;
+        if (Physics.CheckCapsule(hangBottom, hangTop, StandCheckRadiusHang, landingLayer, QueryTriggerInteraction.Ignore)) return false;
+
+        ledge.Edge       = edge;
+        ledge.Normal     = normal;
+        ledge.TopY       = feetY;
+        ledge.StandPoint = edge - normal * ParkourStandard.LedgeStandInset;
+        return true;
+    }
+
+    /// <summary>Radius of the hanging body checked in front of a face (m).</summary>
+    private const float StandCheckRadiusHang = 0.25f;
+
+    /// <summary>
+    /// Shared measurement of a top to reach: the face (two horizontal rays, the lower first), its
+    /// normal, a flat top within the rise range, the exact edge on the face plane and room to stand
+    /// at <paramref name="standInset"/> past the edge. Allocation-free.
+    /// </summary>
+    private bool TryFindTop(Vector3 direction, float feetY, float lowRay, float highRay, float reach,
+                            float minRise, float maxRise, float standInset, out LedgeInfo ledge)
+    {
+        ledge = default;
+        direction.y = 0f;
+        if (direction.sqrMagnitude < 0.0001f || !HasNearbyGeometry(Mathf.Max(ParkourStandard.ProximityRadius, reach + 0.3f))) return false;
+        direction.Normalize();
+
+        Vector3 basePos = new Vector3(transform.position.x, feetY, transform.position.z);
+
+        // 1. Face: the lower ray first, the higher one for faces that start above it
         RaycastHit face;
-        if (!Physics.Raycast(basePos + Vector3.up * 1.2f, direction, out face, reach, obstacleLayer, QueryTriggerInteraction.Ignore) &&
-            !Physics.Raycast(basePos + Vector3.up * 1.75f, direction, out face, reach, obstacleLayer, QueryTriggerInteraction.Ignore))
+        if (!Physics.Raycast(basePos + Vector3.up * lowRay, direction, out face, reach, obstacleLayer, QueryTriggerInteraction.Ignore) &&
+            !Physics.Raycast(basePos + Vector3.up * highRay, direction, out face, reach, obstacleLayer, QueryTriggerInteraction.Ignore))
             return false;
         Vector3 normal = new Vector3(face.normal.x, 0f, face.normal.z);
         if (normal.sqrMagnitude < 0.25f) return false;
@@ -186,13 +238,13 @@ public class EnvironmentChecker : MonoBehaviour
         float rise = top.point.y - feetY;
         if (top.distance < 0.01f || top.normal.y < 0.7f || rise < minRise || rise > maxRise) return false;
 
-        // 3. The face right below the edge (exact plane where the fingers wrap)
+        // 3. The face right below the edge (exact plane where the hands go)
         Vector3 edgeProbe = new Vector3(face.point.x, top.point.y - 0.1f, face.point.z) + normal * 0.6f;
         if (!Physics.Raycast(edgeProbe, -normal, out RaycastHit edgeFace, 1.0f, obstacleLayer, QueryTriggerInteraction.Ignore))
             return false;
         Vector3 edge = new Vector3(edgeFace.point.x, top.point.y, edgeFace.point.z);
 
-        // 4. Room to stand on top and nothing over the edge where the hands go
+        // 4. Room to stand on top where the action ends
         Vector3 stand = edge - normal * standInset;
         if (!Physics.Raycast(stand + Vector3.up * 0.3f, Vector3.down, out RaycastHit standTop, 0.5f, obstacleLayer, QueryTriggerInteraction.Ignore))
             return false;
@@ -210,13 +262,13 @@ public class EnvironmentChecker : MonoBehaviour
     {
         Vector3 origin = centerPoint != null ? centerPoint.position : transform.position;
         Gizmos.color = Color.blue;
-        Gizmos.DrawLine(origin, origin + transform.forward * ledgeReachGround);
+        Gizmos.DrawLine(origin, origin + transform.forward * ParkourStandard.LedgeReachGround);
         Gizmos.color = new Color(0f, 0.5f, 1f, 0.15f);
-        Gizmos.DrawWireSphere(origin, proximityCheckRadius);
+        Gizmos.DrawWireSphere(origin, ParkourStandard.ProximityRadius);
         if (headPoint != null)
         {
             Gizmos.color = Color.cyan;
-            Gizmos.DrawLine(headPoint.position, headPoint.position + transform.forward * ledgeReachAir);
+            Gizmos.DrawLine(headPoint.position, headPoint.position + transform.forward * ParkourStandard.LedgeReachAir);
         }
     }
 }

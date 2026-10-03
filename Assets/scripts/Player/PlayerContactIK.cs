@@ -55,8 +55,11 @@ public class PlayerContactIK : MonoBehaviour
         PlayerState state = _movement.StateMachine.CurrentState;
         float progress = _movement.ParkourProgress;
 
-        bool onGround = _movement.IsGrounded && !_movement.IsRootMotionDriven &&
-                        (state == _movement.IdleState || state == _movement.RunState || state == _movement.SlideState ||
+        // A one-tick gap in the ground check (an auto step lifts the body at once) is not leaving the
+        // ground: the FSM ignores it for FallGraceTime, and so do the feet, or they sink for a few frames
+        bool grounded = _movement.IsGrounded || _movement.AirTime < _movement.FallGraceTime;
+        bool onGround = grounded && !_movement.IsRootMotionDriven &&
+                        (state == _movement.IdleState || state == _movement.RunState || state == _movement.SlideState || state == _movement.CrouchState ||
                          state == _movement.BlockState || state == _movement.LightAttackState || state == _movement.HeavyAttackState);
         // On the ground the feet are solved at once (a landing must not sink); leaving it fades out,
         // except into a parkour action, whose own contacts take over the feet immediately
@@ -70,6 +73,13 @@ public class PlayerContactIK : MonoBehaviour
             SolveHang(animator, progress);
         else if (state == _movement.LedgeClimbState)
             SolveClimb(animator, progress);
+        else if (state == _movement.LedgeDropState)
+            SolveClimb(animator, 1f - progress); // the climb in reverse: hands onto the edge at the end
+        else if (state == _movement.MantleState)
+            SolveMantle(animator, progress);
+
+        if (state == _movement.SlideState)
+            SolveHandsOnGround(animator);
 
         if (_groundWeight > 0f)
             SolveGroundFeet(animator, _groundWeight);
@@ -234,6 +244,62 @@ public class PlayerContactIK : MonoBehaviour
         _pelvisOffset = Mathf.Lerp(_pelvisOffset, drop, Mathf.Clamp01(pelvisSpeed * Time.deltaTime));
         animator.bodyPosition += Vector3.up * (_pelvisOffset * weight);
     }
+
+    /// <summary>
+    /// Mantle: the supporting hand rests on the top while the clip plants it (no floating hand on a
+    /// taller or lower top), and a foot over the block never sinks into it.
+    /// </summary>
+    private void SolveMantle(Animator animator, float progress)
+    {
+        LedgeInfo top = _movement.CurrentLedge;
+        float plant = Mathf.InverseLerp(ParkourTimings.MantleHandPlant, ParkourTimings.MantleHandPlant + 0.05f, progress)
+                    * (1f - Mathf.InverseLerp(ParkourTimings.MantleHandRelease - 0.05f, ParkourTimings.MantleHandRelease, progress));
+        foreach (AvatarIKGoal goal in new[] { AvatarIKGoal.LeftHand, AvatarIKGoal.RightHand })
+        {
+            Vector3 hand = animator.GetIKPosition(goal);
+            if (Vector3.Dot(hand - top.Edge, top.Normal) > -0.03f) continue; // not over the top
+            float y = top.TopY + ParkourTimings.WristAboveSurface;
+            if (goal == AvatarIKGoal.LeftHand && plant > 0f)
+                SetGoal(animator, goal, new Vector3(hand.x, y, hand.z), plant);  // the supporting hand
+            else if (hand.y < y)
+                SetGoal(animator, goal, new Vector3(hand.x, y, hand.z), 1f);      // never through the top
+        }
+        foreach ((AvatarIKGoal goal, float bottom) in new[] { (AvatarIKGoal.LeftFoot, animator.leftFeetBottomHeight), (AvatarIKGoal.RightFoot, animator.rightFeetBottomHeight) })
+        {
+            Vector3 foot = animator.GetIKPosition(goal);
+            if (Vector3.Dot(foot - top.Edge, top.Normal) > 0.05f) continue;    // still in front of the face
+            float minY = top.TopY + bottom + 0.02f;
+            if (foot.y < minY) SetGoal(animator, goal, new Vector3(foot.x, minY, foot.z), 1f);
+        }
+    }
+
+    /// <summary>
+    /// Sliding, a hand that trails along the floor rests on it instead of sinking into it: the wrist
+    /// stays HandOnGround above the surface under it. Lying back, the shoulder's joint limits keep the
+    /// arm from lifting the hand by itself, so the body leans on that hand: the torso rises the
+    /// missing centimeters (up to MaxHandSupport). A hand in the air is left alone.
+    /// </summary>
+    private void SolveHandsOnGround(Animator animator)
+    {
+        float support = 0f;
+        foreach (AvatarIKGoal goal in new[] { AvatarIKGoal.LeftHand, AvatarIKGoal.RightHand })
+        {
+            Vector3 anim = animator.GetIKPosition(goal);
+            if (!Physics.Raycast(anim + Vector3.up * 0.4f, Vector3.down, out RaycastHit hit, 0.8f, groundLayer, QueryTriggerInteraction.Ignore))
+                continue;
+            float minY = hit.point.y + HandOnGround;
+            if (anim.y >= minY) continue;
+            support = Mathf.Max(support, minY - anim.y);
+            SetGoal(animator, goal, new Vector3(anim.x, minY, anim.z), 1f);
+        }
+        animator.bodyPosition += Vector3.up * Mathf.Min(support, MaxHandSupport);
+    }
+
+    /// <summary>Most the torso rises to lean on a hand that rests on the floor (m).</summary>
+    private const float MaxHandSupport = 0.06f;
+
+    /// <summary>Height of the wrist above a surface the palm rests flat on (m).</summary>
+    private const float HandOnGround = 0.05f;
 
     /// <summary>
     /// Follows the terrain under the foot (offset from the body's floor) and keeps the sole above the

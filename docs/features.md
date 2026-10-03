@@ -5,12 +5,15 @@
 > implementado, cómo se hizo y qué prácticas seguimos). Los estados (✅ 🟡 🔧 📋 ⬜ ⚠️ ⏸️) se
 > definen en `contexto.md` §1.
 >
-> Estado verificado el 2026-10-01, después de la pasada de contacto físico del parkour (ver §5):
+> Estado verificado el 2026-10-02, después de la pasada del Parkour Obstacle Standard (ver §5):
 > los scripts compilan sin errores, `PlayerAnimationSetup` valida Avatars, material, clips, la curva
-> del vault, el contacto de las suelas, Missing Scripts, el Parkour Test Area y las poses en batch
-> mode (73 comprobaciones), y **`ParkourPlayModeTest` lo prueba en Play Mode real** con teclado
-> simulado: **140/140 comprobaciones**, incluido el contacto medido sobre el esqueleto (F32). Lo que
-> la prueba no mide (la calidad visual de las poses y la sensación al jugar) falta revisarlo jugando.
+> del vault, el contacto de las suelas, Missing Scripts, el Parkour Test Area, los 10 prefabs de
+> obstáculos y los 25 obstáculos de la escena contra el estándar, y **`ParkourPlayModeTest` lo
+> prueba en Play Mode real** con teclado simulado: **341/341 comprobaciones**, incluido el contacto
+> medido sobre el esqueleto, la consistencia de cada tipo de obstáculo desde varias posiciones, la
+> calidad del movimiento (momentum, slide, transiciones), las marchas, la orientación de la pose, el
+> mantle, el drop y el salto desde la cornisa (F32). Reconstrucción del movimiento (P28): §5. Lo que la prueba no mide (la calidad visual de las poses y la sensación al jugar) falta
+> revisarlo jugando.
 
 ---
 
@@ -22,7 +25,7 @@
 | F02 | Sprint | §5.2 | ✅ |
 | F03 | Salto, caída y aterrizaje | §5.3 | ✅ |
 | F04 | Vault | §5.4 | ✅ |
-| F05 | Ledge grab / climb | — | ⚠️ Fuera del GDD (se conserva, P2) |
+| F05 | Ledge grab / climb / drop / salto de cornisa | — | ⚠️ Fuera del GDD (se conserva, P2; ampliado en P28) |
 | F07 | Slide | — | ⚠️ Fuera del GDD (se conserva, P2; tecla C) |
 | F08 | Esquivar | §5.5 | ✅ |
 | F09 | Ataque ligero | §5.6 | ✅ |
@@ -37,7 +40,7 @@
 | F18 | Jefes | §5.15, §13 | ⬜ |
 | F19 | Checkpoints, muerte y reaparición | §5.13, §6 | ⬜ |
 | F20 | Guardado | §26 | ⬜ |
-| F21 | Cámara al hombro | §15 | 🟡 sin control de ratón ni shake |
+| F21 | Cámara al hombro | §15 | 🟡 orbital con ratón; sin shake ni encuadre de combate |
 | F22 | Input | §14 | 🟡 lectura directa, sin gamepad |
 | F23 | Animación | Pilar 2 | 🟡 clips provisionales |
 | F24 | Spawning y object pooling | (técnico) | ✅ |
@@ -48,6 +51,9 @@
 | F30 | Herramientas de Editor | (técnico) | ✅ |
 | F31 | Auto step y step down | (técnico) | ✅ |
 | F32 | Parkour Test Area y pruebas automáticas | (técnico) | ✅ |
+| F33 | Parkour Obstacle Standard y prefabs de obstáculos | (técnico) | ✅ |
+| F34 | Marchas: caminar, strafe, retroceso rápido, agacharse | — | ⚠️ Fuera del GDD (aprobado en P28) |
+| F35 | Mantle (subirse a bloques de 0.8–1.5 m) | — | ⚠️ Fuera del GDD (aprobado en P28) |
 
 IDs eliminados (no se reutilizan): **F06** wall jump (eliminado el 2026-09-30, P2/P8) y **F25**
 sistema de XP (eliminado el 2026-09-29, P3). Estamina y HUD nunca tuvieron ficha y también se
@@ -63,10 +69,10 @@ todavía falta implementar.
 |---|---|---|
 | Nombre | Awakened Warrior | `warrior-woke` / `WarriorWoke` |
 | Caminar / correr | "Caminar / correr" con WASD | WASD = correr a 5 m/s, acelerando y frenando de forma gradual (el blend pasa por caminar y trotar) (P12) |
-| Caminar hacia atrás | No lo define | S sin sprint retrocede mirando al frente a 1.5 m/s (P16) |
+| Caminar hacia atrás | No lo define | S sin sprint corre hacia atrás mirando al frente a 3.5 m/s; con Ctrl camina hacia atrás a 1.7 m/s (P16, P28) |
 | Salto | "Impulso vertical" sin valor | ~1 m de altura (escala humana) e inercia en el aire (P23) |
 | Aterrizaje | No lo define | Según la altura de la caída: absorbe velocidad y la recupera sin bloquear el control (P23) |
-| Parkour | Solo salto, sprint y vault (§28) | Además: ledge grab/climb (desde el suelo o en el aire) y slide (se conservan por decisión P2; slide con C mientras se esprinta) y auto step / step down (movimiento base). El wall jump se eliminó |
+| Parkour | Solo salto, sprint y vault (§28) | Además: ledge grab/climb (desde el suelo o en el aire) y slide (se conservan por decisión P2; slide con C corriendo con momentum, P27) y auto step / step down (movimiento base). El wall jump se eliminó |
 | Ataque fuerte | Patada (desarmado) | Animación de ataque con arma de una mano como placeholder (no hay clip de patada) |
 | Recoger arma ✔ P1 | E | No existe (E no hace nada todavía) |
 | Pausa | ESC | No existe |
@@ -95,11 +101,18 @@ Dependencias · Consideraciones técnicas · Falta**.
   modelo y la cámara se mueven suaves entre pasos de física. Los clips de locomoción se reproducen
   en el sitio (antes Walk y Jog patinaban hasta 2.2 m por ciclo) y, de pie, las suelas tocan el
   suelo (antes flotaban 11 cm). El IK de pies (`PlayerContactIK`) apoya cada pie en el terreno.
-- **Caminar hacia atrás (P16):** con input hacia atrás (S o diagonales) y sin sprint,
-  `IsBackpedaling` es verdadero: `Run` usa `BackpedalSpeed` (1.5 m/s) y el cuerpo mira al frente de
-  la cámara en lugar de girar, así que la cámara no da media vuelta. `PlayerAnimator` manda `Speed`
-  negativa y el blend reproduce *RunBackward* (LowPoly) a ×0.6. Con Shift gira y esprinta normal.
-  Probado: retrocede 1.72 m en 1.2 s sin girar (0°).
+- **Momentum y peso (2026-10-02, P27):** la velocidad sigue la orientación del cuerpo
+  (`AccelerateAlongFacing`): un giro curva la carrera y pierde velocidad según lo cerrado que es, y un
+  input muy por detrás frena antes de girar. El giro máximo baja de 720°/s parado a lo que permite ~0.9 g de aceleración lateral
+  a la velocidad que lleva (P28). El torso se inclina con la aceleración real: hacia la curva en un giro (hasta 10°),
+  adelante al acelerar y atrás al frenar. Probado: en un giro de 90° a la carrera la velocidad nunca
+  se separa del cuerpo (0°, antes patinaba de lado) y el torso se inclina 10°; al frenar desde el
+  sprint pasa de 7.0 a 5.7 m/s en 0.1 s y el torso se echa 6° atrás.
+- **Hacia atrás (P16, P28):** con input hacia atrás (S o diagonales) y sin sprint, el cuerpo mira
+  al frente de la cámara y **corre hacia atrás a 3.5 m/s** (el ritmo medido de *RunBackward*); con
+  Ctrl camina hacia atrás a 1.7 m/s (el walk invertido). Las diagonales hacia atrás usan sus propios
+  clips. Con Shift el cuerpo frena y pivota 180° progresivamente. La cámara no gira. Marchas y
+  strafe: F34.
 - **Cómo se implementó:** el proyecto nació 2.5D (Z congelado, un eje). En la sesión del 27-sep
   se migró a 3D: `RigidbodyConstraints.FreezeRotation`, `VerticalMove` en `IInputProvider` y
   `SetVelocity(Vector3, float)`. La rotación empezó con `RotateTowards` a 720°/s, pero la cámara
@@ -107,10 +120,10 @@ Dependencias · Consideraciones técnicas · Falta**.
 - **Dependencias:** `Camera.main` (si no hay, usa los ejes del mundo), `GroundChecker`.
 - **Consideraciones:** la lógica de estados corre en el paso de física (50 Hz). Probado: a 0.1 s
   del arranque va a 1.0 m/s y llega a 5 m/s; al soltar, a 0.12 s va a 3.4 m/s y se detiene. Un giro
-  de 90° a la carrera es progresivo (23° a los 0.1 s) y no muestra la caminata hacia atrás (el
-  parámetro `Speed` solo es negativo al retroceder).
-- **Animaciones:** RunBackward (LowPoly) · Idle (LowPoly) · Walk, Jog Forward, Run (DPS) · Sprint
-  (LowPoly), en un blend 1D por `Speed` (`arquitectura.md` §5.10).
+  de 90° a la carrera es progresivo y no muestra la caminata hacia atrás.
+- **Animaciones (P28):** blend 2D direccional sobre la velocidad bajo el cuerpo, con cada clip en su
+  velocidad medida: Idle, Walk, Jog, Run (el sprint lo reproduce más rápido), WalkBackward (generado),
+  RunBackward y sus diagonales, diagonales hacia delante y strafes (`arquitectura.md` §5.10).
 - **Falta:** bloquear el movimiento al morir o durante animaciones de daño (GDD).
 
 ### F02 — Sprint ✅
@@ -170,10 +183,28 @@ Dependencias · Consideraciones técnicas · Falta**.
   `LHandCurve` lo indica, y un pie que pasa sobre el obstáculo nunca baja de su cima. Al 82 % del
   clip sale a `Run` o `Idle` con la velocidad de la aproximación (o la de sprint).
 - **Animación:** *Vault1* (VaultFence) del Dynamic Parkour System, con root motion.
-- **Probado** (sección 02 del área): obstáculos de 0.5, 0.75, 1.0 y 1.2 m y uno de 0.9 m con 1.4 m de
-  fondo, corriendo; el de 1.0 m también esprintando y el de 0.75 m desde parado. En todos, la mano
-  queda a 2 cm de su punto, los pies pasan 17–58 cm sobre la cima, aterriza detrás con los pies en el
-  suelo y sale a 5 m/s (7 m/s esprintando). El de 1.6 m provoca un salto.
+- **Contexto (P28):** lento frente a un bloque con sitio arriba, Espacio hace mantle en lugar de
+  vault (F35); corriendo, vault. Un obstáculo más alto que el vault pero dentro del rango del mantle
+  se sube con mantle a cualquier velocidad.
+- **Probado** (secciones 02–04, obstáculos estándar): vault bajo (0.6 m), medio (1.0 m), alto
+  (1.2 m) y medio de 1.4 m de fondo; corriendo, esprintando, 1.2 m a un lado, en ángulo de 20° y
+  desde parado. La mano queda a ≤ 2.1 cm de su punto en todos los casos, los pies pasan 12–58 cm
+  sobre la cima, el cuerpo se alinea perpendicular a la cara (0°), aterriza con los pies en el suelo
+  y sale a 5 m/s (7 m/s esprintando). **Consistencia:** el mismo tipo da el mismo resultado desde
+  todas las posiciones corriendo (aterrizaje con ≤ 10 cm de diferencia). Un obstáculo de 1.6 m
+  provoca un salto.
+- **Aproximación y velocidad (2026-10-02, P27):** corriendo, Espacio mira más adelante y el vault
+  arranca en el punto de despegue del clip (1.2 m de la cara), aunque se pulse antes; caminando o
+  parado arranca donde está el cuerpo. El clip se reproduce a la velocidad de su propia carrera
+  (5.45 m/s), así que entra y sale a la velocidad de la aproximación (5.00 → 4.99 m/s, 7.0 → 7.2 m/s;
+  antes aceleraba un 24 %), y al terminar el cuerpo recibe la velocidad real del root motion. Sin
+  teleport: la mayor velocidad entre muestras es 12.9 m/s esprintando (antes un pop de hasta 22 m/s
+  en el despegue). Fuera de alcance (2 m, parado), Espacio salta.
+- **Vault de obstáculos altos desde parado (2026-10-02):** un obstáculo de más de 0.8 m necesita la
+  fase de despegue. Corriendo, el impulso sube el cuerpo a tiempo; desde parado o caminando
+  (< 3.5 m/s, la velocidad mínima del clip) y a menos de ~0.91 m de la cara, la pierna delantera
+  ya estaba en el obstáculo al empezar el clip y lo atravesaba 14 cm. Ahora en ese caso Espacio
+  salta en lugar de hacer el vault (desde 0.91–1.1 m sí hace el vault y libra la cima 13 cm).
 - **Cómo se implementó:** el 2026-09-30 se adaptó `VaultObstacle` del DPS (P15, P17), con el
   cuerpo interpolado por código y el clip acelerado a 0.6 s. El 2026-10-01 se pasó a root motion
   con `MatchTarget` (P22). Ver el detalle en §5.
@@ -197,11 +228,12 @@ Dependencias · Consideraciones técnicas · Falta**.
   se puede volver a agarrar en 0.4 s.
 - **Animaciones (DPS):** *Idle To Braced Hang* (root motion) → *Hanging Idle* (colgado) y *Braced
   Hang To Crouch* (subida, root motion).
-- **Probado** (secciones 04 y 05): muros de 2.1 m (desde parado y corriendo), 2.5 m (Espacio doble:
-  agarre y subida seguidos), 3.0 m (saltando) y 2.4 m girado 30°. Las manos quedan a ≤ 3.5 cm del
-  borde, nada atraviesa el muro, el cuerpo mira al muro (0°), sube y queda de pie arriba con las
-  suelas sobre la cima. En la escalada encadenada sube un muro de 2.2 m y, desde su cima, otro hasta
-  4.4 m; luego baja a la terraza y por la escalera.
+- **Probado** (secciones 06 y 07, obstáculos estándar): cornisa de 2.2 m desde parado, corriendo
+  (y soltándose), con Espacio doble, 1.2 m a un lado y girada 30°; muro de escalada de 3.0 m saltando
+  desde parado y corriendo. Las manos quedan a ≤ 3.6 cm del borde, nada atraviesa el muro, el cuerpo
+  mira al muro (0°), sube y queda de pie arriba con las suelas sobre la cima. En la escalada
+  encadenada sube la cornisa de 2.2 m y, desde su terraza, otra hasta 4.4 m; luego cae a la terraza
+  y baja por la escalera.
 - **Cómo se implementó:** el 2026-09-30 colgaba con un offset fijo bajo una "esquina" medida 0.6 m
   por delante de la cabeza, y subía con una trayectoria lineal. El 2026-10-01 se reescribió con
   detección real del borde, root motion, `MatchTarget` e IK (P22). Ver el detalle en §5.
@@ -210,15 +242,27 @@ Dependencias · Consideraciones técnicas · Falta**.
 
 ### F07 — Slide ⚠️ Fuera del GDD
 - **Archivos:** `PlayerGroundedStates.cs` (`PlayerSlideState`), `PlayerMovement.ShrinkCollider`.
-- **Cómo funciona:** C en `Run` **mientras se esprinta**. El collider baja a la mitad **conservando
-  su base en el suelo** (antes se encogía hacia el centro del torso y el modelo se hundía). El cuerpo
-  conserva la velocidad que traía (máximo 7.5 m/s, sin impulso extra) y la pierde con fricción
-  (4 m/s²). No se levanta si hay techo (`HasCeilingOverhead`): sigue deslizándose a ≥ 2.5 m/s hasta
-  salir. La dirección queda fija durante el slide. Animación en tres fases: *Slide Down* (baja al
-  suelo) → *Slide* (bucle, mientras dure) → *Slide Up* (se levanta al salir).
-- **Probado** (sección 03): pasa bajo la barra de 1.2 m y atraviesa el túnel de 4 m; el collider no
-  flota ni se hunde, el cuerpo no atraviesa el suelo y la cabeza queda a ~0.65 m, bajo la barra.
-- **Nota:** se conserva activo (P2). Pasó de Shift a C el 2026-09-30 (P1). Del slide del DPS solo se
+- **Cómo funciona (contextual desde el 2026-10-02, P27):** C en `Run` si hay momentum (≥ 3.9 m/s),
+  suelo plano y espacio libre a la altura del slide. El collider baja a la mitad **conservando su
+  base en el suelo**. El cuerpo conserva la velocidad que traía (máximo 7.5 m/s) y la pierde con
+  fricción (4 m/s², 9 si se suelta el input); frena para no chocar con un obstáculo delante; bajo
+  techo sigue a 2.5 m/s hasta tener sitio. Termina por momentum, espacio, input soltado o contrario,
+  o la ventana de 2 s; Espacio encadena un vault (si hay un obstáculo saltable delante, espera a
+  tenerlo al alcance) o un salto. Animación (P28, Quaternius CC0): *Slide_Start* (más rápida cuanto
+  más rápida la entrada) → *Slide_Loop*, un **bucle real** que dura lo que dura el slide (se encadena en
+  seco: su primer frame es el último de la entrada) → *Slide_Exit*. Una mano se apoya en el suelo y el
+  IK la mantiene encima; el torso se sostiene en ella si el hombro no llega. Detalle:
+  `arquitectura.md` §5.15.
+- **Por qué se rompía:** el sub-clip *Slide* (un tramo de un slide continuo) se importaba como bucle
+  y la pose saltaba atrás cada 0.37 s, y la FSM salía siempre a los 0.8 s, sin importar velocidad,
+  espacio ni input.
+- **Probado:** pasa bajo la barra y el túnel estándar sin que la cabeza los atraviese; esprintando
+  recorre 4.95 m en 1.09 s y corriendo 2.04 m en 0.58 s; soltando el input frena en 0.51 s y se
+  detiene; un solo slide y cero reinicios de la pose; la carrera sigue sin saltos de velocidad; hacia
+  un obstáculo bajo se detiene a 1 m de él ("obstáculo") o, con Espacio, encadena el vault; con
+  Espacio en abierto salta conservando la velocidad (±0.1 m/s); caminando, C no hace nada.
+- **Nota:** se conserva activo (P2). Pasó de Shift a C el 2026-09-30 (P1); desde P27 no exige sprint,
+  sino momentum. Del slide del DPS solo se
   tomaron las animaciones: su detección por tags es menos robusta que la reducción del collider.
 
 ### F08 — Esquivar ✅
@@ -355,14 +399,16 @@ Dependencias · Consideraciones técnicas · Falta**.
 - **Objetivo:** cámara estilo Sleeping Dogs con control libre, zoom ligero, shake y encuadre de
   combate (GDD §15).
 - **Archivos:** `Camera/CameraFollow.cs`, prefab `Main Camera`.
-- **Cómo funciona:** en `LateUpdate` se coloca detrás del hombro del jugador (`shoulderHeight`
-  1.6, `shoulderSide` 0.5, `distance` 3.5), mira hacia adelante (`lookAheadDistance` 2), suaviza con
-  `SmoothDamp`/`Slerp` y usa un `SphereCast` para no atravesar paredes. Encuentra al Player por
-  evento, sin referencias manuales.
-- **Cómo se implementó:** se reescribió en la sesión del 27-sep a partir de una cámara lateral 2.5D.
-- **Falta:** yaw y pitch con ratón o stick (el GDD dice que el jugador mueve la cámara), shake,
-  encuadre de combate y zoom por contexto. Aprobado en P5: extender `CameraFollow` con ratón. El
-  jitter posible (T7) se resolvió interpolando el Rigidbody del Player (2026-10-01).
+- **Cómo funciona (desde el 2026-10-02, P5/P28):** cámara orbital al hombro con yaw y pitch propios
+  que mueve el ratón; no sigue la orientación del cuerpo, así que girar, retroceder o dar media
+  vuelta no la arrastran. `SphereCast` para no atravesar paredes (ignora al Player). Cursor bloqueado;
+  Escape lo libera y un clic lo bloquea. Detalle: `arquitectura.md` §5.7.
+- **Probado:** al retroceder la cámara no gira (0°); en una media vuelta esprintando el cuerpo gira
+  173° progresivamente (máximo 5° por muestra) y la cámara no se mueve.
+- **Cómo se implementó:** se reescribió el 27-sep a partir de una cámara lateral 2.5D; el 2026-10-02
+  pasó de seguir el `forward` del jugador a orbital (el seguimiento del cuerpo causaba el giro en
+  círculos con S esprintando). Se quitaron del prefab los campos huérfanos de la cámara 2.5D.
+- **Falta:** shake, encuadre de combate, zoom por contexto y stick de gamepad.
 
 ### F22 — Input 🟡
 - **Archivos:** `Player/PlayerInputHandler.cs`, `Core/Interfaces/IInputProvider.cs`.
@@ -421,37 +467,110 @@ Dependencias · Consideraciones técnicas · Falta**.
   y suavizado el 2026-10-01 (P23).
 
 ### F32 — Parkour Test Area y pruebas automáticas ✅
-- **Objetivo:** probar cada movimiento por separado y combinado, a mano y automáticamente.
+- **Objetivo:** probar cada movimiento y cada obstáculo estándar por separado y combinados, a mano y
+  automáticamente.
 - **Archivos:** `Editor/ParkourTestCircuitBuilder.cs`, `Editor/ParkourPlayModeTest.cs`,
-  `Assets/Tests/ParkourCircuit/Materials/`, objeto `ParkourTestArea` de `Level-1`.
-- **Área** (P24): `Level-1` completo. Suelo plano (top en y = 0) de 62 × 80 m con un perímetro de
-  1.5 m. El `Spawner` está en la entrada (0, 1.2, 8), mirando hacia las secciones. Siete carriles
-  paralelos que empiezan en z = 0 y avanzan hacia −Z, cada uno de un color y **sin textos**:
+  `Assets/Tests/ParkourTestArea/Materials/Losa.mat`, objeto `ParkourTestArea` de `Level-1`.
+- **Área** (P24, P25): `Level-1` completo. Suelo plano (top en y = 0) de 66 × 80 m rodeado por
+  barreras estándar de 1.5 m. El `Spawner` está en la entrada (0, 1.2, 8), mirando hacia las
+  secciones. Nueve carriles paralelos que empiezan en z = 0 y avanzan hacia −Z, **sin textos**.
+  Todos los obstáculos son instancias de los prefabs estándar (F33); las escaleras, las plataformas
+  de caída y los pilares son fixtures simples:
 
   | Sección | x | Contenido (z de la cara frontal) | Qué se prueba |
   |---|---|---|---|
-  | 01 Locomoción | −24 (8 m de ancho) | Bordillos de 0.15 / 0.25 / 0.35 m (−8, −11, −14) · 4 pilares en zigzag (−20…−35) · escalera a una plataforma de 1 m y escalera de bajada (−40…−49) | Arranque, frenado, giros, caminar hacia atrás, auto step y step down. El pasillo libre en x = −31 sirve para correr en recto. |
-  | 02 Vault | −14 | 0.5 m (−8) · 0.75 m (−16) · 1.0 m (−24) · 1.2 m (−32) · 0.9 m con 1.4 m de fondo (−40) · 1.6 m, demasiado alto (−50) | Vault a distintas alturas, fondos y velocidades |
-  | 03 Slide | −8 | Barra a 1.2 m (−10) · túnel a 1.2 m de 4 m (−20…−24) | Shift + C |
-  | 04 Ledge grab | −2 | Muros de 2.1 m (−8) y 2.5 m (−18), al alcance desde el suelo · 3.0 m (−28), con salto · 2.4 m girado 30° (−40); todos de 3 m de fondo | Agarre desde parado, corriendo y en el aire, colgarse, soltarse y subir |
-  | 05 Climb | 4 | Muro de 2.2 m (−8) · desde su cima, muro hasta 4.4 m (−12) · terraza de 2.2 m (−15) · escalera de bajada (−19) | Escalar encadenado, caer a la terraza y bajar |
-  | 06 Salto / aterrizaje | 10 | Escalera a dos plataformas de 1 m separadas por un hueco de 2 m (−8…−18) · escalera a una de 2 m (−22…−29) · escalera a una de 3 m (−33…−41) | Saltar un hueco y aterrizajes ligero, medio y fuerte |
-  | 07 Combinado | 17 | Bordillo 0.2 m (−6) → vault 1.0 m (−12) → barra de slide (−21) → muro de 2.2 m para agarrarse, subir y caer al otro lado (−30) → vault 0.75 m (−42) | Todo en una sola carrera |
+  | 01 Locomoción | −25 (8 m de ancho) | `Step` de 0.15 / 0.25 / 0.35 m (−8, −11, −14) · 4 pilares en zigzag (−20…−35) · escalera a una plataforma de 1 m y escalera de bajada (−40…−49) | Arranque, frenado, giros, caminar hacia atrás, auto step y step down. El pasillo libre en x = −31 sirve para correr en recto. |
+  | 02 Vault bajo | −16 | `LowVault` 0.6 m (−8) | Corriendo, a un lado, en ángulo, esprintando, desde parado |
+  | 03 Vault medio | −10 | `MediumVault` 1.0 m (−8) · `MediumVault` de 1.4 m de fondo (−20) | Igual, más el fondo máximo |
+  | 04 Vault alto | −4 | `HighVault` 1.2 m (−8) | Igual, más el caso sin espacio para el despegue (y un obstáculo de 1.6 m que la prueba crea y borra) |
+  | 05 Slide | 2 | `Slide` (−9.5) · `Slide` de 4 m de fondo como túnel (−20…−24) | C esprintando |
+  | 06 Cornisa | 8 | `Ledge` 2.2 m (−8) · `Ledge` girado 30° (−20) | Agarre desde parado, corriendo, a un lado y en ángulo; colgarse, soltarse y subir |
+  | 07 Muro de escalada | 14 | `ClimbWall` 3.0 m (−8) · `Ledge` de 11 m de fondo (terraza, −20) con otro `Ledge` encima (hasta 4.4 m, −24) · escalera de bajada (−31) | Salto + agarre en el aire, escalada encadenada, caída a la terraza y bajada |
+  | 08 Salto / aterrizaje | 20 | Escalera a `JumpGap` (plataformas de 1 m, hueco de 2 m, −8…−18) · escalera a una plataforma de 2 m (−22…−29) · escalera a una de 3 m (−33…−41) | Saltar el hueco y aterrizajes ligero, medio y fuerte |
+  | 09 Combinado | 26 | `Combined`: Step (−6) → MediumVault (−12) → Slide (−20.5) → Ledge de 3 m de fondo (−30) → LowVault (−42) → Mantle (−50) | Todo en una sola carrera |
+  | 10 Laboratorio de fluidez | 32 | `LowVault` (−14) y pista libre detrás | Slide hacia un obstáculo (se detiene o encadena el vault), frenadas, giros y slides a distintas velocidades: para mirar peso, contacto, transición y recuperación |
+  | 11 Mantle | 38 | `Mantle` 1.3 m (−8) · 0.9 m (−18) · 1.5 m (−28) | Subirse desde parado y corriendo, en todo el rango |
 
-  Regenerar: **Tools → Warrior Woke → Construir Parkour Test Area** (elimina el blockout anterior si
-  sigue en la escena y valida que no quede ningún collider fuera del área).
+  Regenerar: **Tools → Warrior Woke → Construir Parkour Test Area** (valida que no quede ningún
+  collider fuera del área y que cada obstáculo cumpla el estándar).
 - **Prueba automática** (**Probar Personaje en Play Mode**): entra a Play Mode, agrega un teclado
   virtual del Input System (pasa por `PlayerInputHandler` igual que el teclado real) y recorre las
-  siete secciones. Además del flujo de estados, **mide el contacto sobre el esqueleto animado**:
-  suelas en el suelo (de pie, corriendo, en escalones, al aterrizar y después de cada vault), mano
-  del vault en su punto, pies que no atraviesan el obstáculo, ambas manos en el borde, manos y pies
+  once secciones. Cada obstáculo estándar se prueba **desde varias posiciones**: centro, 1.2 m a un
+  lado, en ángulo de 20–30°, parado, corriendo y esprintando; y una comprobación de **consistencia**
+  exige que el mismo tipo dé el mismo resultado desde todas las posiciones corriendo. Además del
+  flujo de estados, **mide el contacto sobre el esqueleto animado**: suelas en el suelo (de pie,
+  corriendo, en escalones, al aterrizar y después de cada vault), mano del vault en su punto, pies
+  que no atraviesan el obstáculo, cuerpo alineado con la cara, ambas manos en el borde, manos y pies
   fuera del muro, cuerpo de frente al muro, manos en el borde al empezar a subir y sin atravesar la
   cima, cuerpo visible pegado al collider en el aire, cabeza bajo la barra y el túnel, peso del
-  aterrizaje e inercia. También combate, esquiva, bloqueo y cero errores en consola. Resultado del
-  2026-10-01: **140/140**. Cada fallo imprime el estado, la posición y la suela; el del vault
-  indica además el pie, el momento del clip y la posición de la mano.
+  aterrizaje e inercia. **Calidad de movimiento (P27):** giro sin patinar e inclinación del torso;
+  sprint → frenar; caminar hacia atrás → parar; vault sin teleport (velocidad entre muestras
+  < 13 m/s), con la misma velocidad de entrada y salida, saliendo a la velocidad del clip y sin
+  inclinación procedural; caminando → vault bajo; fuera de alcance → salto; sprint → slide → correr,
+  → parar y → salto; correr → slide (más corto que esprintando); caminar → slide (no hay); slide con
+  poco espacio y slide → vault; agarre → subida → correr sin teleport. También combate, esquiva,
+  bloqueo y cero errores en consola. Resultado del 2026-10-02: **301/301** en dos corridas seguidas. Cada fallo imprime el estado, la posición y la suela; el del vault indica
+  además el pie, el momento del clip y la posición de la mano.
 - **Consideraciones:** no prueba la cámara con ratón (no existe), enemigos ni la calidad visual de
-  las poses; eso se revisa jugando.
+  las poses; eso se revisa jugando (sección 10). El fallo intermitente de un pie hundido en escalones
+  (T24) se resolvió en P27.
+
+### F33 — Parkour Obstacle Standard y prefabs de obstáculos ✅
+- **Objetivo:** que todos los obstáculos del juego se construyan con un molde de medidas
+  consistentes que el parkour ya espera, para no recalibrar cada obstáculo al hacer los niveles.
+- **Archivos:** `scripts/Parkour/ParkourStandard.cs`, `scripts/Parkour/ParkourObstacle.cs`,
+  `Editor/ParkourObstaclePrefabs.cs`, `Assets/Prefabs/Parkour/` (10 prefabs + materiales).
+- **Cómo funciona:** `ParkourStandard` guarda en un solo lugar las medidas de cada tipo y los
+  límites de detección (los leen `EnvironmentChecker`, `PlayerLedgeGrabState` y el auto step). Los
+  prefabs se generan desde él. `ParkourObstacle` mide la geometría, dice en el Inspector si cumple el
+  estándar y dibuja los puntos de inicio, mano/agarre y aterrizaje. Catálogo completo, medidas y
+  convención del pivote: `arquitectura.md` §5.13.
+- **Catálogo:** Step 0.25 · LowVault 0.6 · MediumVault 1.0 · HighVault 1.2 · Barrier 1.5 (no
+  transitable) · Ledge 2.2 · ClimbWall 3.0 · Slide (paso libre 1.2) · JumpGap (hueco de 2 m) ·
+  Combined.
+- **Cómo se implementó (2026-10-02, P25):** se auditaron las dimensiones del personaje y de los
+  obstáculos que ya pasaban las pruebas, se eligieron alturas dentro de los rangos con margen y se
+  movieron a `ParkourStandard` los valores que estaban repartidos (campos serializados de
+  `EnvironmentChecker`, que el prefab ya contradecía en el radio del pre-filtro; constantes de
+  `PlayerLedgeGrabState`; `StepHeight`). El Parkour Test Area se reconstruyó solo con los prefabs.
+- **Consideraciones:** los prefabs no se editan a mano (se regeneran). La detección sigue midiendo
+  la geometría real, así que un obstáculo fuera del estándar puede funcionar igual, pero sin la
+  garantía de que caiga dentro de los rangos. Entre 1.2 y 1.9 m no hay acción (banda de la barrera).
+
+### F34 — Marchas: caminar, strafe, retroceso rápido, agacharse ⚠️ Fuera del GDD (P28)
+- **Objetivo:** moverse a distintas velocidades y en cualquier dirección sin tener que girar el
+  cuerpo, con la cámara quieta.
+- **Archivos:** `PlayerMovement.cs` (`WalkSpeed`, `BackpedalSpeed`, `CrouchSpeed`, `IsWalking`,
+  `IsOriented`), `PlayerGroundedStates.cs` (`Run`, `PlayerCrouchState`), `PlayerInputHandler.cs`
+  (Ctrl), `PlayerAnimator.cs` (`MoveX`/`MoveZ`), `Editor/ClipMeasurement.cs`.
+- **Cómo funciona:** tres marchas: caminar (Ctrl mantenido, 1.7 m/s), correr (5 m/s) y sprint (Shift,
+  7 m/s). Caminando, el cuerpo mira a la cámara y se mueve en cualquier dirección (strafe, diagonales,
+  hacia atrás). Corriendo gira hacia donde va, salvo hacia atrás, donde corre hacia atrás mirando a la
+  cámara a 3.5 m/s. C sin momentum agacha el cuerpo (collider al 62 %, 1 m/s, gira hacia donde va);
+  C, Shift o Espacio lo levantan si no hay techo. El blend direccional coloca cada clip en su
+  velocidad medida.
+- **Probado:** caminar a 1.7 m/s; strafe a la derecha a 1.7 m/s sin girar (blend en +X); caminar hacia
+  atrás a 1.7 m/s; diagonal hacia atrás a 3.5 m/s sin girar; de atrás a adelante sin girar y con la
+  velocidad cambiando de sentido gradualmente; el sprint reproduce la carrera más rápido (sin
+  patinar); agacharse baja el collider, camina a 1 m/s y C lo levanta; la pose siempre mira hacia
+  donde mira el cuerpo.
+- **Animaciones:** Walk, WalkBackward (generado), RunBackward y diagonales, strafes (LowPoly),
+  Crouch_Idle/Crouch_Fwd (Quaternius).
+
+### F35 — Mantle ⚠️ Fuera del GDD (P28)
+- **Objetivo:** subirse a un bloque de 0.8–1.5 m que tiene sitio arriba, en lugar de saltarlo o
+  chocar con él.
+- **Archivos:** `PlayerParkourStates.cs` (`PlayerMantleState`), `EnvironmentChecker.TryFindMantle`,
+  `PlayerAnimator.cs` (`MatchTarget`), `PlayerContactIK.SolveMantle`, `ParkourStandard` (tipo `Mantle`).
+- **Cómo funciona:** Espacio frente al bloque: lento, mantle si hay sitio arriba; corriendo, vault si se
+  puede saltar y mantle si es más alto. Corriendo, Espacio se puede pulsar antes y el mantle espera a
+  su distancia. El clip *ClimbUp_1m* (Quaternius) sube 1 m; `MatchTarget` lleva la **mano de apoyo
+  sobre la cima medida** (corrige la distancia y la altura, 0.8–1.5 m) y después los pies al punto de
+  pie. El IK mantiene la mano en la cima mientras el clip la apoya y los pies fuera del bloque. La
+  carrera sigue arriba con la velocidad del clip.
+- **Probado:** bloques de 0.9, 1.3 y 1.5 m desde parado y 1.3 m corriendo con Espacio anticipado (y al
+  final del recorrido combinado): la mano de apoyo queda en la cima (0 cm), los pies nunca dentro del
+  bloque, de pie arriba, sin teleport (máximo 8 m/s), con la pose mirando hacia donde sube.
 
 ### F24 — Spawning y object pooling ✅
 - **Archivos:** `Core/Spawning/{ObjectPoolManager,Spawner,ReturnToPoolDelay}.cs`,
@@ -691,6 +810,56 @@ problema, la causa, la solución y el estado (formato del GDD §29 para bugs).
 | 2026-09-30 | (ver `git log`) | Axel | Personaje jugable: texturas, Animator, controles del GDD, sprint, caída, bloqueo y esquiva (detalle abajo). Validado en batch mode; falta Play Mode. |
 | 2026-09-30 | (ver `git log`) | Axel | Parkour con el Dynamic Parkour System, locomoción con aceleración, caminar hacia atrás, combate más dinámico, circuito y prueba en Play Mode (detalle abajo). 36/36 en Play Mode. |
 | 2026-10-01 | (ver `git log`) | Axel | Contacto físico del parkour (root motion + `MatchTarget` + IK), movimiento a escala humana, aterrizaje con peso, Parkour Test Area y limpieza de recursos sin uso (detalle abajo). 140/140 en Play Mode. |
+| 2026-10-02 | (sin commit) | Axel | Reconstrucción del movimiento (P28), fases 2–10: animaciones CC0 de Quaternius, herramienta de medición de clips, locomoción direccional con marchas (caminar, strafe, retroceso a 3.5 m/s, agacharse), slide con bucle real, mantle, drop y salto de cornisa, roll de aterrizaje, laboratorio S11 y limpieza (detalle abajo). 341/341 en Play Mode. |
+| 2026-10-02 | (sin commit) | Axel | Reconstrucción del movimiento (P28): auditoría, investigación de repositorios y licencias, arquitectura D aprobada; fase 1: cámara orbital con ratón (P5) y giro limitado por la aceleración lateral (media vuelta que frena y pivota). 304/304 en Play Mode. |
+| 2026-10-02 | (sin commit) | Axel | Calidad de movimiento, segunda fase (P27): momentum en la locomoción, inclinación del torso, slide contextual, aproximación del vault, transiciones sin cambios de velocidad, T24 resuelto y laboratorio de fluidez (detalle abajo). 301/301 en Play Mode, dos corridas. |
+| 2026-10-02 | (sin commit) | Axel | Parkour Obstacle Standard: estándar centralizado, 10 prefabs de obstáculos con validación y gizmos, Parkour Test Area reconstruida con ellos y pruebas de consistencia por posición (detalle abajo). 212/212 en Play Mode. |
+
+### Detalle — reconstrucción del movimiento, fases 2–10 (2026-10-02)
+
+| Problema | Causa | Solución | Estado |
+|---|---|---|---|
+| No se podía retroceder ni hacer strafe de verdad | Blend 1D por rapidez; un trote hacia atrás ralentizado ×0.6 a 1.5 m/s | Blend 2D direccional con clips en su velocidad medida; marchas; retroceso a 3.5 m/s | ✅ |
+| Los pies patinaban corriendo y esprintando (T16) | *Run* va a 5.9 m/s y *Sprint* (LowPoly) a 4.5, más lento | Velocidades medidas con `ClipMeasurement`; el sprint reproduce *Run* más rápido; `Sprint.fbx` eliminado | ✅ |
+| El slide se repetía | Tramo de un slide continuo usado como bucle | Clips de Quaternius con bucle real, encadenados en seco | ✅ |
+| Obstáculos de 1.2–1.5 m no tenían acción | Solo existía el vault y el agarre a partir de 1.9 m | Mantle con `MatchTarget` de la mano de apoyo sobre la cima | ✅ |
+| Al correr hacia un bloque alto, Espacio saltaba contra él | La intención anticipada solo existía para el vault | La aproximación vale para mantle y vault; la intención nunca se convierte en un salto tardío | ✅ |
+| Los clips de Quaternius salían de espaldas | Su rig mira a −Z; con la raíz "según el cuerpo" el giro dependía de la pose | Raíz "Original" + 180°, como LowPoly y DPS; prueba "la pose mira hacia donde mira el cuerpo" | ✅ |
+| La mano del mantle se apoyaba en el aire | El clip espera el borde a ~0.55 m y el warp solo corregía la altura | `MatchTarget` de la mano sobre el punto medido de la cima | ✅ |
+| Pop en el mantle alto y corriendo (13–15 m/s) | El cross-fade se comía la ventana del warp | Ventana hasta mitad del apoyo y cross-fade de 0.05 s | ✅ |
+| La mano del slide se hundía en el suelo | Durante la mezcla de la entrada al bucle el IK no la sostenía | Entrada al bucle en seco (las poses coinciden) y el torso se apoya en la mano | ✅ |
+| No había drop ni salto desde la cornisa | — | Drop con la subida invertida (clip generado) y salto lejos del muro | ✅ |
+| Aterrizajes fuertes corriendo terminaban en una pose agachada | Un solo aterrizaje fuerte | Roll (Quaternius) que conserva el 70 % de la velocidad | ✅ |
+
+### Detalle — calidad de movimiento (2026-10-02)
+
+Formato del GDD §29: **problema → causa → solución → estado**. Todo con la arquitectura aprobada
+(P26); sin plugins ni clips nuevos.
+
+| Problema | Causa | Solución | Estado |
+|---|---|---|---|
+| El personaje gira como robot y patina en los giros | La velocidad iba en línea recta al input mientras el cuerpo giraba aparte | La velocidad sigue la orientación; giro máximo según la rapidez; frenada antes de un giro de más de 135° | ✅ |
+| Movimiento rígido, sin peso | La postura era exactamente la del clip | Inclinación procedural del torso con la aceleración real (giro, aceleración, frenada) | ✅ |
+| El slide "se reinicia" | El sub-clip *Slide* se importaba como bucle sin serlo: la pose saltaba atrás cada 0.37 s | Sin bucle: se reproduce una vez y se mantiene, estirado sobre la duración prevista | ✅ |
+| El slide era siempre igual y se disparaba | Duración fija de 0.8 s; solo exigía sprint | Slide contextual: momentum, superficie y espacio para entrar; termina por momentum, espacio, input o ventana; encadena vault o salto | ✅ |
+| El vault aceleraba al personaje (5 → 6.2 m/s) | La reproducción usaba la velocidad media del clip, no la de su carrera | Reproducción a la velocidad de carrera del clip (5.45 m/s) | ✅ |
+| Pop o pierna dentro del obstáculo en vaults altos corriendo | El vault empezaba donde se pulsaba Espacio y el cross-fade se comía la ventana de despegue | Aproximación al punto de despegue (1.2 m) y offset que respeta el cross-fade | ✅ |
+| Cambio de velocidad al terminar vault y subida | Velocidad fija al salir (aprox., 4 m/s o 0) | Velocidad real del root motion | ✅ |
+| Pie hundido hasta 7 cm al subir escalones (T24) | Un hueco de un tick en el ground check (auto step) apagaba el IK de pies | El IK usa el mismo margen que la FSM (`FallGraceTime`) | ✅ |
+
+### Detalle — Parkour Obstacle Standard (2026-10-02)
+
+Formato del GDD §29: **problema → causa → solución → estado**.
+
+| Problema | Causa | Solución | Estado |
+|---|---|---|---|
+| Cada obstáculo se construía a mano, sin medidas consistentes | No había estándar ni prefabs: el área los creaba uno a uno por código | `ParkourStandard` + 10 prefabs generados + `ParkourObstacle` que valida y dibuja los puntos de contacto (P25, F33) | ✅ |
+| Los límites del parkour estaban repartidos y ya se contradecían | Campos serializados en `EnvironmentChecker` (el prefab tenía 1.2 m de pre-filtro, el código 1.4), constantes en `PlayerLedgeGrabState`, `StepHeight` serializado, medidas copiadas en el área y la prueba | Todo lee `ParkourStandard`; los campos se eliminaron del componente y del prefab; el pre-filtro queda en 1.4 m (cubre un obstáculo de 0.45 m a 1.1 m) | ✅ |
+| Entre 1.2 y 1.9 m ningún movimiento funcionaba y no estaba documentado | Es el hueco entre el vault más alto y el agarre más bajo | Se documenta como banda de la `Barrier` (layer Ground, bloquea a propósito); el perímetro del área usa barreras | ✅ |
+| Vault alto (1.2 m) desde parado: la pierna atravesaba la cima 14 cm | Cerca del obstáculo el clip arranca más adelante y no quedaba ventana para la fase de despegue | Desde parado o caminando, un obstáculo que necesita despegue exige ~0.91 m de espacio; si no, Espacio salta | ✅ |
+| Solo se probaba cada obstáculo desde una posición | La prueba seguía un único camino por obstáculo | Varias posiciones por tipo y comprobación de consistencia entre ellas | ✅ |
+| Escena de pruebas con materiales y nombres heredados | `Tests/ParkourCircuit`, `Combo.mat` | Carpeta renombrada a `Tests/ParkourTestArea`, materiales de obstáculos junto a los prefabs, `Combo.mat` eliminado (sin referencias) | ✅ |
+| Escalón de bajada y caída de 2 m: un pie a −4 / −6 cm del suelo en una de cinco corridas | Variación de la física en batch, cerca de la tolerancia (3 cm) | Registrado como T24; sin cambio de código | 🟡 |
 
 ### Detalle — contacto físico del parkour (2026-10-01)
 

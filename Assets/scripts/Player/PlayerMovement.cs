@@ -25,8 +25,14 @@ public class PlayerMovement : MonoBehaviour, IDamageModifier
     public float SlideSpeed  = 7.5f;
     [Tooltip("Vertical take-off speed. 4.5 m/s ≈ 1 m of rise: a human jump, not a superhero one.")]
     public float JumpSpeed   = 4.5f;
-    [Tooltip("Walking backward speed (S without sprint).")]
-    public float BackpedalSpeed = 1.5f;
+    [Tooltip("Running backward speed (S without sprint, facing the camera): the measured pace of the RunBackward clip.")]
+    public float BackpedalSpeed = 3.5f;
+    [Tooltip("Walking speed (Left Ctrl held), in every direction: the measured pace of the Walk clip.")]
+    public float WalkSpeed = 1.7f;
+    [Tooltip("Crouched walking speed.")]
+    public float CrouchSpeed = 1.0f;
+    [Tooltip("Collider height while crouched, as a fraction of the standing height.")]
+    public float CrouchHeightFactor = 0.62f;
 
     public float SprintSpeed => BaseSpeed * SprintMultiplier;
 
@@ -41,16 +47,30 @@ public class PlayerMovement : MonoBehaviour, IDamageModifier
     public float AirDrag = 0.5f;
 
     [Header("Sliding")]
-    public float SlideDuration = 0.8f;
-    [Tooltip("m/s² of friction while sliding.")]
+    [Tooltip("m/s² of friction while sliding with the move input held.")]
     public float SlideFriction = 4f;
-    [Tooltip("Slowest slide speed (m/s): kept while a ceiling forces the slide to continue.")]
+    [Tooltip("m/s² of friction when the move input is released: the legs dig in and the slide ends sooner.")]
+    public float SlideBrakeFriction = 9f;
+    [Tooltip("Momentum is spent below this speed (m/s); it is also the speed kept while a ceiling forces the slide on.")]
     public float SlideMinSpeed = 2.5f;
+    [Tooltip("Seconds the body needs to drop to the ground ('Slide Down'); the slide cannot end or chain before.")]
+    public float SlideMinTime = 0.35f;
+    [Tooltip("Longest slide without a ceiling (s): the end of the valid window.")]
+    public float SlideMaxTime = 2f;
     [SerializeField] private LayerMask ceilingLayer = ~0;
 
+    /// <summary>
+    /// Slowest entry into a slide: it must still have momentum after the body reaches the ground
+    /// (SlideMinSpeed + SlideFriction × SlideMinTime ≈ 3.9 m/s). Walking or jogging does not slide.
+    /// </summary>
+    public float SlideMinEntrySpeed => SlideMinSpeed + SlideFriction * SlideMinTime;
+
+    /// <summary>Height (m above the feet) and radius of the probe that looks for obstacles along a slide.</summary>
+    public const float SlideProbeHeight = 0.45f, SlideProbeRadius = 0.3f;
+
     [Header("Auto Step (adapted from Dynamic Parkour System, MIT)")]
-    [Tooltip("Highest ledge (m above the feet) climbed automatically while moving on the ground.")]
-    public float StepHeight = 0.4f;
+    /// <summary>Highest rise (m) climbed or descended automatically while moving on the ground (ParkourStandard).</summary>
+    public float StepHeight => ParkourStandard.StepMaxHeight;
     [SerializeField] private LayerMask stepLayer = ~0;
 
     [Header("Falling and Landing")]
@@ -64,6 +84,12 @@ public class PlayerMovement : MonoBehaviour, IDamageModifier
     public float HardLandingSpeedKept = 0.3f;
     [Tooltip("Seconds the heaviest landing takes to recover full speed. Control is never blocked.")]
     public float HardLandingRecovery = 0.7f;
+    [Tooltip("A landing at least this heavy, at RollMinSpeed or more with input, is absorbed with a roll.")]
+    public float RollMinSeverity = 0.6f;
+    [Tooltip("Horizontal speed (m/s) needed to roll out of a heavy landing.")]
+    public float RollMinSpeed = 3f;
+    [Tooltip("Horizontal speed kept by the roll (fraction) and seconds it takes to recover the rest.")]
+    public float RollSpeedKept = 0.7f, RollRecovery = 0.45f;
 
     [Header("Ledge")]
     [Tooltip("Seconds after letting go of a ledge before another can be grabbed.")]
@@ -75,6 +101,12 @@ public class PlayerMovement : MonoBehaviour, IDamageModifier
     [SerializeField] private float turnSmoothTime = 0.12f;
     [Tooltip("Turn smoothing time (s) at sprint speed: a fast body turns wider.")]
     [SerializeField] private float sprintTurnSmoothTime = 0.2f;
+    [Tooltip("Fastest turn (°/s) at low speed.")]
+    [SerializeField] private float maxTurnRateStill = 720f;
+    [Tooltip("Largest sideways acceleration (m/s²) a running body can take in a turn (~0.9 g). It limits the turn rate at speed (rate = this / speed), so a sharp turn at a sprint has to brake first.")]
+    [SerializeField] private float maxLateralAcceleration = 9f;
+    [Tooltip("Input this far (°) behind the facing is a reversal: the runner brakes and turns before accelerating again.")]
+    [SerializeField] private float pivotAngle = 135f;
 
     private float _turnSmoothVelocity;
 
@@ -95,6 +127,7 @@ public class PlayerMovement : MonoBehaviour, IDamageModifier
     public float InputZ         { get; private set; }
     public bool  JumpTriggered  { get; private set; }
     public bool  IsSprintHeld   { get; private set; }
+    public bool  IsWalkHeld     { get; private set; }
     public bool  SlideTriggered { get; private set; }
 
     /// <summary>True when the combined move input exceeds the deadzone.</summary>
@@ -123,10 +156,23 @@ public class PlayerMovement : MonoBehaviour, IDamageModifier
     public float AirPeakFeetY       { get; private set; }
 
     /// <summary>
-    /// Walking backward while facing forward: back input (S or back diagonals) without sprint.
-    /// Sprinting backward turns around and runs normally.
+    /// Moving backward while facing the camera: back input (S or back diagonals) without sprint.
+    /// Sprinting backward pivots and runs the other way.
     /// </summary>
     public bool  IsBackpedaling     => HasMoveInput && InputZ < -0.1f && !IsSprint;
+
+    /// <summary>Walking gait (Left Ctrl held, not sprinting).</summary>
+    public bool  IsWalking          => IsWalkHeld && !IsSprint;
+
+    /// <summary>
+    /// Oriented locomotion: the body keeps facing the camera's direction and moves in any direction
+    /// under it (strafe, diagonals, backward). Walking is always oriented; running is oriented only
+    /// when the input goes backward. Otherwise the body turns toward where it moves.
+    /// </summary>
+    public bool  IsOriented         => IsWalking || IsBackpedaling;
+
+    /// <summary>The last landing was absorbed with a roll (fast, heavy landing with input).</summary>
+    public bool  LandedWithRoll     { get; private set; }
 
     /// <summary>Half of the standing collider height: distance from the origin (torso center) to the feet.</summary>
     public float StandingHalfHeight => _originalColliderHeight * 0.5f;
@@ -195,6 +241,12 @@ public class PlayerMovement : MonoBehaviour, IDamageModifier
     /// <summary>True while the body is kinematic and moved by the animation (vault, ledge grab, climb).</summary>
     public bool IsRootMotionDriven  { get; private set; }
 
+    /// <summary>
+    /// Horizontal velocity the animation is moving the body at (smoothed). Parkour actions hand it
+    /// to the Rigidbody when they end, so the run continues at the speed the clip was really moving.
+    /// </summary>
+    public Vector3 RootMotionVelocity { get; private set; }
+
     // ─── State Machine ────────────────────────────────────────────────────────────
     public PlayerStateMachine    StateMachine       { get; private set; }
 
@@ -208,9 +260,12 @@ public class PlayerMovement : MonoBehaviour, IDamageModifier
     public PlayerJumpState       JumpState          { get; private set; }
     public PlayerFallState       FallState          { get; private set; }
     public PlayerSlideState      SlideState         { get; private set; }
+    public PlayerCrouchState     CrouchState        { get; private set; }
     public PlayerVaultState      VaultState         { get; private set; }
+    public PlayerMantleState     MantleState        { get; private set; }
     public PlayerLedgeGrabState  LedgeGrabState     { get; private set; }
     public PlayerLedgeClimbState LedgeClimbState    { get; private set; }
+    public PlayerLedgeDropState  LedgeDropState     { get; private set; }
     public PlayerLightAttackState LightAttackState  { get; private set; }
     public PlayerHeavyAttackState HeavyAttackState  { get; private set; }
     public PlayerBlockState       BlockState        { get; private set; }
@@ -265,6 +320,7 @@ public class PlayerMovement : MonoBehaviour, IDamageModifier
         float horizontal,
         float vertical,
         bool  sprintHeld,
+        bool  walkHeld,
         bool  jumpTriggered,
         bool  slideTriggered,
         bool  lightAttack,
@@ -275,6 +331,7 @@ public class PlayerMovement : MonoBehaviour, IDamageModifier
         InputX                = horizontal;
         InputZ                = vertical;
         IsSprintHeld          = sprintHeld;
+        IsWalkHeld            = walkHeld;
         JumpTriggered         = jumpTriggered;
         SlideTriggered        = slideTriggered;
         LightAttackTriggered  = lightAttack;
@@ -343,10 +400,15 @@ public class PlayerMovement : MonoBehaviour, IDamageModifier
         _landingTime      = Time.time;
         _recoveryDuration = LandingSeverity > 0f ? Mathf.Lerp(0.15f, HardLandingRecovery, LandingSeverity) : 0f;
 
+        // A heavy landing at speed with the run held turns into a roll: the impact goes into the
+        // forward motion instead of the legs, so less speed is lost and it comes back sooner
+        LandedWithRoll = LandingSeverity >= RollMinSeverity && HorizontalSpeed >= RollMinSpeed && HasMoveInput;
+
         if (LandingSeverity > 0f)
         {
             Vector3 v = Rb.linearVelocity;
-            float kept = Mathf.Lerp(0.9f, HardLandingSpeedKept, LandingSeverity);
+            float kept = LandedWithRoll ? RollSpeedKept : Mathf.Lerp(0.9f, HardLandingSpeedKept, LandingSeverity);
+            if (LandedWithRoll) _recoveryDuration = RollRecovery;
             Rb.linearVelocity = new Vector3(v.x * kept, v.y, v.z * kept);
         }
     }
@@ -384,6 +446,58 @@ public class PlayerMovement : MonoBehaviour, IDamageModifier
     }
 
     /// <summary>
+    /// Ground locomotion with momentum: the velocity follows the body's facing instead of jumping
+    /// to the input direction, so a turn curves the run (no sideways skating) and its speed drops
+    /// with the sharpness of the turn. Input far behind the facing (a reversal) brakes first, the way a
+    /// runner plants a foot, and the body turns while it slows down. Keeps the vertical velocity.
+    /// </summary>
+    public void AccelerateAlongFacing(Vector3 desiredDirection, float targetSpeed)
+    {
+        Vector3 v = Rb.linearVelocity;
+        Vector3 current = new Vector3(v.x, 0f, v.z);
+        Vector3 facing = Rb.rotation * Vector3.forward;
+        facing.y = 0f;
+        facing.Normalize();
+
+        float angle = Vector3.Angle(facing, desiredDirection);
+        float target = angle >= pivotAngle ? 0f : targetSpeed * Mathf.Lerp(1f, 0.6f, angle / pivotAngle);
+
+        float speed = current.magnitude;
+        Vector3 dir = speed > 0.05f ? current / speed : facing;
+        dir = Vector3.RotateTowards(dir, facing, MaxTurnRate(speed) * 1.2f * Mathf.Deg2Rad * Time.fixedDeltaTime, 0f);
+        speed = Mathf.MoveTowards(speed, target, (target >= speed ? Acceleration : Deceleration) * Time.fixedDeltaTime);
+        Rb.linearVelocity = new Vector3(dir.x * speed, v.y, dir.z * speed);
+    }
+
+    /// <summary>
+    /// Fastest turn (°/s) at <paramref name="speed"/>: quick at low speed, and at speed limited by the
+    /// sideways acceleration a body can take (a = speed × turn rate), so a fast run curves wide.
+    /// </summary>
+    public float MaxTurnRate(float speed)
+    {
+        return Mathf.Min(maxTurnRateStill, maxLateralAcceleration / Mathf.Max(speed, 0.1f) * Mathf.Rad2Deg);
+    }
+
+    /// <summary>
+    /// Free distance (m) along <paramref name="direction"/> for a sliding body, up to
+    /// <paramref name="maxDistance"/>: a sphere at slide height (it passes under bars and tunnels,
+    /// and stops at walls, curbs and obstacles).
+    /// </summary>
+    public float SlideClearance(Vector3 direction, float maxDistance)
+    {
+        Vector3 origin = new Vector3(transform.position.x, FeetY + SlideProbeHeight, transform.position.z);
+        return Physics.SphereCast(origin, SlideProbeRadius, direction, out RaycastHit hit, maxDistance, ceilingLayer, QueryTriggerInteraction.Ignore)
+            ? hit.distance : maxDistance;
+    }
+
+    /// <summary>True if the ground under the feet is flat enough to slide on.</summary>
+    public bool HasSlideSurface()
+    {
+        Vector3 origin = new Vector3(transform.position.x, FeetY + 0.2f, transform.position.z);
+        return Physics.Raycast(origin, Vector3.down, out RaycastHit hit, 0.5f, ceilingLayer, QueryTriggerInteraction.Ignore) && hit.normal.y > 0.9f;
+    }
+
+    /// <summary>
     /// Air control with momentum: input steers the horizontal velocity toward
     /// <paramref name="targetHorizontal"/> at AirAcceleration; without input only a light drag applies,
     /// so a jump keeps the speed it took off with. Keeps the vertical velocity.
@@ -418,6 +532,8 @@ public class PlayerMovement : MonoBehaviour, IDamageModifier
     public void BeginRootMotion()
     {
         if (IsRootMotionDriven) return;
+        Vector3 v = Rb.linearVelocity;
+        RootMotionVelocity = new Vector3(v.x, 0f, v.z); // until the clip reports its own
         StopHorizontal(0f);
         Rb.isKinematic   = true;
         Rb.interpolation = RigidbodyInterpolation.None;
@@ -433,6 +549,11 @@ public class PlayerMovement : MonoBehaviour, IDamageModifier
     {
         if (!IsRootMotionDriven) return;
         transform.position += deltaPosition;
+        if (Time.deltaTime > 0f)
+        {
+            Vector3 frame = new Vector3(deltaPosition.x, 0f, deltaPosition.z) / Time.deltaTime;
+            RootMotionVelocity = Vector3.Lerp(RootMotionVelocity, frame, 0.3f);
+        }
         float yaw = (deltaRotation * transform.rotation).eulerAngles.y;
         transform.rotation = Quaternion.Euler(0f, yaw, 0f);
     }
@@ -572,9 +693,12 @@ public class PlayerMovement : MonoBehaviour, IDamageModifier
         JumpState         = new PlayerJumpState(this, StateMachine);
         FallState         = new PlayerFallState(this, StateMachine);
         SlideState        = new PlayerSlideState(this, StateMachine);
+        CrouchState       = new PlayerCrouchState(this, StateMachine);
         VaultState        = new PlayerVaultState(this, StateMachine);
+        MantleState       = new PlayerMantleState(this, StateMachine);
         LedgeGrabState    = new PlayerLedgeGrabState(this, StateMachine);
         LedgeClimbState   = new PlayerLedgeClimbState(this, StateMachine);
+        LedgeDropState    = new PlayerLedgeDropState(this, StateMachine);
         LightAttackState  = new PlayerLightAttackState(this, StateMachine);
         HeavyAttackState  = new PlayerHeavyAttackState(this, StateMachine);
         BlockState        = new PlayerBlockState(this, StateMachine);
@@ -629,9 +753,10 @@ public class PlayerMovement : MonoBehaviour, IDamageModifier
         if (!faceMovementDirection || MoveDirection == Vector3.zero || IsRootMotionDriven || !CanRotateInCurrentState())
             return;
 
-        // Backpedaling keeps the body facing the camera's forward instead of turning 180°.
+        // Oriented locomotion (walking, or running backward) keeps the body facing the camera's
+        // forward and moves under it, instead of turning toward the input.
         Vector3 facing = MoveDirection;
-        if (IsBackpedaling && StateMachine.CurrentState == RunState)
+        if (IsOriented && StateMachine.CurrentState == RunState)
         {
             facing = CameraForwardFlat();
             if (facing == Vector3.zero) return;
@@ -643,7 +768,7 @@ public class PlayerMovement : MonoBehaviour, IDamageModifier
         float smoothTime = Mathf.Lerp(turnSmoothTime, sprintTurnSmoothTime, speed01);
         float targetYaw  = Quaternion.LookRotation(facing, Vector3.up).eulerAngles.y;
         float currentYaw = Rb.rotation.eulerAngles.y;
-        float newYaw     = Mathf.SmoothDampAngle(currentYaw, targetYaw, ref _turnSmoothVelocity, smoothTime, Mathf.Infinity, Time.fixedDeltaTime);
+        float newYaw     = Mathf.SmoothDampAngle(currentYaw, targetYaw, ref _turnSmoothVelocity, smoothTime, MaxTurnRate(HorizontalSpeed), Time.fixedDeltaTime);
         Rb.MoveRotation(Quaternion.Euler(0f, newYaw, 0f));
     }
 
@@ -661,7 +786,9 @@ public class PlayerMovement : MonoBehaviour, IDamageModifier
         var current = StateMachine.CurrentState;
         return current != LedgeGrabState  &&
                current != LedgeClimbState &&
+               current != LedgeDropState  &&
                current != VaultState      &&
+               current != MantleState     &&
                current != SlideState      &&
                current != BlockState      &&
                current != DodgeState      &&

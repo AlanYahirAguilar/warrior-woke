@@ -152,10 +152,3 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::CameraFollow
   target: {fileID: 0}
   autoDetectTarget: 1
-  offset: {x: 0, y: 2, z: -15}
-  autoCalculateOffset: 1
-  smoothTimeX: 0.15
-  smoothTimeY: 0.35
-  verticalDeadZone: 1.2
-  adjustOrthographicSize: 1
-  targetOrthographicSize: 6.5
