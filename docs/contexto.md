@@ -280,7 +280,13 @@ final · SFX y música básica · build para Windows.
    locomoción direccional con marchas, agacharse, slide con bucle real, mantle, drop y salto de
    cornisa, roll al aterrizar. Animaciones nuevas de Quaternius (CC0); los clips de Mixamo quedan para
    lo que falta (vault a dos manos, step over, agarre a la carrera, free hang, giros y frenadas). La migración a
-   `.inputactions` sigue pendiente.
+   `.inputactions` sigue pendiente. **Desde el 2026-10-05 hay una segunda reconstrucción aprobada**
+   (P29–P32, `arquitectura.md` §8): locomoción con motion matching (MxM) sobre el mocap del Kinematica
+   Demo, `CharacterController` como único motor, Animation Rigging para el IK y repo privado por las
+   licencias de Mixamo. Por ahora existen la fase 0 (el mocap importado y probado sobre Ch45 en
+   `Assets/ThirdParty/Kinematica`) y el retroceso y strafe lentos de 100STYLE
+   (`Assets/ThirdParty/100STYLE`, P34; falta una fuente para los rápidos); el jugador sigue usando el
+   sistema anterior.
 3. **No se implementa nada fuera del MVP** sin que antes funcione el MVP (GDD §25 y §28).
 
 ## 11. Cómo abrir el proyecto
@@ -374,8 +380,11 @@ git config merge.unityyamlmerge.recursive binary
   Editor o con `git diff --text`.
 - La serialización es **Force Text** (`EditorSettings.asset`, `m_SerializationMode: 2`). No la
   cambies a Binary.
-- **Git LFS no está activado.** Hay bloques comentados al final de `.gitattributes` para
-  activarlo. Hacerlo reescribe el historial, así que hay que coordinarlo con todo el equipo.
+- **Git LFS solo para el mocap** (P35, 2026-10-05): `.gitattributes` manda a LFS los FBX de
+  `Assets/ThirdParty/Kinematica/` y `Assets/ThirdParty/100STYLE/`. Cada máquina necesita Git LFS (`git lfs install`, una vez); sin él,
+  esos FBX llegan como punteros de texto y Unity no los importa. No reescribe el historial: el resto
+  del arte sigue en git normal. Al final de `.gitattributes` hay un bloque comentado para extender LFS
+  al resto de binarios; eso sí exigiría migrar el historial y coordinarlo con todo el equipo.
 
 ## 13. Equipo
 

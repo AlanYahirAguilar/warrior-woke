@@ -53,7 +53,14 @@ LightingData.asset binary
 *.unitypackage binary
 *.cubemap binary
 
-# --- Opcional a futuro: Git LFS ---
+# --- Git LFS solo para el mocap (decisión P35, 2026-10-05) ---
+# Las tomas de mocap pesan ~5 MB cada una (cientos de MB en total). Solo afecta a los archivos
+# nuevos de estas carpetas: no reescribe el historial. Cada máquina necesita Git LFS instalado
+# ("git lfs install" una vez). Ver docs/contexto.md §12.
+Assets/ThirdParty/Kinematica/**/*.[fF][bB][xX] filter=lfs diff=lfs merge=lfs -text
+Assets/ThirdParty/100STYLE/**/*.[fF][bB][xX] filter=lfs diff=lfs merge=lfs -text
+
+# --- Opcional a futuro: Git LFS para el resto del arte ---
 # Si el repo empieza a pesar mucho por arte/animaciones (ya hay .fbx de varios MB),
 # descomenta estas líneas, corre "git lfs install" y "git lfs migrate import --include=...".
 # Todo el equipo necesitará instalar Git LFS. Ver docs/contexto.md §12 -> "Git LFS".

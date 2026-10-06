@@ -69,7 +69,7 @@ Assets/
                               ParkourObstacle (componente de los obstáculos estándar)
     Editor/                   SceneAutoLoader, PlayerCharacterSetup, PlayerAnimationSetup,
                               ClipMeasurement, ParkourObstaclePrefabs, ParkourTestCircuitBuilder,
-                              ParkourPlayModeTest (no van al build)
+                              ParkourPlayModeTest, MocapRetargetProbe (no van al build)
   Prefabs/                    Player, Enemy, GameManager, Spawner, Main Camera,
                               Directional Light, Particle System
     Parkour/                  ParkourObstacle_{Step, LowVault, MediumVault, HighVault, Barrier,
@@ -89,6 +89,12 @@ Assets/
                               LICENSE.txt (MIT), README.md (qué se tomó y cómo se adaptó)
   ThirdParty/Quaternius/      Animations/UAL1_Standard.fbx, UAL2_Standard.fbx (CC0: agacharse, slide,
                               mantle, roll), LICENSE.txt, README.md (origen y uso)
+  ThirdParty/Kinematica/      🔧 Character/Unit.FBX + Animations/ (22 tomas de mocap del Kinematica Demo,
+                              Unity Companion License; prueba de retarget para motion matching, P29;
+                              todavía sin uso en el jugador), LICENSE.md, README.md
+  ThirdParty/100STYLE/        🔧 Character/Neutral_Skeleton.fbx + Animations/ (8 tomas Neutral de 100STYLE,
+                              CC BY 4.0: adelante, atrás y de lado, P34; sin uso en el jugador),
+                              bvh2fbx.py (conversión con Blender), LICENSE.md, README.md
   Tests/ParkourTestArea/      Materials/Losa.mat (suelo del área de pruebas)
   LowPolyCity/                asset pack de entorno (placeholder) + escena demo
   material/                   enemy, floors (.mat), ZeroFriction.physicMaterial
@@ -502,6 +508,17 @@ zoom por contexto y stick de gamepad.
   sobre el esqueleto animado, y la calidad del movimiento: velocidad sin saltos ni teleport, slide sin
   reinicios, transiciones encadenadas e inclinación del torso (detalle en `features.md` F32).
   Sale con código 0 si todo pasa.
+- `MocapRetargetProbe` (🔧, menú **Probar Retarget del Mocap**; batch: `-executeMethod
+  WarriorWoke.EditorTools.MocapRetargetProbe.RunBatch`): para cada fuente de mocap
+  (`ThirdParty/Kinematica` y `ThirdParty/100STYLE`) importa el esqueleto del actor como Humanoid con su
+  propio Avatar (`Unit` sin los huesos que los clips no tienen; `Neutral_Skeleton` con mapeo explícito,
+  porque los nombres de 100STYLE engañan al automático) y las tomas como Humanoid copiando ese Avatar,
+  con root motion completo. Reproduce cada toma sobre el actor y sobre Ch45 (con y sin Foot IK) y mide
+  patinaje de los pies, altura de las suelas y velocidades. Escribe `Logs/MocapProbe/<fuente>/metrics.csv`
+  y hojas de poses `Logs/MocapProbe/<fuente>/<toma>.png` (arriba el actor, abajo Ch45). Fuera de Play Mode combina dos
+  muestreos: `SampleAnimationClip` (con el desplazamiento de la raíz, sin Foot IK) y un
+  `PlayableGraph` muestreado con `AnimationMode.SamplePlayableGraph` (con Foot IK, en el sitio); un
+  `PlayableGraph` evaluado a mano en el Editor deja el cuerpo en la pose de bind.
 
 ### 5.10 Animación y contacto físico — 🟡 Parcial (funciona, con clips provisionales)
 
@@ -972,7 +989,14 @@ una mano, el agarre desde parado) y la física hace el pivot y la frenada.
 | P25 | Parkour Obstacle Standard | Medidas derivadas del personaje y de los obstáculos que ya funcionaban (Step 0.25, LowVault 0.6, MediumVault 1.0, HighVault 1.2, Barrier 1.5, Ledge 2.2, ClimbWall 3.0, Slide con paso libre de 1.2, JumpGap de 2 m; §5.13), centralizadas en una clase estática. Diez prefabs generados. Puntos de contacto derivados y dibujados como gizmos (no transforms). El área de pruebas pasa a nueve secciones construidas solo con esos prefabs. | 2026-10-02 | ✅ Implementada |
 | P27 | Calidad de movimiento (segunda fase) | Sin cambiar la arquitectura ni agregar dependencias (P26): velocidad que sigue la orientación y giro limitado por la rapidez, inclinación procedural del torso, slide contextual con pose mantenida (C con momentum, ya no solo esprintando), aproximación del vault al punto de despegue, reproducción del vault a la velocidad de carrera del clip y salidas del parkour con la velocidad del root motion. Sección de laboratorio S10 en el área. §5.15–§5.16. | 2026-10-02 | ✅ Implementada |
 | P28 | Reconstrucción del movimiento y del parkour | Auditoría del 2026-10-02 (§7.1): arquitectura **D, híbrido propio** (un único motor de locomoción + percepción + selector de acciones + warping + IK; código MIT de Traverser adaptable con atribución). Clips nuevos de **Mixamo** que el equipo descarga (lista en §7.1). Alcance ampliado sobre el GDD §28: caminar/agacharse, strafe y retroceso rápido, mantle y step over, drop y salto de cornisa. Cámara orbital primero. Se ejecuta por fases con revisión jugando en cada una. | 2026-10-02 | ✅ Fases 1–10 hechas (§7.1). Clips nuevos de Quaternius (CC0, descargables) en lugar de esperar a Mixamo; los de Mixamo quedan para lo que Quaternius gratuito no cubre |
-| P26 | Active ragdoll y plugins de animación | Evaluados contra la referencia de calidad (Tricking 0, Uncharted, TLOU, AC Unity): **no se agregan** PuppetMaster, Final IK, Animancer, Animation Rigging ni un active ragdoll. Lo que falta para el realismo no es física sino clips (vault de una mano, solo braced hang, sin patada; T17). La arquitectura queda preparada: el cuerpo ya alterna dinámico/kinemático por estado y el IK está aislado en `PlayerContactIK`. | 2026-10-02 | ✔ Recomendación; ❓ pendiente de confirmar por el equipo |
+| P26 | Active ragdoll y plugins de animación | Evaluados contra la referencia de calidad (Tricking 0, Uncharted, TLOU, AC Unity): **no se agregan** PuppetMaster, Final IK, Animancer, Animation Rigging ni un active ragdoll. Lo que falta para el realismo no es física sino clips (vault de una mano, solo braced hang, sin patada; T17). La arquitectura queda preparada: el cuerpo ya alterna dinámico/kinemático por estado y el IK está aislado en `PlayerContactIK`. | 2026-10-02 | ⏸️ En lo que toca a Animation Rigging, reemplazada por P31 (2026-10-05). Active ragdoll, PuppetMaster, Final IK y Animancer siguen fuera. |
+| P29 | Locomoción con motion matching | Auditoría del 2026-10-05: la rigidez venía de mezclar clips de tres orígenes en un blend sin fase común, de no tener intención filtrada ni clips de giro, de `MatchTarget` (un objetivo, nada durante un cross-fade) y de dos dueños del movimiento. La locomoción pasa a **motion matching con MxM** (fork de Frost-Blade, MIT, probado en Unity 6) alimentado con el **mocap del Kinematica Demo** (Unity Companion License). El parkour y el combate quedan como acciones con clip, warper propio por segmentos e inercialización. | 2026-10-05 | ✔ Aprobada; 🔧 fase 0 (retarget) hecha: con Foot IK el mocap sobre Ch45 patina como el original (P33–P35 resuelven velocidades, retroceso y versionado) |
+| P30 | Motor del personaje | **`CharacterController`** como único dueño del movimiento: el root motion de las acciones se aplica con `Move`; desaparece el cambio dinámico/kinemático del Rigidbody. Reemplaza a D1 cuando se implemente. | 2026-10-05 | ✔ Aprobada, 📋 por implementar |
+| P31 | IK y ajustes procedurales | **Animation Rigging** (paquete core en Unity 6.6, 6.6.0) para el contacto de manos y pies, stride/orientation warping y la mirada de cabeza y torso. Corre sobre la pose final, también durante las mezclas (T25). Reemplaza al IK Pass Humanoid de `PlayerContactIK`. | 2026-10-05 | ✔ Aprobada, 📋 por implementar |
+| P33 | Velocidades del personaje | El juego se ajusta al mocap en lugar de acelerarlo: caminar ~1.3, correr ~3.4 y sprint ~4.8 m/s (sprint +41 %, GDD §5.2). Medido: el mocap camina a ~1.1–1.6, trota a ~3.2 y esprinta con punta de ~4.5–5.1 m/s. Reemplaza `BaseSpeed` 5 / sprint 7 de P12 cuando se implemente el motor (P30). | 2026-10-05 | ✔ Aprobada, 📋 por implementar |
+| P34 | Retroceso y strafe | Kinematica no los tiene: se toman de **100STYLE** (estilo Neutral, CC BY 4.0, con atribución), convertidos de BVH con Blender. | 2026-10-05 | ✔ Aprobada; 🔧 importadas las 8 tomas Neutral (`ThirdParty/100STYLE`, 30 fps) y probadas sobre Ch45: retarget limpio con Foot IK, pero solo llegan a ~0.8 (atrás caminando), ~1.3 (atrás corriendo), ~0.9 y ~1.6 m/s (de lado). El equipo decidió (2026-10-05) **buscar otra fuente de mocap** para retroceso y strafe rápidos; 100STYLE queda para velocidades bajas |
+| P35 | Versionado del mocap | **Git LFS solo para el mocap** (`Assets/ThirdParty/Kinematica/**/*.fbx` y `Assets/ThirdParty/100STYLE/**/*.fbx` en `.gitattributes`): sin reescribir el historial; cada máquina instala Git LFS. | 2026-10-05 | ✅ Configurado en `.gitattributes` |
+| P32 | FBX de Mixamo en un repo público | La licencia de Mixamo prohíbe redistribuir los archivos sueltos y el repo es público. El equipo decidió **hacer privado el repo** (lo hace su dueño; no es un cambio de código). Mientras siga público no se agregan FBX nuevos de Mixamo. | 2026-10-05 | ✔ Aprobada; pendiente del dueño del repo |
 
 ## 9. Deuda técnica y bugs conocidos
 
