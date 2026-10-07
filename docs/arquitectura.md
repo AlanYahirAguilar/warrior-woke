@@ -92,8 +92,9 @@ Assets/
   ThirdParty/Kinematica/      🔧 Character/Unit.FBX + Animations/ (22 tomas de mocap del Kinematica Demo,
                               Unity Companion License; prueba de retarget para motion matching, P29;
                               todavía sin uso en el jugador), LICENSE.md, README.md
-  ThirdParty/100STYLE/        🔧 Character/Neutral_Skeleton.fbx + Animations/ (8 tomas Neutral de 100STYLE,
-                              CC BY 4.0: adelante, atrás y de lado, P34; sin uso en el jugador),
+  ThirdParty/100STYLE/        🔧 Character/Neutral_Skeleton.fbx + Animations/ (16 tomas de 100STYLE, estilos
+                              Neutral y Rushed, CC BY 4.0: adelante, atrás y de lado, P34; sin uso
+                              en el jugador),
                               bvh2fbx.py (conversión con Blender), LICENSE.md, README.md
   Tests/ParkourTestArea/      Materials/Losa.mat (suelo del área de pruebas)
   LowPolyCity/                asset pack de entorno (placeholder) + escena demo
@@ -994,7 +995,7 @@ una mano, el agarre desde parado) y la física hace el pivot y la frenada.
 | P30 | Motor del personaje | **`CharacterController`** como único dueño del movimiento: el root motion de las acciones se aplica con `Move`; desaparece el cambio dinámico/kinemático del Rigidbody. Reemplaza a D1 cuando se implemente. | 2026-10-05 | ✔ Aprobada, 📋 por implementar |
 | P31 | IK y ajustes procedurales | **Animation Rigging** (paquete core en Unity 6.6, 6.6.0) para el contacto de manos y pies, stride/orientation warping y la mirada de cabeza y torso. Corre sobre la pose final, también durante las mezclas (T25). Reemplaza al IK Pass Humanoid de `PlayerContactIK`. | 2026-10-05 | ✔ Aprobada, 📋 por implementar |
 | P33 | Velocidades del personaje | El juego se ajusta al mocap en lugar de acelerarlo: caminar ~1.3, correr ~3.4 y sprint ~4.8 m/s (sprint +41 %, GDD §5.2). Medido: el mocap camina a ~1.1–1.6, trota a ~3.2 y esprinta con punta de ~4.5–5.1 m/s. Reemplaza `BaseSpeed` 5 / sprint 7 de P12 cuando se implemente el motor (P30). | 2026-10-05 | ✔ Aprobada, 📋 por implementar |
-| P34 | Retroceso y strafe | Kinematica no los tiene: se toman de **100STYLE** (estilo Neutral, CC BY 4.0, con atribución), convertidos de BVH con Blender. | 2026-10-05 | ✔ Aprobada; 🔧 importadas las 8 tomas Neutral (`ThirdParty/100STYLE`, 30 fps) y probadas sobre Ch45: retarget limpio con Foot IK, pero solo llegan a ~0.8 (atrás caminando), ~1.3 (atrás corriendo), ~0.9 y ~1.6 m/s (de lado). El equipo decidió (2026-10-05) **buscar otra fuente de mocap** para retroceso y strafe rápidos; 100STYLE queda para velocidades bajas |
+| P34 | Retroceso y strafe | Kinematica no los tiene: se toman de **100STYLE** (estilo Neutral, CC BY 4.0, con atribución), convertidos de BVH con Blender. | 2026-10-05 | ✔ Aprobada; 🔧 importadas y probadas sobre Ch45 (retarget limpio con Foot IK) las 8 tomas **Neutral** (lentas: atrás y de lado hasta ~1.3–1.6 m/s) y, tras buscar otra fuente, las 8 **Rushed** (atrás ~2.0 y de lado ~2.2 m/s). Ninguna fuente libre compatible llega a ~3.4 m/s (LaFAN1 y Bandai Namco son NC-ND, MotionPersona NC, CMU solo camina; Mixamo bloqueado por P32): el retroceso y el strafe tendrán tope de ~2 m/s (2026-10-05) |
 | P35 | Versionado del mocap | **Git LFS solo para el mocap** (`Assets/ThirdParty/Kinematica/**/*.fbx` y `Assets/ThirdParty/100STYLE/**/*.fbx` en `.gitattributes`): sin reescribir el historial; cada máquina instala Git LFS. | 2026-10-05 | ✅ Configurado en `.gitattributes` |
 | P32 | FBX de Mixamo en un repo público | La licencia de Mixamo prohíbe redistribuir los archivos sueltos y el repo es público. El equipo decidió **hacer privado el repo** (lo hace su dueño; no es un cambio de código). Mientras siga público no se agregan FBX nuevos de Mixamo. | 2026-10-05 | ✔ Aprobada; pendiente del dueño del repo |
 

@@ -284,8 +284,8 @@ final · SFX y música básica · build para Windows.
    (P29–P32, `arquitectura.md` §8): locomoción con motion matching (MxM) sobre el mocap del Kinematica
    Demo, `CharacterController` como único motor, Animation Rigging para el IK y repo privado por las
    licencias de Mixamo. Por ahora existen la fase 0 (el mocap importado y probado sobre Ch45 en
-   `Assets/ThirdParty/Kinematica`) y el retroceso y strafe lentos de 100STYLE
-   (`Assets/ThirdParty/100STYLE`, P34; falta una fuente para los rápidos); el jugador sigue usando el
+   `Assets/ThirdParty/Kinematica`) y el retroceso y strafe de 100STYLE
+   (`Assets/ThirdParty/100STYLE`, estilos Neutral y Rushed, hasta ~2 m/s, P34); el jugador sigue usando el
    sistema anterior.
 3. **No se implementa nada fuera del MVP** sin que antes funcione el MVP (GDD §25 y §28).
 

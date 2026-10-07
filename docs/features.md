@@ -811,7 +811,8 @@ problema, la causa, la solución y el estado (formato del GDD §29 para bugs).
 | 2026-09-30 | (ver `git log`) | Axel | Parkour con el Dynamic Parkour System, locomoción con aceleración, caminar hacia atrás, combate más dinámico, circuito y prueba en Play Mode (detalle abajo). 36/36 en Play Mode. |
 | 2026-10-01 | (ver `git log`) | Axel | Contacto físico del parkour (root motion + `MatchTarget` + IK), movimiento a escala humana, aterrizaje con peso, Parkour Test Area y limpieza de recursos sin uso (detalle abajo). 140/140 en Play Mode. |
 | 2026-10-05 | (ver `git log`) | Axel | Segunda auditoría de locomoción, parkour, animación y combate; decisiones P29–P32 (motion matching con MxM, `CharacterController`, Animation Rigging, repo privado). Fase 0: mocap del Kinematica Demo (22 tomas, Unity Companion License) importado como Humanoid y probado sobre Ch45 con la sonda de retarget (hoy `MocapRetargetProbe`; detalle abajo). El jugador todavía no lo usa. |
-| 2026-10-05 | (ver `git log`) | Axel | Retroceso y strafe de 100STYLE (P34): 8 tomas Neutral (CC BY 4.0) convertidas de BVH a FBX con Blender, importadas como Humanoid con mapeo explícito y probadas sobre Ch45; la sonda pasa a `MocapRetargetProbe` y prueba las dos fuentes. Retarget limpio, pero solo cubre velocidades bajas: se buscará otra fuente para las rápidas (detalle abajo). El jugador todavía no lo usa. |
+| 2026-10-05 | (ver `git log`) | Axel | Retroceso y strafe de 100STYLE (P34): 8 tomas Neutral (CC BY 4.0) convertidas de BVH a FBX con Blender, importadas como Humanoid con mapeo explícito y probadas sobre Ch45; la sonda pasa a `MocapRetargetProbe` y prueba las dos fuentes. Retarget limpio, pero Neutral solo cubre velocidades bajas (detalle abajo). El jugador todavía no lo usa. |
+| 2026-10-05 | (ver `git log`) | Axel | Retroceso y strafe rápidos: búsqueda de otra fuente de mocap (ninguna libre y compatible pasa de ~2 m/s); se agregan las 8 tomas **Rushed** de 100STYLE (atrás ~2.0, de lado ~2.2 m/s) y el convertidor acepta cualquier estilo. Retarget limpio con Foot IK. |
 | 2026-10-02 | (sin commit) | Axel | Reconstrucción del movimiento (P28), fases 2–10: animaciones CC0 de Quaternius, herramienta de medición de clips, locomoción direccional con marchas (caminar, strafe, retroceso a 3.5 m/s, agacharse), slide con bucle real, mantle, drop y salto de cornisa, roll de aterrizaje, laboratorio S11 y limpieza (detalle abajo). 341/341 en Play Mode. |
 | 2026-10-02 | (sin commit) | Axel | Reconstrucción del movimiento (P28): auditoría, investigación de repositorios y licencias, arquitectura D aprobada; fase 1: cámara orbital con ratón (P5) y giro limitado por la aceleración lateral (media vuelta que frena y pivota). 304/304 en Play Mode. |
 | 2026-10-02 | (sin commit) | Axel | Calidad de movimiento, segunda fase (P27): momentum en la locomoción, inclinación del torso, slide contextual, aproximación del vault, transiciones sin cambios de velocidad, T24 resuelto y laboratorio de fluidez (detalle abajo). 301/301 en Play Mode, dos corridas. |
@@ -819,13 +820,16 @@ problema, la causa, la solución y el estado (formato del GDD §29 para bugs).
 
 ### Detalle — retroceso y strafe de 100STYLE (2026-10-05)
 
+Estilos Neutral (8 tomas) y Rushed (8 tomas).
+
 | Problema | Causa | Solución | Estado |
 |---|---|---|---|
 | 100STYLE viene en BVH (60 fps, centímetros) y Unity no importa BVH | Formato del dataset | `ThirdParty/100STYLE/bvh2fbx.py` (Blender 4.5 LTS en batch): recorta a `Frame_Cuts.csv`, pasa a 30 fps y a metros y exporta FBX; también exporta el esqueleto en reposo (`Character/Neutral_Skeleton.fbx`) para el Avatar. Solo se descarga el estilo Neutral del ZIP de 1.4 GB | ✅ |
 | El mapeo Humanoid automático confundiría los huesos | En 100STYLE `Collar` es el hombro, `Shoulder` el brazo y `Hip` el muslo | Mapeo explícito en la sonda (`MocapRetargetProbe`, que ahora prueba las dos fuentes) | ✅ |
 | ¿Se retargetea bien a Ch45? | — | Con Foot IK, Ch45 patina igual o menos que el esqueleto original (mediana 0.03–0.08 m/s) y las suelas quedan a ±1 cm del suelo; sin avisos de rig. Un render lateral muestra poses naturales | ✅ |
 | Las hojas de poses de 100STYLE no muestran el actor | `Neutral_Skeleton` no tiene malla | Se comparan solo las métricas; la fila de abajo (Ch45) sí se ve | ⚠️ Esperado |
-| Retroceso y strafe solo a velocidad baja | Las tomas llegan a ~0.8 m/s (atrás caminando), ~1.3 (atrás corriendo), ~0.9 (de lado caminando), ~1.6 (de lado corriendo); adelante corriendo ~1.8 | El equipo decidió buscar otra fuente de mocap para los rápidos; 100STYLE queda para los lentos | 📋 |
+| Retroceso y strafe solo a velocidad baja | Neutral llega a ~0.8 m/s (atrás caminando), ~1.3 (atrás corriendo), ~0.9 (de lado caminando), ~1.6 (de lado corriendo) | Se buscó otra fuente: LaFAN1 y Bandai Namco son NC-ND, MotionPersona NC y CMU solo camina hacia atrás; Mixamo sigue bloqueado por P32. Se midieron 10 estilos de 100STYLE y se agregó **Rushed** (atrás ~2.0, de lado ~2.2 m/s; mismo esqueleto, licencia y convertidor). El retroceso y el strafe tendrán tope de ~2 m/s | ✅ |
+| p90 de patinaje alto en carreras rápidas (Rushed BR/BW/SR, ~4 m/s) | El punto de apoyo salta de un pie al otro durante la fase de vuelo | Mismo patrón que los sprints de Kinematica; la mediana queda igual que el original | ⚠️ Artefacto de la métrica |
 
 ### Detalle — prueba de retarget del mocap de Kinematica (2026-10-05)
 
@@ -834,7 +838,7 @@ problema, la causa, la solución y el estado (formato del GDD §29 para bugs).
 | Los clips no aceptaban el Avatar de `Unit` | `Unit.FBX` tiene `Eye_L/R` y `Jaw`, que el esqueleto de los clips no tiene | El Avatar de `Unit` solo mapea huesos presentes en los clips | ✅ |
 | ¿Se retargetea bien a Ch45? | — | Mismo patinaje que el original **con Foot IK** (mediana 0.04–0.19 m/s frente a 0.04–0.15); sin Foot IK patina hasta 1.4 m/s y hunde las suelas hasta 8 cm. Hojas de poses idénticas en los dos personajes | ✅ El Foot IK es obligatorio |
 | Velocidades | El mocap camina a ~1.1–1.6, trota a ~3.2 y esprinta con punta de ~4.5–5.1 m/s; el juego usa 5 (correr) y 7 (sprint) | El juego se ajusta al mocap: ~1.3 / ~3.4 / ~4.8 m/s (P33) | 📋 |
-| Retroceso y strafe | Kinematica no los tiene | 100STYLE, estilo Neutral, CC BY 4.0 (P34); solo a velocidad baja (detalle arriba) | 🟡 |
+| Retroceso y strafe | Kinematica no los tiene | 100STYLE, estilos Neutral y Rushed, CC BY 4.0 (P34); hasta ~2 m/s (detalle arriba) | ✅ |
 | El mocap pesa ~5 MB por toma | Tomas largas de captura continua | Git LFS solo para `ThirdParty/Kinematica` y `ThirdParty/100STYLE` (P35) | ✅ |
 | Mediciones falsas al principio | `SampleAnimationClip` no aplica Foot IK, y un `PlayableGraph` evaluado a mano en el Editor deja el cuerpo en la pose de bind | La herramienta combina dos muestreos (ver `arquitectura.md` §5.9) | ✅ |
 

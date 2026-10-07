@@ -1,5 +1,5 @@
 fileFormatVersion: 2
-guid: 1c5f676374b755a4fac137a8261e29c9
+guid: 8136fe3d944517f4ea498330c40640c4
 ModelImporter:
   serializedVersion: 24600
   internalIDToNameTable: []
@@ -18,7 +18,7 @@ ModelImporter:
     removeConstantScaleCurves: 0
     motionNodeName: 
     animationImportErrors: 
-    animationImportWarnings: "\nClip 'Scene' has import animation warnings that might lower retargeting quality:\nNote: Activate translation DOF on avatar to improve retargeting quality.\n\t'Chest3' is inbetween humanoid transforms and has rotation animation that will be discarded.\n"
+    animationImportWarnings: 
     animationRetargetingWarnings: 
     animationDoRetargetingWarnings: 0
     importAnimatedCustomProperties: 0
@@ -32,11 +32,11 @@ ModelImporter:
     extraUserProperties: []
     clipAnimations:
     - serializedVersion: 16
-      name: Neutral_TR1
+      name: Rushed_FW
       takeName: Scene
       internalID: -623603649343465320
-      firstFrame: 152
-      lastFrame: 3388
+      firstFrame: 172
+      lastFrame: 1632
       wrapMode: 0
       orientationOffsetY: 0
       level: 0
