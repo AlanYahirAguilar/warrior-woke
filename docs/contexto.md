@@ -287,7 +287,10 @@ final · SFX y música básica · build para Windows.
    `Assets/ThirdParty/Kinematica`), el retroceso y strafe de 100STYLE
    (`Assets/ThirdParty/100STYLE`, estilos Neutral y Rushed, hasta ~2 m/s, P34) y, desde el 2026-10-07, la
    fase 1: MxM embebido en `Packages/`, la base de datos horneada (`Assets/Data/MxM`) y su prueba en Play
-   Mode (`arquitectura.md` §7.2). El jugador sigue usando el sistema anterior.
+   Mode (`arquitectura.md` §7.2). **Desde el 2026-10-08 (fase 2)** el jugador se mueve con un
+   `CharacterController` (P30) y camina, corre y esprinta con motion matching a las velocidades del
+   mocap (P33: 1.3 / 3.4 / 4.8 m/s, atrás ~2 m/s); el parkour y el combate siguen como acciones del
+   Animator, reajustadas a esas velocidades.
 3. **No se implementa nada fuera del MVP** sin que antes funcione el MVP (GDD §25 y §28).
 
 ## 11. Cómo abrir el proyecto
@@ -310,7 +313,7 @@ final · SFX y música básica · build para Windows.
 - **Controles actuales** (GDD §14, P1, P28): ratón: mover la cámara (Escape libera el cursor, clic
   lo vuelve a bloquear) · WASD/flechas correr, relativo a la cámara · Ctrl (mantener) caminar, en
   cualquier dirección mirando a la cámara (strafe y hacia atrás) · S sin sprint correr hacia atrás
-  sin girar (3.5 m/s) · Shift (mantener) sprint (S con Shift: media vuelta) · Espacio, según el
+  sin girar (~2 m/s) · Shift (mantener) sprint (S con Shift: media vuelta) · Espacio, según el
   contexto: subirse a un bloque de 0.8–1.5 m (mantle), vault de un obstáculo de 0.45–1.2 m, agarrarse
   de una cornisa de 1.9–2.7 m o saltar (y agarrarse en el aire); corriendo se puede pulsar antes y la
   acción espera a su punto de inicio · C, según el contexto: deslizarse corriendo con momentum

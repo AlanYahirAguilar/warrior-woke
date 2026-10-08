@@ -49,7 +49,7 @@ namespace WarriorWoke.EditorTools
         /// two sets never mix: free locomotion (no tags) searches Kinematica and strafe (this tag)
         /// searches 100STYLE. Without it MxM jumps between both styles while running forward.
         /// </summary>
-        public const ETags StrafeTag = ETags.Tag1;
+        public const ETags StrafeTag = PlayerMxMLocomotion.StrafeTag;
 
         private static readonly (string category, ETags tags, string[] clips)[] Categories =
         {

@@ -16,7 +16,13 @@
 > revisarlo jugando.
 >
 > 2026-10-07: la base de **motion matching** (MxM) existe y tiene su propia prueba en Play Mode
-> (`MxMLocomotionProbe`, 50/57; detalle en §5). El jugador todavía no la usa.
+> (`MxMLocomotionProbe`, 50/57; detalle en §5).
+>
+> **2026-10-08: el jugador se mueve con un `CharacterController` y camina, corre y esprinta con
+> motion matching** (P29, P30) a las velocidades del mocap (P33: 1.3 / 3.4 / 4.8 m/s, atrás 2.0).
+> `ParkourPlayModeTest` da 338–341/341 entre corridas (MxM no es determinista entre escenarios; las
+> tolerancias que dependen del ritmo del mocap están en `arquitectura.md` T27). Los números de las
+> fichas que hablan de 5 y 7 m/s son del sistema anterior y quedan como historial.
 
 ---
 
@@ -71,8 +77,8 @@ todavía falta implementar.
 | Tema | GDD final | Código actual |
 |---|---|---|
 | Nombre | Awakened Warrior | `warrior-woke` / `WarriorWoke` |
-| Caminar / correr | "Caminar / correr" con WASD | WASD = correr a 5 m/s, acelerando y frenando de forma gradual (el blend pasa por caminar y trotar) (P12) |
-| Caminar hacia atrás | No lo define | S sin sprint corre hacia atrás mirando al frente a 3.5 m/s; con Ctrl camina hacia atrás a 1.7 m/s (P16, P28) |
+| Caminar / correr | "Caminar / correr" con WASD | WASD = correr a 3.4 m/s con motion matching sobre mocap: arranques, curvas y frenadas son las del actor (P29, P33) |
+| Caminar hacia atrás | No lo define | S sin sprint corre hacia atrás mirando al frente a ~2 m/s (100STYLE); con Ctrl camina en cualquier dirección a 1.3 m/s (P16, P28, P34) |
 | Salto | "Impulso vertical" sin valor | ~1 m de altura (escala humana) e inercia en el aire (P23) |
 | Aterrizaje | No lo define | Según la altura de la caída: absorbe velocidad y la recupera sin bloquear el control (P23) |
 | Parkour | Solo salto, sprint y vault (§28) | Además: ledge grab/climb (desde el suelo o en el aire) y slide (se conservan por decisión P2; slide con C corriendo con momentum, P27) y auto step / step down (movimiento base). El wall jump se eliminó |
@@ -127,6 +133,15 @@ Dependencias · Consideraciones técnicas · Falta**.
 - **Animaciones (P28):** blend 2D direccional sobre la velocidad bajo el cuerpo, con cada clip en su
   velocidad medida: Idle, Walk, Jog, Run (el sprint lo reproduce más rápido), WalkBackward (generado),
   RunBackward y sus diagonales, diagonales hacia delante y strafes (`arquitectura.md` §5.10).
+- **Desde el 2026-10-08 (P29, P30, P33):** el cuerpo es un `CharacterController` y en `Idle` y `Run` lo
+  mueve **motion matching**: `PlayerMovement` le pasa la intención (dirección relativa a la cámara,
+  velocidad de la marcha, orientada o libre) y MxM elige la pose de mocap que mejor la cumple; su root
+  motion mueve el cuerpo. Las velocidades son las del mocap: caminar 1.3, correr 3.4 y sprint 4.8 m/s
+  (P33); hacia atrás y de lado, 100STYLE hasta ~2 m/s (P34). La aceleración, las curvas, los pivots y
+  las frenadas son los del actor (correr llega al 80 % en ~1 s y frena en ~1.3 s, T27). El resto de los
+  estados mueve el cuerpo con su velocidad y el Animator Controller (el motion matching se mezcla
+  encima por el peso de su salida). Detalle en `arquitectura.md` §5.1 ("Motor" y "Locomoción por
+  motion matching").
 - **Falta:** bloquear el movimiento al morir o durante animaciones de daño (GDD).
 
 ### F02 — Sprint ✅
@@ -137,8 +152,9 @@ Dependencias · Consideraciones técnicas · Falta**.
 - **Cómo funciona:** en `Run`, `IsSprint = CanSprint` en cada tick: Shift mantenido y sprint no
   cancelado. Velocidad = `BaseSpeed × 1.4` (5 → 7 m/s). Atacar, bloquear o recibir daño
   (`HealthSystem.OnDamageReceived`) llaman `CancelSprint()` y el sprint no vuelve hasta soltar Shift.
-  **Se conserva** en `Jump`, `Fall` y `Vault` (GDD §5.2, §5.4). La animación pasa de Run a Sprint en
-  el blend tree `Locomotion`.
+  **Se conserva** en `Jump`, `Fall` y `Vault` (GDD §5.2, §5.4). Desde el 2026-10-08 el sprint es el del
+  mocap: `SprintMultiplier` 1.41 sobre 3.4 m/s = 4.8 m/s (P33), y lo anima motion matching (las tomas
+  de sprint van de 4.4 a 5.4 m/s; un regulador frena las más rápidas, T27).
 - **Cómo se implementó:** el auto-sprint (3 s corriendo) se reemplazó el 2026-09-30 por Shift
   mantenido (P1). Shift era la tecla del slide, que pasó a C.
 
@@ -211,8 +227,14 @@ Dependencias · Consideraciones técnicas · Falta**.
 - **Cómo se implementó:** el 2026-09-30 se adaptó `VaultObstacle` del DPS (P15, P17), con el
   cuerpo interpolado por código y el clip acelerado a 0.6 s. El 2026-10-01 se pasó a root motion
   con `MatchTarget` (P22). Ver el detalle en §5.
-- **Consideraciones:** el cuerpo es kinemático durante el vault, así que no choca con nada; la cara,
-  la cima, el fondo y el aterrizaje se comprueban antes de empezar.
+- **Consideraciones:** durante el vault el `CharacterController` está apagado (antes el cuerpo era
+  kinemático), así que no choca con nada; la cara, la cima, el fondo y el aterrizaje se comprueban
+  antes de empezar.
+- **Con las velocidades de P33 (2026-10-08):** "corriendo" empieza en 2.6 m/s (el clip se reproduce
+  como mínimo a ×0.6 de su carrera de 5.45 m/s), así que a 3.4 m/s Espacio espera el punto de despegue
+  y el cuerpo entra y sale a la velocidad que traía. Las alturas se comparan con 1 cm de tolerancia (el
+  vault alto mide justo el máximo del estándar).
+
 
 ### F05 — Ledge grab / climb ⚠️ Fuera del GDD
 - **Archivos:** `PlayerParkourStates.cs` (`PlayerLedgeGrabState`, `PlayerLedgeClimbState`),
@@ -245,7 +267,13 @@ Dependencias · Consideraciones técnicas · Falta**.
 
 ### F07 — Slide ⚠️ Fuera del GDD
 - **Archivos:** `PlayerGroundedStates.cs` (`PlayerSlideState`), `PlayerMovement.ShrinkCollider`.
-- **Cómo funciona (contextual desde el 2026-10-02, P27):** C en `Run` si hay momentum (≥ 3.9 m/s),
+- **Desde el 2026-10-08 (P33):** con las velocidades del mocap el slide entra desde 2.7 m/s (correr ya
+  desliza), pierde 2.5 m/s² hasta 1.8 m/s (~1.8 m desde la carrera, ~3–4 m desde el sprint), sale en la
+  dirección del input (no la de la cadera del mocap, que oscila ±10°), con Espacio en cola no frena ante
+  el obstáculo y sigue hasta el despegue del vault, y el cuerpo encogido no usa step offset (el barrido
+  de subida del `CharacterController` chocaba con la barra). C se pulsa a ≤ 1 m del obstáculo
+  (`ParkourStandard.SlideEntryDistance`).
+- **Cómo funcionaba (contextual desde el 2026-10-02, P27):** C en `Run` si hay momentum (≥ 3.9 m/s),
   suelo plano y espacio libre a la altura del slide. El collider baja a la mitad **conservando su
   base en el suelo**. El cuerpo conserva la velocidad que traía (máximo 7.5 m/s) y la pierde con
   fricción (4 m/s², 9 si se suelta el input); frena para no chocar con un obstáculo delante; bajo
@@ -431,7 +459,9 @@ Dependencias · Consideraciones técnicas · Falta**.
 - **Cómo funciona:** ver `arquitectura.md` §5.10. La FSM avisa cada cambio de estado y
   `PlayerAnimator` hace cross-fade al estado equivalente del Animator; `Speed` mueve el blend
   WalkBackward → Idle → Walk → Jog → Run → Sprint. La locomoción se reproduce en el sitio y la mueve
-  el Rigidbody; el parkour usa root motion warpeado con `MatchTarget` (P22). `PlayerContactIK`
+  el motor (desde el 2026-10-08, en Idle y Run, con el root motion de motion matching mezclado
+  encima, P29); el parkour usa root motion warpeado con `MatchTarget` (P22). `PlayerContactIK`
+
   apoya manos y pies sobre las superficies medidas. 20 estados y 5 parámetros, con IK Pass.
 - **Cómo se implementó (2026-09-30):**
   - El personaje se veía sin textura porque Unity no usa las texturas embebidas en un FBX hasta
@@ -546,10 +576,13 @@ Dependencias · Consideraciones técnicas · Falta**.
 - **Archivos:** `PlayerMovement.cs` (`WalkSpeed`, `BackpedalSpeed`, `CrouchSpeed`, `IsWalking`,
   `IsOriented`), `PlayerGroundedStates.cs` (`Run`, `PlayerCrouchState`), `PlayerInputHandler.cs`
   (Ctrl), `PlayerAnimator.cs` (`MoveX`/`MoveZ`), `Editor/ClipMeasurement.cs`.
-- **Cómo funciona:** tres marchas: caminar (Ctrl mantenido, 1.7 m/s), correr (5 m/s) y sprint (Shift,
-  7 m/s). Caminando, el cuerpo mira a la cámara y se mueve en cualquier dirección (strafe, diagonales,
-  hacia atrás). Corriendo gira hacia donde va, salvo hacia atrás, donde corre hacia atrás mirando a la
-  cámara a 3.5 m/s. C sin momentum agacha el cuerpo (collider al 62 %, 1 m/s, gira hacia donde va);
+- **Cómo funciona:** tres marchas: caminar (Ctrl mantenido, 1.3 m/s), correr (3.4 m/s) y sprint
+  (Shift, 4.8 m/s) (P33; antes 1.7 / 5 / 7). Caminando, el cuerpo mira a la cámara y se mueve en
+  cualquier dirección (strafe, diagonales, hacia atrás). Corriendo gira hacia donde va, salvo hacia
+  atrás, donde corre hacia atrás mirando a la cámara a ~2 m/s (antes 3.5). Desde el 2026-10-08 la
+  locomoción orientada es motion matching con las tomas de 100STYLE (tag `Strafe`); el motor corrige
+  su deriva de orientación (±10°) y sigue orientada hasta detenerse.
+ C sin momentum agacha el cuerpo (collider al 62 %, 1 m/s, gira hacia donde va);
   C, Shift o Espacio lo levantan si no hay techo. El blend direccional coloca cada clip en su
   velocidad medida.
 - **Probado:** caminar a 1.7 m/s; strafe a la derecha a 1.7 m/s sin girar (blend en +X); caminar hacia
@@ -816,11 +849,31 @@ problema, la causa, la solución y el estado (formato del GDD §29 para bugs).
 | 2026-10-05 | (ver `git log`) | Axel | Segunda auditoría de locomoción, parkour, animación y combate; decisiones P29–P32 (motion matching con MxM, `CharacterController`, Animation Rigging, repo privado). Fase 0: mocap del Kinematica Demo (22 tomas, Unity Companion License) importado como Humanoid y probado sobre Ch45 con la sonda de retarget (hoy `MocapRetargetProbe`; detalle abajo). El jugador todavía no lo usa. |
 | 2026-10-05 | (ver `git log`) | Axel | Retroceso y strafe de 100STYLE (P34): 8 tomas Neutral (CC BY 4.0) convertidas de BVH a FBX con Blender, importadas como Humanoid con mapeo explícito y probadas sobre Ch45; la sonda pasa a `MocapRetargetProbe` y prueba las dos fuentes. Retarget limpio, pero Neutral solo cubre velocidades bajas (detalle abajo). El jugador todavía no lo usa. |
 | 2026-10-05 | (ver `git log`) | Axel | Retroceso y strafe rápidos: búsqueda de otra fuente de mocap (ninguna libre y compatible pasa de ~2 m/s); se agregan las 8 tomas **Rushed** de 100STYLE (atrás ~2.0, de lado ~2.2 m/s) y el convertidor acepta cualquier estilo. Retarget limpio con Foot IK. |
+| 2026-10-08 | (ver `git log`) | Axel | Motion matching, fase 2 (P29, P30, P33): el Player pasa de Rigidbody a **`CharacterController`** y camina, corre y esprinta con MxM mezclado sobre el Animator Controller (`PlayerMxMLocomotion`, motor en `PlayerMovement.LateUpdate`); velocidades del mocap; dos parches más en MxM (T26); parkour y prueba reajustados a las velocidades nuevas (detalle abajo). `ParkourPlayModeTest` 338–341/341 entre corridas (T27). |
 | 2026-10-07 | (ver `git log`) | Axel | Motion matching, fase 1 (P29): MxM 2.3.3 embebido con un parche para Unity 6.6 (T26), base de datos horneada desde código (`MxMLocomotionBuilder`: 24 118 poses de Kinematica y 100STYLE, el estilo de strafe separado por tag) y prueba en Play Mode (`MxMLocomotionProbe`). 50/57: velocidades, respuesta, giros de 180°, retroceso y patinaje cumplen; quedan suelas hundidas en giros de 90° y strafe, frenado lento y strafe derecho lento (T27). La base va por Git LFS. El jugador todavía no la usa (detalle abajo). |
 | 2026-10-02 | (sin commit) | Axel | Reconstrucción del movimiento (P28), fases 2–10: animaciones CC0 de Quaternius, herramienta de medición de clips, locomoción direccional con marchas (caminar, strafe, retroceso a 3.5 m/s, agacharse), slide con bucle real, mantle, drop y salto de cornisa, roll de aterrizaje, laboratorio S11 y limpieza (detalle abajo). 341/341 en Play Mode. |
 | 2026-10-02 | (sin commit) | Axel | Reconstrucción del movimiento (P28): auditoría, investigación de repositorios y licencias, arquitectura D aprobada; fase 1: cámara orbital con ratón (P5) y giro limitado por la aceleración lateral (media vuelta que frena y pivota). 304/304 en Play Mode. |
 | 2026-10-02 | (sin commit) | Axel | Calidad de movimiento, segunda fase (P27): momentum en la locomoción, inclinación del torso, slide contextual, aproximación del vault, transiciones sin cambios de velocidad, T24 resuelto y laboratorio de fluidez (detalle abajo). 301/301 en Play Mode, dos corridas. |
 | 2026-10-02 | (sin commit) | Axel | Parkour Obstacle Standard: estándar centralizado, 10 prefabs de obstáculos con validación y gizmos, Parkour Test Area reconstruida con ellos y pruebas de consistencia por posición (detalle abajo). 212/212 en Play Mode. |
+
+### Detalle — motion matching, fase 2: motor y locomoción en el jugador (2026-10-08)
+
+| Problema | Causa | Solución | Estado |
+|---|---|---|---|
+| ¿Cómo convivir MxM (su propio PlayableGraph) con el Animator Controller que usan las acciones, `MatchTarget` y el IK? | MxM toma el Animator con su grafo | Medido con una prueba temporal: **el peso de la salida del grafo de MxM mezcla su pose con la del controller**, que sigue corriendo debajo (peso 0 = controller, 0.5 = pose intermedia). `PlayerMxMLocomotion` sube el peso en Idle y Run y lo baja (y pausa MxM) en las acciones | ✅ |
+| El personaje salía despedido (z = −828) y "teleports" de 40–66 m/s | `CharacterController.velocity` incluye el salto de un teleport; y durante la mezcla la velocidad medida (que ya incluía el root motion) volvía a sumarse como (1 − w) × velocidad: crecía como 1/w | El motor mide el desplazamiento de su propio `Move`; durante la mezcla conserva la orden de los estados; una colisión solo quita velocidad | ✅ |
+| El personaje giraba solo estando quieto (180° → 211°) y tras cada acción | `MxMAnimator.ResetMotion` reinicia la orientación de la trayectoria a yaw 0 del mundo | Se reinicia con la orientación actual del cuerpo y con el pasado de su velocidad real | ✅ |
+| `ArgumentNullException` y `ArgumentOutOfRangeException` dentro de MxM | Bugs de MxM al desactivar antes de `Start` y en `ForcePastTrajectoryByVelocity` | Parcheados en la copia embebida (T26) | ✅ |
+| El cuerpo flotaba 5 cm | Un `CharacterController` descansa su piel sobre el suelo | `FeetY` y la colocación del modelo descuentan la piel (0.035 m) | ✅ |
+| Los vaults corriendo no empezaban | Correr bajó a 3.4 m/s y el umbral de "corriendo" era 3.48 m/s | Umbral único `PlayerVaultState.IsRunning` en 2.6 m/s (clip a ×0.6 mínimo) | ✅ |
+| El vault alto (1.2 m) no se detectaba en el suelo | Mide exactamente `VaultMaxHeight` y los pies leían una fracción de milímetro bajo el suelo | Tolerancia de 1 cm en vault, mantle y cornisa | ✅ |
+| Parado a 0.75 m del muro de 3 m ya no se agarraba | El idle del mocap mueve la raíz 1 cm y `LedgeReachAir` era 0.75 | 0.8 m | ✅ |
+| El slide chocaba con la barra de 1.2 m | Radio 0.54 (el controller nunca es más bajo que 2 × radio) y, sobre todo, **el barrido de subida del step offset** (0.4 m) de la cápsula baja | Radio 0.35 (hombros); step offset 0 con el cuerpo encogido | ✅ |
+| Al levantarse junto a la barra salía disparado hacia atrás (+94 m/s) | El controller se despenetra al recuperar la altura y eso se medía como velocidad | La colisión solo quita velocidad; el techo se comprueba con la cápsula de pie completa | ✅ |
+| El slide se agotaba a 0.6–1.8 m y no llegaba a la barra, al túnel ni al vault | La fricción venía de deslizarse desde 7 m/s; el balanceo del mocap lo desviaba 9° contra la pared del túnel | Fricción 2.5, mínimo 1.8, sale en la dirección del input, C a ≤ 1 m del obstáculo, y con Espacio en cola no frena y sigue hasta el despegue del vault | ✅ |
+| Deriva de orientación en strafe/retroceso (hasta 40°) y residuo de rumbo en la carrera | Las tomas giran solas | El motor corrige la orientación en la locomoción orientada y el residuo (< 30°) en la libre; la orientada sigue así hasta detenerse | ✅ |
+| Sprint de hasta 5.5 m/s | Tomas de sprint más rápidas que 4.8 m/s | Regulador que frena la reproducción hasta el 88 % en línea recta. El warping de velocidad de MxM se probó y se descartó (rompía las medias vueltas: desvío de 98°) | 🟡 T27 (4.4–5.4 m/s) |
+| La prueba en Play Mode asumía 5/7 m/s y el blend tree | — | Tiempos, distancias y tolerancias a P33 (cada cambio comentado en `ParkourPlayModeTest`); el resultado varía entre corridas porque MxM no es determinista entre escenarios | 🟡 338–341/341 |
 
 ### Detalle — motion matching, fase 1 (2026-10-07)
 

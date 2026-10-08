@@ -57,11 +57,17 @@ public class PlayerVaultState : PlayerState
     /// keeps the intention until the body reaches it, so the clip always meets the obstacle at its
     /// own take-off instead of starting late. A standing or walking vault starts from where it is.
     /// </summary>
-    public static Approach Evaluate(PlayerMovement player)
+    public static Approach Evaluate(PlayerMovement player) => Evaluate(player, player.HorizontalSpeed);
+
+    /// <summary>
+    /// Same as Evaluate, judging the approach at <paramref name="approachSpeed"/>: a slide braking
+    /// toward the obstacle still carries the momentum of its entry into the vault.
+    /// </summary>
+    public static Approach Evaluate(PlayerMovement player, float approachSpeed)
     {
         Vector3 dir = player.HasMoveInput ? player.MoveDirection : player.transform.forward;
-        bool fast = player.HorizontalSpeed >= ParkourTimings.VaultClipSpeed * MinPlaybackSpeed;
-        float reach = fast ? ParkourStandard.VaultSpotReach(player.HorizontalSpeed) : ParkourStandard.VaultReach;
+        bool fast = IsRunning(approachSpeed);
+        float reach = fast ? ParkourStandard.VaultSpotReach(approachSpeed) : ParkourStandard.VaultReach;
         if (!player.EnvChecker.TryFindVault(dir, player.FeetY, reach, out VaultInfo info))
             return Approach.None;
 
@@ -69,7 +75,7 @@ public class PlayerVaultState : PlayerState
         {
             Vector3 toFace = info.FrontPoint - player.transform.position;
             float distance = Vector3.Dot(new Vector3(toFace.x, 0f, toFace.z), info.Direction);
-            if (distance > ParkourStandard.VaultTakeoffDistance + player.HorizontalSpeed * Time.fixedDeltaTime)
+            if (distance > ParkourStandard.VaultTakeoffDistance + approachSpeed * Time.fixedDeltaTime)
                 return Approach.Approaching;
         }
 
@@ -77,7 +83,7 @@ public class PlayerVaultState : PlayerState
         // from a standstill or a walk too close to it, the lead leg would already be at the obstacle
         // when the clip starts and cut through it, so Space jumps instead (~0.91 m of room needed).
         float raise = info.TopY - player.FeetY - ParkourTimings.VaultClipFenceHeight;
-        bool slow = player.HorizontalSpeed < ParkourTimings.VaultClipSpeed * MinPlaybackSpeed;
+        bool slow = !IsRunning(approachSpeed);
         if (slow && raise > MinTakeoffRaise &&
             CloseStartOffset(info.HandDistance) > ParkourTimings.VaultTakeoff - ParkourTimings.VaultTakeoffWindow)
             return Approach.None;
@@ -86,8 +92,15 @@ public class PlayerVaultState : PlayerState
         return Approach.Ready;
     }
 
-    /// <summary>Slowest playback of the clip: below this approach speed the vault is a standing one.</summary>
-    private const float MinPlaybackSpeed = 0.8f;
+    /// <summary>
+    /// Slowest playback of the clip: below this approach speed (≈ 2.6 m/s, between the walk and the
+    /// run of P33) the vault is a standing one. At the run (3.4 m/s) the clip, whose run-in moves at
+    /// 5.45 m/s, plays at ~0.62 and the body keeps its speed through the vault.
+    /// </summary>
+    private const float MinPlaybackSpeed = 0.6f;
+
+    /// <summary>Running approach: the vault, the mantle and Space look ahead and wait for the take-off point.</summary>
+    public static bool IsRunning(float speed) => speed >= ParkourTimings.VaultClipSpeed * MinPlaybackSpeed;
 
     /// <summary>Smallest extra take-off (m) that is worth a warp phase.</summary>
     private const float MinTakeoffRaise = 0.02f;
@@ -375,7 +388,7 @@ public class PlayerMantleState : PlayerState
     public static PlayerVaultState.Approach Evaluate(PlayerMovement player)
     {
         Vector3 dir = player.HasMoveInput ? player.MoveDirection : player.transform.forward;
-        bool fast = player.HorizontalSpeed >= ParkourTimings.VaultClipSpeed * 0.8f;
+        bool fast = PlayerVaultState.IsRunning(player.HorizontalSpeed);
         float reach = fast ? ParkourStandard.VaultSpotReach(player.HorizontalSpeed) : ParkourStandard.MantleReach;
         if (!player.EnvChecker.TryFindMantle(dir, player.FeetY, reach, out LedgeInfo top))
             return PlayerVaultState.Approach.None;

@@ -111,8 +111,12 @@ public static class ParkourStandard
     public const float LedgeGroundMinRise = 1.9f, LedgeGroundMaxRise = 2.7f;
     /// <summary>Rise (m) of the ledge's top above the feet at the moment of a grab in the air.</summary>
     public const float LedgeAirMinRise = 1.5f, LedgeAirMaxRise = 2.6f;
-    /// <summary>How far ahead (m from the body) the wall is found for a grab from the ground / in the air.</summary>
-    public const float LedgeReachGround = 1.0f, LedgeReachAir = 0.75f;
+    /// <summary>
+    /// How far ahead (m from the body) the wall is found for a grab from the ground / in the air. In
+    /// the air 0.8: a body standing 0.75 m from a wall (an arm's length) still grabs after the
+    /// idle's own sway (the mocap moves the root ~1 cm, P29).
+    /// </summary>
+    public const float LedgeReachGround = 1.0f, LedgeReachAir = 0.8f;
     /// <summary>Heights (m above the feet) of the chest and head rays that find the wall face.</summary>
     public const float LedgeChestRay = 1.2f, LedgeHeadRay = 1.75f;
     /// <summary>Inset (m) from the edge where the feet stand after climbing.</summary>
@@ -142,10 +146,11 @@ public static class ParkourStandard
     /// <summary>Thickness of a slide bar (m).</summary>
     public const float SlideBarThickness = 0.3f;
     /// <summary>
-    /// Farthest point (m before the bar) to press C: a sprint slide covers ~4.3 m (7 m/s, 0.8 s,
-    /// friction 4 m/s²), so starting within 3 m keeps ≥ 1 m of slide under the bar.
+    /// Farthest point (m before the bar) to press C: from a run (3.4 m/s of P33, friction 2.5 m/s²)
+    /// the slide covers ~1.8 m before its momentum is spent, and a sprint ~3–4 m, so starting within
+    /// 1 m keeps the body sliding when it reaches the bar (under it the ceiling keeps it going).
     /// </summary>
-    public const float SlideEntryDistance = 3f;
+    public const float SlideEntryDistance = 1f;
     /// <summary>Depth (m) of each JumpGap platform.</summary>
     public const float JumpPlatformDepth = 4f;
     /// <summary>

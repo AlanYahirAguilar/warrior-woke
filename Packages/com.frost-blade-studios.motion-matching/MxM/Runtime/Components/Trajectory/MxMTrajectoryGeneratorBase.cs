@@ -631,11 +631,10 @@ namespace MxM
         *********************************************************************************************/
         public void ForcePastTrajectoryByVelocity(Vector3 a_velocity)
         {
-            int pastRecordCount = Mathf.CeilToInt(p_maxRecordTime / p_recordingFrequency);
+            // Warrior Woke patch: it set the lists' Capacity below their Count (ArgumentOutOfRangeException)
+            // and then wrote past their end; it now rewrites the records that exist
+            int pastRecordCount = Mathf.Min(p_recordedPastPositions.Count, p_recordedPastFacingAngles.Count);
 
-            p_recordedPastPositions.Capacity = pastRecordCount;
-            p_recordedPastFacingAngles.Capacity = pastRecordCount;
-            
             Vector3 trajectoryStartPosition = transform.position;
             Vector3 incrementVelocityVector = a_velocity * p_recordingFrequency * -1f;
 

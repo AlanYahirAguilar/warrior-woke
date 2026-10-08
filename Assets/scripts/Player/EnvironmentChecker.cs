@@ -60,6 +60,9 @@ public class EnvironmentChecker : MonoBehaviour
     /// side, and the landing is as far as the clip naturally lands, or closer if that spot is blocked.
     /// Allocation-free.
     /// </summary>
+    /// <summary>Measurement tolerance (m) of the obstacle heights against the standard's limits.</summary>
+    private const float HeightTolerance = 0.01f;
+
     public bool TryFindVault(Vector3 direction, float feetY, out VaultInfo info) =>
         TryFindVault(direction, feetY, ParkourStandard.VaultReach, out info);
 
@@ -87,7 +90,10 @@ public class EnvironmentChecker : MonoBehaviour
         if (!Physics.Raycast(topOrigin, Vector3.down, out RaycastHit top, ParkourStandard.VaultMaxHeight + 0.3f, obstacleLayer, QueryTriggerInteraction.Ignore))
             return false;
         float height = top.point.y - feetY;
-        if (top.distance < 0.01f || top.normal.y < 0.7f || height < ParkourStandard.VaultMinHeight || height > ParkourStandard.VaultMaxHeight) return false;
+        // (with a tolerance: the standard high vault is exactly VaultMaxHeight, and the feet of a
+        // CharacterController resting on the ground read a fraction of a millimetre below it)
+        if (top.distance < 0.01f || top.normal.y < 0.7f ||
+            height < ParkourStandard.VaultMinHeight - HeightTolerance || height > ParkourStandard.VaultMaxHeight + HeightTolerance) return false;
 
         // 3. Depth: cast back toward the player from beyond the deepest vaultable obstacle.
         //    If the origin is still inside the obstacle the ray hits nothing → too deep.
@@ -236,7 +242,7 @@ public class EnvironmentChecker : MonoBehaviour
         if (!Physics.Raycast(topOrigin, Vector3.down, out RaycastHit top, maxRise - minRise + 0.6f, obstacleLayer, QueryTriggerInteraction.Ignore))
             return false;
         float rise = top.point.y - feetY;
-        if (top.distance < 0.01f || top.normal.y < 0.7f || rise < minRise || rise > maxRise) return false;
+        if (top.distance < 0.01f || top.normal.y < 0.7f || rise < minRise - HeightTolerance || rise > maxRise + HeightTolerance) return false;
 
         // 3. The face right below the edge (exact plane where the hands go)
         Vector3 edgeProbe = new Vector3(face.point.x, top.point.y - 0.1f, face.point.z) + normal * 0.6f;

@@ -7,8 +7,9 @@ using UnityEngine;
 ///
 /// The FSM is the single source of truth: the Animator Controller has almost no transitions of
 /// its own (only chained one-shots that return to a loop: Block enter/exit, landings, Ledge hang),
-/// so the two can never disagree. Locomotion clips play in place and the Rigidbody is moved by the
-/// states (D1). Parkour actions use root motion (P22): during Vault, LedgeGrab and LedgeClimb the
+/// so the two can never disagree. Locomotion clips play in place; in Idle and Run motion matching
+/// (PlayerMxMLocomotion, P29) blends over the controller and its root motion moves the body; the
+/// other states are moved by their velocity. Parkour actions use root motion (P22): during Vault, LedgeGrab and LedgeClimb the
 /// clip's motion is forwarded to PlayerMovement and warped with Animator.MatchTarget so hands and
 /// feet arrive on the contact points measured by EnvironmentChecker; PlayerContactIK then keeps
 /// them there. Parkour states read the clip's progress through IParkourAnimationProgress.
@@ -83,12 +84,14 @@ public class PlayerAnimator : MonoBehaviour, IParkourAnimationProgress
             return;
         }
 
-        animator.applyRootMotion = false;
+        // The motor reads the root motion every frame (motion matching); OnAnimatorMove exists, so
+        // Unity never applies it by itself
+        animator.applyRootMotion = true;
         animator.cullingMode = AnimatorCullingMode.AlwaysAnimate; // root motion and IK also off screen
         _model = animator.transform;
         _modelBaseLocalPosition = _model.localPosition;
-        var capsule = GetComponent<CapsuleCollider>();
-        _rootAboveFeet = _modelBaseLocalPosition.y + (capsule != null ? capsule.height * 0.5f : 0f);
+        var body = GetComponent<CharacterController>();
+        _rootAboveFeet = _modelBaseLocalPosition.y + (body != null ? body.height * 0.5f - body.center.y + body.skinWidth : 0f);
 
         foreach (AnimationClip clip in animator.runtimeAnimatorController.animationClips)
         {
@@ -107,7 +110,11 @@ public class PlayerAnimator : MonoBehaviour, IParkourAnimationProgress
 
         // OnAnimatorIK and OnAnimatorMove are only sent to the Animator's own GameObject, so a relay forwards them here.
         var relay = animator.GetComponent<PlayerAnimatorIK>();
-        if (relay != null) relay.Owner = this;
+        if (relay != null)
+        {
+            relay.Owner = this;
+            relay.Movement = _movement;
+        }
 
         _movement.ParkourAnimation = this;
     }
@@ -126,12 +133,13 @@ public class PlayerAnimator : MonoBehaviour, IParkourAnimationProgress
 
     private void Update()
     {
-        if (animator == null || _movement.Rb == null) return;
+        if (animator == null) return;
 
         // The directional blend reads the real velocity under the body (m/s, local right/forward):
         // walking forward, backward, strafing or in a diagonal picks the clips whose measured pace and
         // direction match. Beyond the fastest clip (a sprint), the locomotion plays faster instead.
-        Vector3 velocity = _movement.Rb.linearVelocity;
+        // (Under motion matching it only shows while MxM fades in or out.)
+        Vector3 velocity = _movement.Velocity;
         Vector3 local = transform.InverseTransformDirection(new Vector3(velocity.x, 0f, velocity.z));
         animator.SetFloat(PlayerAnimatorIds.MoveXParam, local.x, speedDampTime, Time.deltaTime);
         animator.SetFloat(PlayerAnimatorIds.MoveZParam, local.z, speedDampTime, Time.deltaTime);
@@ -177,7 +185,6 @@ public class PlayerAnimator : MonoBehaviour, IParkourAnimationProgress
                           : state == m.LedgeGrabState  ? PlayerAnimatorIds.LedgeGrab
                           : state == m.LedgeClimbState ? PlayerAnimatorIds.LedgeClimb
                           : 0;
-        animator.applyRootMotion = _parkourStateHash != 0;
 
         if (state == m.VaultState)
         {
@@ -463,16 +470,16 @@ public class PlayerAnimator : MonoBehaviour, IParkourAnimationProgress
     private const float MaxGroundGuard = 0.3f;
 
     /// <summary>
-    /// Turn rate and forward acceleration of the body, measured at the physics rate (the Rigidbody's
-    /// velocity only changes there; per-frame differences would be spikes and zeros).
+    /// Turn rate and forward acceleration of the body, measured at the physics rate (smoothed: the
+    /// states change the velocity there, and per-frame differences would be spikes and zeros).
     /// </summary>
     private void FixedUpdate()
     {
-        if (_movement.Rb == null) return;
         float dt = Time.fixedDeltaTime;
-        float yaw = _movement.Rb.rotation.eulerAngles.y;
-        Vector3 v = _movement.Rb.linearVelocity;
-        Vector3 forward = _movement.Rb.rotation * Vector3.forward;
+        float yaw = transform.eulerAngles.y;
+        Vector3 v = _movement.Velocity;
+        Vector3 forward = transform.forward;
+
         float forwardSpeed = Vector3.Dot(new Vector3(v.x, 0f, v.z), forward);
         _yawRate      = Mathf.Lerp(_yawRate, Mathf.DeltaAngle(_lastYaw, yaw) * Mathf.Deg2Rad / dt, 0.5f);
         _forwardAccel = Mathf.Lerp(_forwardAccel, (forwardSpeed - _lastForwardSpeed) / dt, 0.5f);

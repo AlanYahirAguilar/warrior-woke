@@ -7,28 +7,35 @@ using UnityEngine;
 /// input is projected onto the main camera's flattened forward/right vectors, and the
 /// character smoothly rotates to face its current movement direction — except when
 /// backpedaling (S / back diagonals without sprint), where it keeps facing the camera's forward.
-/// Parkour actions (vault, ledge grab, climb) are driven by the animation's root motion: while
-/// IsRootMotionDriven the body is kinematic and PlayerAnimator moves it with the clip, warped onto
-/// the real contact points (decision P22). Everything else is moved by the states through the Rigidbody.
+///
+/// The body is a CharacterController, the single owner of the motion (decision P30). The states
+/// write <see cref="Velocity"/> at the physics rate; the motor moves the body once per frame in
+/// LateUpdate, after the animation: in Idle and Run the motion matching locomotion
+/// (PlayerMxMLocomotion, P29) carries it with its root motion, blended with the states' velocity by
+/// the motion matching weight; everywhere else the velocity moves it, with gravity. Parkour
+/// actions (vault, ledge grab, climb) are driven by the animation's root motion: while
+/// IsRootMotionDriven the controller is off and PlayerAnimator writes the clip's motion, warped
+/// onto the real contact points (P22), straight to the transform.
 /// Adheres to SRP: orchestrates state routing, never implements game logic directly.
 /// </summary>
-[RequireComponent(typeof(Rigidbody))]
+[RequireComponent(typeof(CharacterController))]
+[DefaultExecutionOrder(-100)] // the motor moves the body before the animation's LateUpdate work and the camera
 public class PlayerMovement : MonoBehaviour, IDamageModifier
 {
     // ─── Inspector Configuration ─────────────────────────────────────────────────
     [Header("Movement Speeds")]
-    [Tooltip("Run speed (WASD). Matched to the stride of the Run animation clip.")]
-    public float BaseSpeed   = 5f;
-    [Tooltip("Sprint = BaseSpeed × this value. GDD §5.2: ~+40 %.")]
-    public float SprintMultiplier = 1.4f;
+    [Tooltip("Run speed (WASD): the jog of the motion matching mocap (P33).")]
+    public float BaseSpeed   = 3.4f;
+    [Tooltip("Sprint = BaseSpeed × this value. GDD §5.2: ~+40 % (4.8 m/s, the mocap's sprint, P33).")]
+    public float SprintMultiplier = 1.41f;
     [Tooltip("Slide entry speed cap (m/s). The slide keeps the current speed (up to this) and loses it with friction.")]
     public float SlideSpeed  = 7.5f;
     [Tooltip("Vertical take-off speed. 4.5 m/s ≈ 1 m of rise: a human jump, not a superhero one.")]
     public float JumpSpeed   = 4.5f;
-    [Tooltip("Running backward speed (S without sprint, facing the camera): the measured pace of the RunBackward clip.")]
-    public float BackpedalSpeed = 3.5f;
-    [Tooltip("Walking speed (Left Ctrl held), in every direction: the measured pace of the Walk clip.")]
-    public float WalkSpeed = 1.7f;
+    [Tooltip("Running backward speed (S without sprint, facing the camera): the top of the 100STYLE backward takes (P34).")]
+    public float BackpedalSpeed = 2.0f;
+    [Tooltip("Walking speed (Left Ctrl held), in every direction: the mocap's walk (P33).")]
+    public float WalkSpeed = 1.3f;
     [Tooltip("Crouched walking speed.")]
     public float CrouchSpeed = 1.0f;
     [Tooltip("Collider height while crouched, as a fraction of the standing height.")]
@@ -48,11 +55,11 @@ public class PlayerMovement : MonoBehaviour, IDamageModifier
 
     [Header("Sliding")]
     [Tooltip("m/s² of friction while sliding with the move input held.")]
-    public float SlideFriction = 4f;
+    public float SlideFriction = 2.5f;
     [Tooltip("m/s² of friction when the move input is released: the legs dig in and the slide ends sooner.")]
     public float SlideBrakeFriction = 9f;
     [Tooltip("Momentum is spent below this speed (m/s); it is also the speed kept while a ceiling forces the slide on.")]
-    public float SlideMinSpeed = 2.5f;
+    public float SlideMinSpeed = 1.8f;
     [Tooltip("Seconds the body needs to drop to the ground ('Slide Down'); the slide cannot end or chain before.")]
     public float SlideMinTime = 0.35f;
     [Tooltip("Longest slide without a ceiling (s): the end of the valid window.")]
@@ -61,7 +68,7 @@ public class PlayerMovement : MonoBehaviour, IDamageModifier
 
     /// <summary>
     /// Slowest entry into a slide: it must still have momentum after the body reaches the ground
-    /// (SlideMinSpeed + SlideFriction × SlideMinTime ≈ 3.9 m/s). Walking or jogging does not slide.
+    /// (SlideMinSpeed + SlideFriction × SlideMinTime ≈ 2.7 m/s). Running and sprinting slide, walking does not.
     /// </summary>
     public float SlideMinEntrySpeed => SlideMinSpeed + SlideFriction * SlideMinTime;
 
@@ -87,7 +94,7 @@ public class PlayerMovement : MonoBehaviour, IDamageModifier
     [Tooltip("A landing at least this heavy, at RollMinSpeed or more with input, is absorbed with a roll.")]
     public float RollMinSeverity = 0.6f;
     [Tooltip("Horizontal speed (m/s) needed to roll out of a heavy landing.")]
-    public float RollMinSpeed = 3f;
+    public float RollMinSpeed = 2f;
     [Tooltip("Horizontal speed kept by the roll (fraction) and seconds it takes to recover the rest.")]
     public float RollSpeedKept = 0.7f, RollRecovery = 0.45f;
 
@@ -114,13 +121,21 @@ public class PlayerMovement : MonoBehaviour, IDamageModifier
     [SerializeField] private float moveInputDeadzone = 0.1f;
 
     // ─── Cached Components (set once in Awake, never in the loop) ────────────────
-    public Rigidbody        Rb         { get; private set; }
-    private CapsuleCollider _capsuleCollider;
+    /// <summary>The body: the only thing that moves the player (P30).</summary>
+    public CharacterController Controller { get; private set; }
     private IGroundChecker  _groundChecker;
     private HealthSystem    _healthSystem;
     private Transform       _cameraTransform;
-    private RigidbodyInterpolation _interpolation;
     public EnvironmentChecker EnvChecker { get; private set; }
+
+    /// <summary>Motion matching locomotion (optional: without it the states' velocity moves the body).</summary>
+    public PlayerMxMLocomotion Locomotion { get; private set; }
+
+    /// <summary>
+    /// Velocity of the body (m/s). The states write it at the physics rate; after every move it holds
+    /// what the body really did, so a wall stops it and a landing ends its fall.
+    /// </summary>
+    public Vector3 Velocity { get; private set; }
 
     // ─── Movement Input State ─────────────────────────────────────────────────────
     public float InputX         { get; private set; }
@@ -177,18 +192,16 @@ public class PlayerMovement : MonoBehaviour, IDamageModifier
     /// <summary>Half of the standing collider height: distance from the origin (torso center) to the feet.</summary>
     public float StandingHalfHeight => _originalColliderHeight * 0.5f;
 
-    /// <summary>World Y of the bottom of the collider (the feet).</summary>
-    public float FeetY => _capsuleCollider != null ? _capsuleCollider.bounds.min.y : transform.position.y;
+    /// <summary>
+    /// World Y of the feet: the bottom of the controller's capsule minus its skin (a
+    /// CharacterController rests its skin width above the ground).
+    /// </summary>
+    public float FeetY => Controller != null
+        ? transform.position.y + Controller.center.y - Controller.height * 0.5f - Controller.skinWidth
+        : transform.position.y;
 
     /// <summary>Horizontal speed of the body (m/s).</summary>
-    public float HorizontalSpeed
-    {
-        get
-        {
-            Vector3 v = Rb.linearVelocity;
-            return new Vector2(v.x, v.z).magnitude;
-        }
-    }
+    public float HorizontalSpeed => new Vector2(Velocity.x, Velocity.z).magnitude;
 
     /// <summary>Obstacle found by the last vault check (set right before entering VaultState).</summary>
     public VaultInfo PendingVault   { get; set; }
@@ -238,12 +251,12 @@ public class PlayerMovement : MonoBehaviour, IDamageModifier
     }
 
     // ─── Root motion (parkour) ────────────────────────────────────────────────────
-    /// <summary>True while the body is kinematic and moved by the animation (vault, ledge grab, climb).</summary>
+    /// <summary>True while the controller is off and the animation moves the body (vault, ledge grab, climb).</summary>
     public bool IsRootMotionDriven  { get; private set; }
 
     /// <summary>
     /// Horizontal velocity the animation is moving the body at (smoothed). Parkour actions hand it
-    /// to the Rigidbody when they end, so the run continues at the speed the clip was really moving.
+    /// to the body when they end, so the run continues at the speed the clip was really moving.
     /// </summary>
     public Vector3 RootMotionVelocity { get; private set; }
 
@@ -275,7 +288,11 @@ public class PlayerMovement : MonoBehaviour, IDamageModifier
     private float   _originalColliderHeight;
     private Vector3 _originalColliderCenter;
     private bool    _wasGrounded;
-    private float   _lastStepUpTime = -10f;
+    private float   _turnTargetYaw;
+    private bool    _hasTurnTarget;
+    private Vector3 _lastMotorPosition;
+    private Vector3    _rootDelta;     // root motion of the frame (from the Animator, OnAnimatorMove)
+    private Quaternion _rootRotation = Quaternion.identity;
 
     // ─── Lifecycle ───────────────────────────────────────────────────────────────
 
@@ -283,8 +300,8 @@ public class PlayerMovement : MonoBehaviour, IDamageModifier
     {
         CacheComponents();
         SnapshotColliderDimensions();
-        ConfigureRigidbody();
         BuildStateMachine();
+        _lastMotorPosition = transform.position;
     }
 
     private void OnEnable()
@@ -306,9 +323,144 @@ public class PlayerMovement : MonoBehaviour, IDamageModifier
 
     private void FixedUpdate()
     {
-        // Rotation applied in physics step so it stays in sync with Rigidbody movement
-        ApplyFacingRotation();
+        UpdateFacingTarget();
         StateMachine.CurrentState?.PhysicsUpdate();
+        UpdateLocomotionIntent();
+    }
+
+    /// <summary>
+    /// The motor: one move per frame, after the animation produced its root motion. In Idle and Run
+    /// the motion matching locomotion carries the body with its weight w: the frame's displacement is
+    /// the Animator's root motion (motion matching's, the controller's own locomotion plays in place)
+    /// plus (1 − w) of the states' velocity, and the turn is the root rotation plus (1 − w) of the
+    /// facing turn. Gravity acts on the vertical velocity; the ground holds the body.
+    /// </summary>
+    private void LateUpdate()
+    {
+        float dt = Time.deltaTime;
+        if (Controller == null || dt <= 0f || IsRootMotionDriven || !Controller.enabled)
+        {
+            ClearRootMotion();
+            return;
+        }
+
+        // Moved from outside (a spawn or a test): the physics scene must see it before moving
+        if ((transform.position - _lastMotorPosition).sqrMagnitude > 1e-8f)
+            Physics.SyncTransforms();
+
+        float w = Locomotion != null ? Locomotion.Weight : 0f;
+        Vector3 v = Velocity;
+        Vector3 displacement = new Vector3(v.x, 0f, v.z) * ((1f - w) * dt);
+        if (w > 0f) displacement += new Vector3(_rootDelta.x, 0f, _rootDelta.z);
+        v.y += Physics.gravity.y * dt;
+        if (IsGrounded && v.y < 0f) v.y = Mathf.Max(v.y, -GroundStickSpeed);
+        displacement.y = v.y * dt;
+
+        float yaw = transform.eulerAngles.y + (w > 0f ? _rootRotation.eulerAngles.y : 0f);
+        if (_hasTurnTarget && w < 1f)
+        {
+            float turned = Mathf.SmoothDampAngle(yaw, _turnTargetYaw, ref _turnSmoothVelocity, CurrentTurnSmoothTime(), MaxTurnRate(HorizontalSpeed), dt);
+            yaw += Mathf.DeltaAngle(yaw, turned) * (1f - w);
+        }
+        // Oriented locomotion keeps the facing the camera asks for: the strafe takes turn a little on
+        // their own (10–17° measured by MxMLocomotionProbe), and that drift is corrected under the mocap
+        // Free locomotion: the mocap plans its own turns (a pivot, a curve), so only the residue of a
+        // turn that motion matching's warping leaves (≤ ResidualHeadingAngle) is closed, more slowly
+        if (w > 0f && _hasTurnTarget)
+        {
+            float error = Mathf.DeltaAngle(yaw, _turnTargetYaw);
+            if (Locomotion.IsOriented)
+                yaw += error * Mathf.Clamp01(OrientedFacingGain * dt) * w;
+            else if (Mathf.Abs(error) < ResidualHeadingAngle && HorizontalSpeed > 0.5f)
+                yaw += error * Mathf.Clamp01(ResidualHeadingGain * dt) * w;
+        }
+        transform.rotation = Quaternion.Euler(0f, yaw, 0f);
+
+        Vector3 before = transform.position;
+        bool groundedBefore = IsGrounded;
+        Controller.Move(displacement);
+        // What the body really did (CharacterController.velocity would also count a teleport since
+        // its last move as speed). Horizontally: moved by the states (w = 0), the real motion, walls
+        // included; carried by motion matching (w = 1), its motion smoothed over a few frames (one
+        // frame of a blend of poses is noisy, and a jump or a vault takes its momentum from here);
+        // while blending, the states' command stays (measuring there would feed the root motion back
+        // into the (1 − w) part and multiply it by 1/w)
+        Vector3 actual = (transform.position - before) / dt;
+        Vector3 horizontal = new Vector3(actual.x, 0f, actual.z);
+        Vector3 commanded = new Vector3(v.x, 0f, v.z);
+        if (w >= 1f) horizontal = Vector3.Lerp(commanded, horizontal, 1f - Mathf.Exp(-dt / MeasuredVelocitySmoothing));
+        else if (w > 0f || horizontal.sqrMagnitude > commanded.sqrMagnitude) horizontal = commanded;
+        // A collision only takes speed away: a step climbed or the controller pushing itself out of
+        // geometry (standing up next to a bar) moves the body, but it is not speed to keep
+        float vertical = actual.y < v.y ? actual.y : v.y;
+        if (Controller.isGrounded && v.y < 0f) vertical = v.y;
+        Velocity = new Vector3(horizontal.x, vertical, horizontal.z);
+
+        // The controller climbed a step in one move: the model eases after it (PlayerAnimator)
+        float rise = transform.position.y - before.y - displacement.y;
+        if (groundedBefore && rise > 0.05f) Stepped?.Invoke(rise);
+
+        _lastMotorPosition = transform.position;
+        ClearRootMotion();
+    }
+
+    /// <summary>Downward speed (m/s) that keeps a grounded controller pressed onto the ground.</summary>
+    private const float GroundStickSpeed = 2f;
+
+    /// <summary>Time constant (s) of the smoothing of the velocity measured under motion matching.</summary>
+    private const float MeasuredVelocitySmoothing = 0.05f;
+
+    /// <summary>Fraction per second of the facing error removed in oriented locomotion (1/s).</summary>
+    private const float OrientedFacingGain = 10f;
+
+    /// <summary>Largest heading error (°) of free locomotion that the motor closes, and how fast (1/s).</summary>
+    private const float ResidualHeadingAngle = 30f, ResidualHeadingGain = 5f;
+
+    private void ClearRootMotion()
+    {
+        _rootDelta = Vector3.zero;
+        _rootRotation = Quaternion.identity;
+    }
+
+    /// <summary>
+    /// Root motion of this frame from the Animator (OnAnimatorMove, through PlayerAnimatorIK), with
+    /// motion matching's warping already applied. The motor uses it in Idle and Run.
+    /// </summary>
+    public void QueueRootMotion(Vector3 deltaPosition, Quaternion deltaRotation)
+    {
+        _rootDelta += deltaPosition;
+        _rootRotation = deltaRotation * _rootRotation;
+    }
+
+    /// <summary>Places the body (spawn, checkpoint, tests): no velocity, physics in sync.</summary>
+    public void Teleport(Vector3 position, Quaternion rotation)
+    {
+        Velocity = Vector3.zero;
+        transform.SetPositionAndRotation(position, rotation);
+        Physics.SyncTransforms();
+        _lastMotorPosition = position;
+        _turnSmoothVelocity = 0f;
+        _hasTurnTarget = false;
+        Locomotion?.ResetMotion();
+    }
+
+    /// <summary>
+    /// Feeds the motion matching locomotion every physics tick: in Idle and Run it gets the intention
+    /// (direction, gait speed, oriented or free); in any other state motion matching fades out and the
+    /// Animator Controller plays the action.
+    /// </summary>
+    private void UpdateLocomotionIntent()
+    {
+        if (Locomotion == null) return;
+        PlayerState s = StateMachine.CurrentState;
+        bool active = (s == IdleState || s == RunState) && !IsRootMotionDriven;
+        bool moving = active && s == RunState && HasMoveInput;
+        float speed = IsWalking ? WalkSpeed : IsBackpedaling ? BackpedalSpeed : IsSprint ? SprintSpeed : BaseSpeed;
+        // Oriented movement stays oriented until the body stops: the strafe takes brake facing the
+        // same way (switching to the free set mid-stop would turn the body)
+        bool oriented = moving ? IsOriented : active && Locomotion.IsOriented && HorizontalSpeed > 0.3f;
+        Locomotion.Drive(active, moving ? MoveDirection : Vector3.zero, speed * RecoverySpeedScale,
+                         oriented, CameraForwardFlat());
     }
 
     // ─── Input Entry Point (called by Player.cs from FixedUpdate) ────────────────
@@ -406,10 +558,10 @@ public class PlayerMovement : MonoBehaviour, IDamageModifier
 
         if (LandingSeverity > 0f)
         {
-            Vector3 v = Rb.linearVelocity;
+            Vector3 v = Velocity;
             float kept = LandedWithRoll ? RollSpeedKept : Mathf.Lerp(0.9f, HardLandingSpeedKept, LandingSeverity);
             if (LandedWithRoll) _recoveryDuration = RollRecovery;
-            Rb.linearVelocity = new Vector3(v.x * kept, v.y, v.z * kept);
+            Velocity = new Vector3(v.x * kept, v.y, v.z * kept);
         }
     }
 
@@ -418,18 +570,13 @@ public class PlayerMovement : MonoBehaviour, IDamageModifier
     /// <summary>Sets horizontal (X/Z) and vertical (Y) velocity independently.</summary>
     public void SetVelocity(Vector3 horizontalVelocity, float verticalVelocity)
     {
-        Rb.linearVelocity = new Vector3(horizontalVelocity.x, verticalVelocity, horizontalVelocity.z);
+        Velocity = new Vector3(horizontalVelocity.x, verticalVelocity, horizontalVelocity.z);
     }
 
     /// <summary>Zeroes horizontal (X/Z) velocity and sets the vertical (Y) velocity.</summary>
     public void StopHorizontal(float verticalVelocity)
     {
-        Rb.linearVelocity = new Vector3(0f, verticalVelocity, 0f);
-    }
-
-    public void SetKinematic(bool isKinematic)
-    {
-        Rb.isKinematic = isKinematic;
+        Velocity = new Vector3(0f, verticalVelocity, 0f);
     }
 
     /// <summary>
@@ -438,11 +585,11 @@ public class PlayerMovement : MonoBehaviour, IDamageModifier
     /// </summary>
     public void AccelerateHorizontal(Vector3 targetHorizontal)
     {
-        Vector3 v = Rb.linearVelocity;
+        Vector3 v = Velocity;
         Vector3 current = new Vector3(v.x, 0f, v.z);
         float rate = targetHorizontal.sqrMagnitude >= current.sqrMagnitude ? Acceleration : Deceleration;
         Vector3 next = Vector3.MoveTowards(current, targetHorizontal, rate * Time.fixedDeltaTime);
-        Rb.linearVelocity = new Vector3(next.x, v.y, next.z);
+        Velocity = new Vector3(next.x, v.y, next.z);
     }
 
     /// <summary>
@@ -453,9 +600,9 @@ public class PlayerMovement : MonoBehaviour, IDamageModifier
     /// </summary>
     public void AccelerateAlongFacing(Vector3 desiredDirection, float targetSpeed)
     {
-        Vector3 v = Rb.linearVelocity;
+        Vector3 v = Velocity;
         Vector3 current = new Vector3(v.x, 0f, v.z);
-        Vector3 facing = Rb.rotation * Vector3.forward;
+        Vector3 facing = transform.forward;
         facing.y = 0f;
         facing.Normalize();
 
@@ -466,7 +613,7 @@ public class PlayerMovement : MonoBehaviour, IDamageModifier
         Vector3 dir = speed > 0.05f ? current / speed : facing;
         dir = Vector3.RotateTowards(dir, facing, MaxTurnRate(speed) * 1.2f * Mathf.Deg2Rad * Time.fixedDeltaTime, 0f);
         speed = Mathf.MoveTowards(speed, target, (target >= speed ? Acceleration : Deceleration) * Time.fixedDeltaTime);
-        Rb.linearVelocity = new Vector3(dir.x * speed, v.y, dir.z * speed);
+        Velocity = new Vector3(dir.x * speed, v.y, dir.z * speed);
     }
 
     /// <summary>
@@ -504,12 +651,12 @@ public class PlayerMovement : MonoBehaviour, IDamageModifier
     /// </summary>
     public void AccelerateAir(Vector3 targetHorizontal)
     {
-        Vector3 v = Rb.linearVelocity;
+        Vector3 v = Velocity;
         Vector3 current = new Vector3(v.x, 0f, v.z);
         Vector3 next = HasMoveInput
             ? Vector3.MoveTowards(current, targetHorizontal, AirAcceleration * Time.fixedDeltaTime)
             : Vector3.MoveTowards(current, Vector3.zero, AirDrag * Time.fixedDeltaTime);
-        Rb.linearVelocity = new Vector3(next.x, v.y, next.z);
+        Velocity = new Vector3(next.x, v.y, next.z);
     }
 
     /// <summary>Turns the character instantly to face <paramref name="direction"/> (XZ). Used at the start of attacks.</summary>
@@ -518,31 +665,30 @@ public class PlayerMovement : MonoBehaviour, IDamageModifier
         direction.y = 0f;
         if (direction.sqrMagnitude < 0.0001f) return;
         Quaternion rotation = Quaternion.LookRotation(direction.normalized, Vector3.up);
-        Rb.rotation = rotation;
         transform.rotation = rotation;
         _turnSmoothVelocity = 0f;
+        _hasTurnTarget = false;
     }
 
     // ─── Root Motion (parkour) ───────────────────────────────────────────────────
 
     /// <summary>
-    /// Hands the body to the animation: kinematic, no interpolation, moved by ApplyRootMotion.
-    /// Collisions are off for the duration; the action was validated against the geometry before.
+    /// Hands the body to the animation: the controller is off and ApplyRootMotion writes the clip's
+    /// motion. Collisions are off for the duration; the action was validated against the geometry before.
     /// </summary>
     public void BeginRootMotion()
     {
         if (IsRootMotionDriven) return;
-        Vector3 v = Rb.linearVelocity;
+        Vector3 v = Velocity;
         RootMotionVelocity = new Vector3(v.x, 0f, v.z); // until the clip reports its own
         StopHorizontal(0f);
-        Rb.isKinematic   = true;
-        Rb.interpolation = RigidbodyInterpolation.None;
+        Controller.enabled = false;
         IsRootMotionDriven = true;
     }
 
     /// <summary>
     /// Moves the body by an animation delta (called by PlayerAnimator from OnAnimatorMove, once per
-    /// frame). Writes the transform directly: the body is kinematic, so physics follows it, and
+    /// frame). Writes the transform directly: the controller is off, so nothing fights it, and
     /// MatchTarget reads the real position every frame.
     /// </summary>
     public void ApplyRootMotion(Vector3 deltaPosition, Quaternion deltaRotation)
@@ -558,60 +704,26 @@ public class PlayerMovement : MonoBehaviour, IDamageModifier
         transform.rotation = Quaternion.Euler(0f, yaw, 0f);
     }
 
-    /// <summary>Gives the body back to physics at its current pose, with the interpolation restored.</summary>
+    /// <summary>Gives the body back to the controller at its current pose.</summary>
     public void EndRootMotion()
     {
         if (!IsRootMotionDriven) return;
         IsRootMotionDriven = false;
-        Rb.position = transform.position;
-        Rb.rotation = transform.rotation;
-        Rb.isKinematic   = false;
-        Rb.interpolation = _interpolation;
+        Controller.enabled = true;
+        Physics.SyncTransforms();
+        _lastMotorPosition = transform.position;
         _turnSmoothVelocity = 0f;
-    }
-
-    /// <summary>
-    /// Auto step (logic adapted from Dynamic Parkour System's MovementCharacterController.AutoStep):
-    /// if a low edge blocks the feet in the movement direction and the space above it is free,
-    /// lift the body onto it so small steps and curbs do not stop the run.
-    /// </summary>
-    public void TryAutoStep()
-    {
-        if (_capsuleCollider == null || MoveDirection == Vector3.zero || !IsGrounded) return;
-
-        float feet = FeetY;
-        float reach = _capsuleCollider.radius + 0.2f;
-        Vector3 basePos = new Vector3(transform.position.x, feet, transform.position.z);
-
-        if (!Physics.Raycast(basePos + Vector3.up * 0.05f, MoveDirection, out RaycastHit low, reach, stepLayer, QueryTriggerInteraction.Ignore))
-            return;
-        if (Mathf.Abs(low.normal.y) > 0.3f) return; // a slope, not a step
-
-        if (Physics.Raycast(basePos + Vector3.up * (StepHeight + 0.02f), MoveDirection, reach + 0.1f, stepLayer, QueryTriggerInteraction.Ignore))
-            return; // too tall: it is a wall or a vault obstacle
-
-        Vector3 topOrigin = low.point + MoveDirection * 0.05f + Vector3.up * (StepHeight + 0.05f);
-        if (!Physics.Raycast(topOrigin, Vector3.down, out RaycastHit top, StepHeight + 0.1f, stepLayer, QueryTriggerInteraction.Ignore))
-            return;
-
-        float rise = top.point.y - feet;
-        if (rise <= 0.02f || rise > StepHeight) return;
-
-        Rb.position += Vector3.up * (rise + 0.01f);
-        Vector3 v = Rb.linearVelocity;
-        if (v.y < 0f) Rb.linearVelocity = new Vector3(v.x, 0f, v.z);
-        _lastStepUpTime = Time.time;
-        Stepped?.Invoke(rise + 0.01f);
+        _hasTurnTarget = false;
     }
 
     /// <summary>
     /// Step down: walking off a step or curb (up to StepHeight) keeps the feet on the ground instead
-    /// of dropping into the Fall state on every step.
+    /// of dropping into the Fall state on every step. Steps up are climbed by the controller itself
+    /// (its step offset is StepHeight); the motor reports both so the model eases after the body.
     /// </summary>
     public void TryStepDown()
     {
-        if (_capsuleCollider == null || IsGrounded || Rb.linearVelocity.y > 0.1f) return;
-        if (Time.time - _lastStepUpTime < 0.3f) return; // just stepped up: the body is moving onto the step
+        if (Controller == null || !Controller.enabled || IsGrounded || Velocity.y > 0.1f) return;
 
         float feet = FeetY;
         Vector3 origin = new Vector3(transform.position.x, feet + 0.05f, transform.position.z);
@@ -622,19 +734,24 @@ public class PlayerMovement : MonoBehaviour, IDamageModifier
         float drop = feet - hit.point.y;
         if (drop <= 0.02f || drop > StepHeight) return;
 
-        Rb.position += Vector3.down * drop;
-        Vector3 v = Rb.linearVelocity;
-        if (v.y < 0f) Rb.linearVelocity = new Vector3(v.x, 0f, v.z);
+        Controller.Move(Vector3.down * (drop + 0.01f));
+        _lastMotorPosition = transform.position;
+        Vector3 v = Velocity;
+        if (v.y < 0f) Velocity = new Vector3(v.x, 0f, v.z);
         Stepped?.Invoke(-drop);
+        _groundChecker?.CheckGrounded();
     }
 
     /// <summary>Shrinks the collider keeping its bottom on the ground (the body crouches, it does not float or sink).</summary>
     public void ShrinkCollider(float factor)
     {
-        if (_capsuleCollider == null) return;
+        if (Controller == null) return;
         float height = _originalColliderHeight * factor;
-        _capsuleCollider.height = height;
-        _capsuleCollider.center = new Vector3(
+        // The controller climbs a step by sweeping up its step offset first: a lowered body (slide,
+        // crouch) under a bar or a tunnel would hit it in that sweep, so it does not step up
+        Controller.stepOffset = 0f;
+        Controller.height = height;
+        Controller.center = new Vector3(
             _originalColliderCenter.x,
             _originalColliderCenter.y - (_originalColliderHeight - height) * 0.5f,
             _originalColliderCenter.z);
@@ -642,25 +759,31 @@ public class PlayerMovement : MonoBehaviour, IDamageModifier
 
     public void ResetCollider()
     {
-        if (_capsuleCollider == null) return;
-        _capsuleCollider.height = _originalColliderHeight;
-        _capsuleCollider.center = _originalColliderCenter;
+        if (Controller == null) return;
+        Controller.height = _originalColliderHeight;
+        Controller.center = _originalColliderCenter;
+        Controller.stepOffset = StepHeight;
     }
 
     /// <summary>True if something is over the head of a standing body (measured from the feet).</summary>
     public bool HasCeilingOverhead()
     {
-        if (_capsuleCollider == null) return false;
-        Vector3 feet = new Vector3(transform.position.x, FeetY + 0.1f, transform.position.z);
-        return Physics.Raycast(feet, Vector3.up, _originalColliderHeight, ceilingLayer, QueryTriggerInteraction.Ignore);
+        if (Controller == null) return false;
+        // The whole standing body, not a ray up its middle: a bar just ahead of the chest also stops it
+        float r = Controller.radius * 0.95f;
+        Vector3 feet = new Vector3(transform.position.x, FeetY, transform.position.z);
+        Vector3 bottom = feet + Vector3.up * (r + StepHeight * 0.5f);
+        Vector3 top = feet + Vector3.up * Mathf.Max(r + StepHeight * 0.5f, _originalColliderHeight + Controller.skinWidth - r);
+        return Physics.CheckCapsule(bottom, top, r, ceilingLayer, QueryTriggerInteraction.Ignore);
     }
 
     // ─── Private Helpers ─────────────────────────────────────────────────────────
 
     private void CacheComponents()
     {
-        Rb               = GetComponent<Rigidbody>();
-        _capsuleCollider = GetComponent<CapsuleCollider>();
+        Controller       = GetComponent<CharacterController>();
+        Controller.stepOffset = StepHeight;
+        Locomotion       = GetComponent<PlayerMxMLocomotion>();
         _groundChecker   = GetComponent<IGroundChecker>() ?? gameObject.AddComponent<GroundChecker>();
         _healthSystem    = GetComponent<HealthSystem>();
         EnvChecker       = GetComponent<EnvironmentChecker>() ?? gameObject.AddComponent<EnvironmentChecker>();
@@ -671,17 +794,9 @@ public class PlayerMovement : MonoBehaviour, IDamageModifier
 
     private void SnapshotColliderDimensions()
     {
-        if (_capsuleCollider == null) return;
-        _originalColliderHeight = _capsuleCollider.height;
-        _originalColliderCenter = _capsuleCollider.center;
-    }
-
-    private void ConfigureRigidbody()
-    {
-        // Free movement on X and Z (camera-relative third person); rotation is driven through
-        // MoveRotation, so it stays frozen against physics torques.
-        Rb.constraints = RigidbodyConstraints.FreezeRotation;
-        _interpolation = Rb.interpolation;
+        if (Controller == null) return;
+        _originalColliderHeight = Controller.height;
+        _originalColliderCenter = Controller.center;
     }
 
     private void BuildStateMachine()
@@ -745,34 +860,33 @@ public class PlayerMovement : MonoBehaviour, IDamageModifier
     }
 
     /// <summary>
-    /// Smoothly rotates the character to face MoveDirection through Rigidbody.MoveRotation, so the
-    /// turn is interpolated between physics steps like the movement. Faster bodies turn wider.
+    /// The yaw the body turns toward (the motor applies it every frame, eased with SmoothDampAngle;
+    /// faster bodies turn wider): the movement direction, or the camera's forward in oriented
+    /// locomotion (walking, or running backward), which moves under the body instead of turning it.
     /// </summary>
-    private void ApplyFacingRotation()
+    private void UpdateFacingTarget()
     {
+        _hasTurnTarget = false;
         if (!faceMovementDirection || MoveDirection == Vector3.zero || IsRootMotionDriven || !CanRotateInCurrentState())
             return;
 
-        // Oriented locomotion (walking, or running backward) keeps the body facing the camera's
-        // forward and moves under it, instead of turning toward the input.
         Vector3 facing = MoveDirection;
         if (IsOriented && StateMachine.CurrentState == RunState)
         {
             facing = CameraForwardFlat();
             if (facing == Vector3.zero) return;
         }
-
-        // SmoothDampAngle eases in/out of the turn instead of snapping at a flat angular speed;
-        // the camera trails transform.forward, so a snappy turn reads as a fast camera swing.
-        float speed01    = SprintSpeed > BaseSpeed ? Mathf.InverseLerp(BaseSpeed, SprintSpeed, HorizontalSpeed) : 0f;
-        float smoothTime = Mathf.Lerp(turnSmoothTime, sprintTurnSmoothTime, speed01);
-        float targetYaw  = Quaternion.LookRotation(facing, Vector3.up).eulerAngles.y;
-        float currentYaw = Rb.rotation.eulerAngles.y;
-        float newYaw     = Mathf.SmoothDampAngle(currentYaw, targetYaw, ref _turnSmoothVelocity, smoothTime, MaxTurnRate(HorizontalSpeed), Time.fixedDeltaTime);
-        Rb.MoveRotation(Quaternion.Euler(0f, newYaw, 0f));
+        _turnTargetYaw = Quaternion.LookRotation(facing, Vector3.up).eulerAngles.y;
+        _hasTurnTarget = true;
     }
 
-    private Vector3 CameraForwardFlat()
+    private float CurrentTurnSmoothTime()
+    {
+        float speed01 = SprintSpeed > BaseSpeed ? Mathf.InverseLerp(BaseSpeed, SprintSpeed, HorizontalSpeed) : 0f;
+        return Mathf.Lerp(turnSmoothTime, sprintTurnSmoothTime, speed01);
+    }
+
+    public Vector3 CameraForwardFlat()
     {
         if (_cameraTransform == null) return Vector3.zero;
         Vector3 f = _cameraTransform.forward;

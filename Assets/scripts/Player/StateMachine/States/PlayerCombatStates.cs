@@ -106,8 +106,8 @@ public class PlayerLightAttackState : PlayerState
         base.PhysicsUpdate();
         // Short lunge at the start of the strike, then planted (vertical velocity preserved)
         bool lunging = Time.time - startTime < LungeTime;
-        if (lunging) player.SetVelocity(player.transform.forward * LungeSpeed, player.Rb.linearVelocity.y);
-        else         player.StopHorizontal(player.Rb.linearVelocity.y);
+        if (lunging) player.SetVelocity(player.transform.forward * LungeSpeed, player.Velocity.y);
+        else         player.StopHorizontal(player.Velocity.y);
     }
 
     public override void Exit()
@@ -182,8 +182,8 @@ public class PlayerHeavyAttackState : PlayerState
     {
         base.PhysicsUpdate();
         bool lunging = Time.time - startTime < LungeTime;
-        if (lunging) player.SetVelocity(player.transform.forward * LungeSpeed, player.Rb.linearVelocity.y);
-        else         player.StopHorizontal(player.Rb.linearVelocity.y);
+        if (lunging) player.SetVelocity(player.transform.forward * LungeSpeed, player.Velocity.y);
+        else         player.StopHorizontal(player.Velocity.y);
     }
 }
 
@@ -226,7 +226,7 @@ public class PlayerBlockState : PlayerState
     public override void Enter()
     {
         base.Enter();
-        player.StopHorizontal(player.Rb.linearVelocity.y);
+        player.StopHorizontal(player.Velocity.y);
     }
 
     public override void LogicUpdate()
@@ -252,7 +252,7 @@ public class PlayerBlockState : PlayerState
     {
         base.PhysicsUpdate();
         // Block anchors the player in place
-        player.StopHorizontal(player.Rb.linearVelocity.y);
+        player.StopHorizontal(player.Velocity.y);
     }
 
 }
@@ -325,6 +325,6 @@ public class PlayerDodgeState : PlayerState
     {
         base.PhysicsUpdate();
         // Dash in the direction chosen on Enter, even if the input changes mid-dodge
-        player.SetVelocity(_dodgeDirection * DodgeSpeed, player.Rb.linearVelocity.y);
+        player.SetVelocity(_dodgeDirection * DodgeSpeed, player.Velocity.y);
     }
 }

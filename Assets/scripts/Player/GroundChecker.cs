@@ -19,14 +19,16 @@ public class GroundChecker : MonoBehaviour, IGroundChecker
     [Header("Gizmos Debugging")]
     [SerializeField] private bool showGizmos = true;
 
-    private CapsuleCollider _capsuleCollider;
+    private Collider _capsuleCollider; // a CapsuleCollider or a CharacterController
+    private float _radius;
     private bool _isGrounded;
 
     public bool IsGrounded => _isGrounded;
 
     private void Awake()
     {
-        _capsuleCollider = GetComponent<CapsuleCollider>();
+        if (TryGetComponent(out CharacterController controller)) { _capsuleCollider = controller; _radius = controller.radius; }
+        else if (TryGetComponent(out CapsuleCollider capsule))   { _capsuleCollider = capsule;    _radius = capsule.radius; }
     }
 
     /// <summary>
@@ -36,10 +38,11 @@ public class GroundChecker : MonoBehaviour, IGroundChecker
     {
         if (_capsuleCollider != null)
         {
-            // Sphere slightly narrower than the capsule, starting just above the feet
-            float radius = _capsuleCollider.radius * 0.9f;
-            Bounds b = _capsuleCollider.bounds;
-            Vector3 origin = new Vector3(b.center.x, b.min.y + radius + 0.05f, b.center.z);
+            // Sphere slightly narrower than the capsule, starting just above the feet (computed from
+            // the shape, not the bounds: a CharacterController is off while parkour moves the body)
+            float radius = _radius * 0.9f;
+            Vector3 feet = Feet();
+            Vector3 origin = new Vector3(feet.x, feet.y + radius + 0.05f, feet.z);
             _isGrounded = Physics.SphereCast(origin, radius, Vector3.down, out _, 0.05f + extraDistance, groundLayer, QueryTriggerInteraction.Ignore);
             return _isGrounded;
         }
@@ -48,15 +51,24 @@ public class GroundChecker : MonoBehaviour, IGroundChecker
         return _isGrounded;
     }
 
+    /// <summary>Bottom of the capsule in world space.</summary>
+    private Vector3 Feet()
+    {
+        Vector3 center = Vector3.zero;
+        float height = 0f;
+        if (_capsuleCollider is CharacterController c) { center = c.center; height = c.height; }
+        else if (_capsuleCollider is CapsuleCollider k) { center = k.center; height = k.height; }
+        Vector3 world = transform.TransformPoint(center);
+        return new Vector3(world.x, world.y - height * 0.5f * transform.lossyScale.y, world.z);
+    }
+
     private Vector3 GetRayOrigin()
     {
-        if (_capsuleCollider != null)
-        {
-            // Start the ray slightly above the bottom-most point of the collider (bounds.min.y)
-            return new Vector3(_capsuleCollider.bounds.center.x, _capsuleCollider.bounds.min.y + 0.1f, _capsuleCollider.bounds.center.z);
-        }
+        // Start the ray slightly above the bottom-most point of the collider
+        if (_capsuleCollider != null) return Feet() + Vector3.up * 0.1f;
         return transform.position + Vector3.up * 0.1f;
     }
+
 
     private float GetRayLength()
     {

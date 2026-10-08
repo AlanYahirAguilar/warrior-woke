@@ -88,7 +88,7 @@ public class PlayerIdleState : PlayerState
     /// </summary>
     public static PlayerState ResolveSpace(PlayerMovement player)
     {
-        bool slow = player.HorizontalSpeed < ParkourTimings.VaultClipSpeed * 0.8f;
+        bool slow = !PlayerVaultState.IsRunning(player.HorizontalSpeed);
         if (slow && PlayerMantleState.TryStart(player)) return player.MantleState;
         PlayerVaultState.Approach vault = PlayerVaultState.Evaluate(player);
         if (vault == PlayerVaultState.Approach.Ready) return player.VaultState;
@@ -117,7 +117,10 @@ public class PlayerIdleState : PlayerState
 /// Accelerates toward the target speed; the directional blend follows the real velocity under the
 /// body. Walking is oriented (strafe and backward, facing the camera); running turns toward the input
 /// except backward, where it runs backward facing the camera (PlayerMovement.IsOriented).
-/// Low edges are climbed and stepped down automatically (auto step). After a landing the speed recovers gradually.
+/// With motion matching (P29) the mocap moves the body and this velocity only covers its blend in and
+/// out; the gait speed and the orientation reach it through PlayerMovement's intention.
+/// Low edges are climbed by the controller and stepped down automatically. After a landing the speed recovers gradually.
+
 /// </summary>
 public class PlayerRunState : PlayerState
 {
@@ -227,7 +230,6 @@ public class PlayerRunState : PlayerState
             player.AccelerateHorizontal(player.MoveDirection * (speed * player.RecoverySpeedScale));
         else
             player.AccelerateAlongFacing(player.MoveDirection, speed * player.RecoverySpeedScale);
-        player.TryAutoStep();
         player.TryStepDown();
     }
 
@@ -313,7 +315,7 @@ public class PlayerSlideState : PlayerState
     private float _spaceQueuedAt = -10f;
 
     /// <summary>Seconds a Space press during the slide waits for an obstacle ahead to come within vault reach.</summary>
-    private const float SpaceBuffer = 0.5f;
+    private const float SpaceBuffer = 1.0f;
 
     public PlayerSlideState(PlayerMovement player, PlayerStateMachine stateMachine)
         : base(player, stateMachine) { }
@@ -337,12 +339,26 @@ public class PlayerSlideState : PlayerState
         if (speed < player.SlideMinEntrySpeed || !player.HasSlideSurface()) return false;
         // Enough room to get down and slide at least until the body reaches the ground
         float minLength = speed * player.SlideMinTime + 0.5f;
-        return player.SlideClearance(player.transform.forward, minLength) >= minLength;
+        return player.SlideClearance(Direction(player), minLength) >= minLength;
+    }
+
+    /// <summary>
+    /// Where the slide goes: where the player runs (the input), not where the mocap's hips point at
+    /// that instant (under motion matching the body and its velocity sway ±10° around the run, P29);
+    /// without input, along the velocity, or the facing.
+    /// </summary>
+    private static Vector3 Direction(PlayerMovement player)
+    {
+        if (player.HasMoveInput) return player.MoveDirection;
+        Vector3 v = player.Velocity;
+        v.y = 0f;
+        return v.sqrMagnitude > 0.25f ? v.normalized : player.transform.forward;
     }
 
     public override void Enter()
     {
         base.Enter();
+        player.FaceDirection(Direction(player)); // the facing is locked along the slide from here on
         player.ShrinkCollider(0.5f);
         EntrySpeed = Mathf.Min(player.HorizontalSpeed, player.SlideSpeed);
         _speed = EntrySpeed;
@@ -376,10 +392,12 @@ public class PlayerSlideState : PlayerState
         {
             float horizon = _speed * SpaceBuffer + ParkourStandard.VaultReach + 0.5f;
             bool obstacleComing = !_blocked && player.SlideClearance(player.transform.forward, horizon) < horizon;
-            PlayerState next = PlayerVaultState.TryStart(player) ? player.VaultState
+            PlayerState next = PlayerVaultState.Evaluate(player, EntrySpeed) == PlayerVaultState.Approach.Ready ? player.VaultState
                              : obstacleComing ? null
                              : PlayerIdleState.ResolveSpace(player);
             // (ResolveSpace is null while still approaching a vault's take-off point: keep sliding)
+            if (next == null && obstacleComing && !_blocked)
+                return; // the slide carries the body to the take-off point (PhysicsUpdate keeps it moving)
             if (next != null)
             {
                 EndReason = "encadena";
@@ -408,23 +426,27 @@ public class PlayerSlideState : PlayerState
         float friction = player.HasMoveInput ? player.SlideFriction : player.SlideBrakeFriction;
         float decel = friction;
 
-        // Space ahead: brake to stop short of an obstacle at slide height (never run into it)
+        // Space ahead: brake to stop short of an obstacle at slide height (never run into it). With
+        // Space queued the player wants to go over it: the momentum is kept for the vault, and only
+        // the obstacle itself stops the body
         float stopping = _speed * _speed / (2f * friction) + 0.5f;
         float free = player.SlideClearance(player.transform.forward, stopping + 0.5f);
         const float margin = 0.3f;
+        bool vaultQueued = Time.time - _spaceQueuedAt < SpaceBuffer;
         _spaceEndsSoon = free < stopping + 0.5f;
         if (_spaceEndsSoon)
         {
             float room = free - margin;
             if (room <= 0.05f) { _speed = 0f; _blocked = true; }
-            else decel = Mathf.Max(decel, _speed * _speed / (2f * room));
+            else if (!vaultQueued) decel = Mathf.Max(decel, _speed * _speed / (2f * room));
         }
 
-        float floor = ceiling && !_blocked ? player.SlideMinSpeed : 0f; // a ceiling forces the slide on
+        // A ceiling forces the slide on; so does a queued vault, until the body reaches its take-off
+        float floor = (ceiling || vaultQueued) && !_blocked ? player.SlideMinSpeed : 0f;
         _speed = Mathf.Max(floor, _speed - decel * Time.fixedDeltaTime);
 
         // The facing is locked during the slide: momentum, not steering
-        player.SetVelocity(player.transform.forward * _speed, player.Rb.linearVelocity.y);
+        player.SetVelocity(player.transform.forward * _speed, player.Velocity.y);
     }
 
     public override void Exit()

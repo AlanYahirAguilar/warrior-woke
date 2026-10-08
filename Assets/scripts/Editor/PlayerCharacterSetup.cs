@@ -7,7 +7,7 @@ namespace WarriorWoke.EditorTools
     /// One-click setup: takes Assets/Characters/Player/character.fbx, configures it as a
     /// Humanoid model (falling back to Generic if the FBX has no valid biped rig), swaps it
     /// in as Player.prefab's visual model (replacing the placeholder box), and fits the
-    /// CapsuleCollider/HeadPoint to the model's real dimensions so it stands correctly on
+    /// CharacterController/HeadPoint to the model's real dimensions so it stands correctly on
     /// the ground. Re-running it is safe (it replaces its own previous "Model" child).
     /// See docs/contexto.md and docs/arquitectura.md §5.9.
     /// </summary>
@@ -132,20 +132,20 @@ namespace WarriorWoke.EditorTools
             float height = bounds.size.y;
 
             // Re-center the model so its vertical middle sits at the root's local origin —
-            // matches the CapsuleCollider/CenterPoint convention already used by the rest
+            // matches the CharacterController/CenterPoint convention already used by the rest
             // of the player (root = torso center, not feet). This is what actually fixes
             // "el personaje flota o se hunde": the collider bottom now matches the model's
             // real feet, whatever the FBX's internal pivot happened to be.
             float centerOffsetY = bounds.center.y - root.position.y;
             modelInstance.transform.localPosition = new Vector3(0f, -centerOffsetY, 0f);
 
-            var capsule = prefabRoot.GetComponent<CapsuleCollider>();
-            if (capsule != null)
+            var body = prefabRoot.GetComponent<CharacterController>();
+            if (body != null)
             {
-                capsule.height = height;
-                capsule.center = Vector3.zero;
-                capsule.radius = Mathf.Clamp(Mathf.Max(bounds.extents.x, bounds.extents.z) * 0.6f, 0.25f, 0.6f);
-                Debug.Log($"[PlayerCharacterSetup] CapsuleCollider ajustado: height={capsule.height:F2}, radius={capsule.radius:F2}.");
+                body.height = height;
+                body.center = Vector3.zero;
+                body.radius = Mathf.Clamp(Mathf.Max(bounds.extents.x, bounds.extents.z) * 0.6f, 0.25f, 0.6f);
+                Debug.Log($"[PlayerCharacterSetup] CharacterController ajustado: height={body.height:F2}, radius={body.radius:F2}.");
             }
 
             Transform headPoint = root.Find("HeadPoint");

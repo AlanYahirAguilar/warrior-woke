@@ -12,7 +12,7 @@ namespace WarriorWoke.EditorTools
     ///     they are extracted) so URP's FBX material import links the Base/Normal/Emission maps.
     ///  2. Imports the Ch45 guard transitions as Humanoid clips that reuse character.fbx's Avatar,
     ///     and sets the root motion of every clip the player uses (P22): locomotion, air, landing and
-    ///     slide clips play in place (the Rigidbody moves the body); vault, ledge grab and climb keep
+    ///     slide clips play in place (the motor moves the body); vault, ledge grab and climb keep
     ///     their root motion (PlayerAnimator applies it and warps it with MatchTarget). Clip settings
     ///     are edited through SerializedObject: ModelImporter.clipAnimations fails to marshal in this
     ///     Unity version and dropped the clips' curves (LHandCurve), which are restored here.
@@ -202,7 +202,7 @@ namespace WarriorWoke.EditorTools
         {
             /// <summary>Everything baked into the pose (a loop that must not move at all).</summary>
             Baked,
-            /// <summary>Horizontal travel removed from the pose (plays in place); vertical motion stays in the pose. The Rigidbody moves the body.</summary>
+            /// <summary>Horizontal travel removed from the pose (plays in place); vertical motion stays in the pose. The motor moves the body.</summary>
             InPlace,
             /// <summary>Horizontal and vertical travel are root motion (horizontal based on the center of mass): in place unless PlayerAnimator applies it (parkour).</summary>
             RootMotion,
@@ -615,16 +615,17 @@ namespace WarriorWoke.EditorTools
 
                 animator.runtimeAnimatorController = controller;
                 animator.avatar = avatar;
-                animator.applyRootMotion = false; // PlayerAnimator turns it on only during parkour (P22)
+                animator.applyRootMotion = true; // the motor reads it (PlayerAnimatorIK handles OnAnimatorMove)
                 animator.cullingMode = AnimatorCullingMode.AlwaysAnimate;
+
+                CharacterController body = ConfigureMotor(root);
 
                 // Soles on the collider bottom: the model was centered on its renderer bounds, which
                 // include padding, and stood ~11 cm above the ground (measured on the idle pose).
-                var capsule = root.GetComponent<CapsuleCollider>();
-                model.localPosition = new Vector3(0f, -capsule.height * 0.5f - soleBelowRoot, 0f);
+                // (a CharacterController rests its skin width above the ground)
+                model.localPosition = new Vector3(0f, body.center.y - body.height * 0.5f - body.skinWidth - soleBelowRoot, 0f);
 
-                // Interpolated body: the camera and the model follow the 50 Hz physics without jitter (T7)
-                root.GetComponent<Rigidbody>().interpolation = RigidbodyInterpolation.Interpolate;
+                ConfigureMotionMatching(root, model);
 
                 if (model.GetComponent<PlayerAnimatorIK>() == null)
                     model.gameObject.AddComponent<PlayerAnimatorIK>();
@@ -641,6 +642,14 @@ namespace WarriorWoke.EditorTools
 
                 // Movement values of the human-scale tuning (P23) and the auto step layers
                 var movement = new SerializedObject(root.GetComponent<PlayerMovement>());
+                // Gaits of the motion matching mocap (P33, P34)
+                movement.FindProperty("BaseSpeed").floatValue = 3.4f;
+                movement.FindProperty("SprintMultiplier").floatValue = 1.41f;
+                movement.FindProperty("WalkSpeed").floatValue = 1.3f;
+                movement.FindProperty("BackpedalSpeed").floatValue = 2.0f;
+                movement.FindProperty("SlideMinSpeed").floatValue = 1.8f;
+                movement.FindProperty("SlideFriction").floatValue = 2.5f;
+                movement.FindProperty("RollMinSpeed").floatValue = 2f;
                 movement.FindProperty("SlideSpeed").floatValue = 7.5f;
                 movement.FindProperty("JumpSpeed").floatValue = 4.5f;
                 movement.FindProperty("Acceleration").floatValue = 10f;
@@ -659,13 +668,91 @@ namespace WarriorWoke.EditorTools
                 contact.ApplyModifiedPropertiesWithoutUndo();
 
                 PrefabUtility.SaveAsPrefabAsset(root, PrefabPath);
-                Debug.Log($"[PlayerAnimationSetup] Player.prefab: controller asignado, Model a y = {model.localPosition.y:F3} (suela {soleBelowRoot:F3} m bajo su raíz), Rigidbody interpolado, PlayerAnimator, PlayerAnimatorIK y PlayerContactIK presentes.");
+                Debug.Log($"[PlayerAnimationSetup] Player.prefab: controller asignado, Model a y = {model.localPosition.y:F3} (suela {soleBelowRoot:F3} m bajo su raíz), CharacterController, motion matching, PlayerAnimator, PlayerAnimatorIK y PlayerContactIK presentes.");
                 return true;
             }
             finally
             {
                 PrefabUtility.UnloadPrefabContents(root);
             }
+        }
+
+        /// <summary>
+        /// The body is a CharacterController (P30): it takes the size of the former CapsuleCollider
+        /// (or keeps its own), and the Rigidbody and the capsule go away.
+        /// </summary>
+        private static CharacterController ConfigureMotor(GameObject root)
+        {
+            var capsule = root.GetComponent<CapsuleCollider>();
+            var body = root.GetComponent<CharacterController>() ?? root.AddComponent<CharacterController>();
+            if (capsule != null)
+            {
+                body.height = capsule.height;
+                body.center = capsule.center;
+            }
+            // Human width: the former capsule (0.54 m, fitted to the renderer bounds with the arms) was
+            // wider than the shoulders, and a CharacterController is never lower than twice its radius,
+            // so the slide's body (half height) stayed 1.13 m tall and hit the 1.2 m bar
+            body.radius = BodyRadius;
+            body.slopeLimit = 45f;
+            body.stepOffset = ParkourStandard.StepMaxHeight;
+            body.skinWidth = BodySkinWidth;
+            body.minMoveDistance = 0f; // every move counts, also the slowest walk
+            var rigidbody = root.GetComponent<Rigidbody>();
+            if (rigidbody != null) Object.DestroyImmediate(rigidbody, true);
+            if (capsule != null) Object.DestroyImmediate(capsule, true);
+            return body;
+        }
+
+        /// <summary>Radius of the body (m): the shoulders of Ch45, not its arms.</summary>
+        private const float BodyRadius = 0.35f;
+
+        /// <summary>Skin of the CharacterController (m): about 10 % of its radius, as the Unity manual recommends.</summary>
+        private const float BodySkinWidth = 0.035f;
+
+        /// <summary>
+        /// Motion matching locomotion (P29): MxMAnimator and its trajectory generator on the model,
+        /// fed with the database of MxMLocomotionBuilder, and PlayerMxMLocomotion on the root. Same
+        /// settings MxMLocomotionProbe measured: root motion to the motor (PlayerAnimatorIK is the
+        /// applicator), Humanoid Foot IK, favour the current pose and test the next one.
+        /// </summary>
+        private static void ConfigureMotionMatching(GameObject root, Transform model)
+        {
+            var animData = AssetDatabase.LoadAssetAtPath<MxM.MxMAnimData>(MxMLocomotionBuilder.AnimDataPath);
+            if (animData == null)
+            {
+                Debug.LogWarning($"[PlayerAnimationSetup] No existe {MxMLocomotionBuilder.AnimDataPath}: corre 'Construir Datos de Motion Matching'. El jugador se mueve sin motion matching.");
+                return;
+            }
+
+            var trajectory = model.GetComponent<MxM.MxMTrajectoryGenerator>() ?? model.gameObject.AddComponent<MxM.MxMTrajectoryGenerator>();
+            var st = new SerializedObject(trajectory);
+            st.FindProperty("m_customInput").boolValue = true;
+            st.FindProperty("m_maxSpeed").floatValue = 3.4f;
+            st.FindProperty("m_camTransform").objectReferenceValue = null; // the intention arrives in world space
+            st.ApplyModifiedPropertiesWithoutUndo();
+
+            var mxm = model.GetComponent<MxM.MxMAnimator>() ?? model.gameObject.AddComponent<MxM.MxMAnimator>();
+            var sm = new SerializedObject(mxm);
+            SerializedProperty data = sm.FindProperty("m_animData");
+            data.arraySize = 1;
+            data.GetArrayElementAtIndex(0).objectReferenceValue = animData;
+            sm.FindProperty("m_animationRoot").objectReferenceValue = root.transform;
+            sm.FindProperty("m_rootMotionMode").enumValueIndex = (int)MxM.EMxMRootMotion.RootMotionApplicator;
+            sm.FindProperty("m_applyHumanoidFootIK").boolValue = true;
+            sm.FindProperty("m_favourCurrentPose").boolValue = true;
+            sm.FindProperty("m_nextPoseToleranceTest").boolValue = true;
+            sm.FindProperty("m_longErrorWarpType").enumValueIndex = (int)MxM.ELongitudinalErrorWarp.None;
+            sm.FindProperty("m_debugGoal").boolValue = false;
+            sm.FindProperty("m_debugChosenTrajectory").boolValue = false;
+            sm.FindProperty("m_debugCurrentPose").boolValue = false;
+            sm.ApplyModifiedPropertiesWithoutUndo();
+
+            var locomotion = root.GetComponent<PlayerMxMLocomotion>() ?? root.AddComponent<PlayerMxMLocomotion>();
+            var sl = new SerializedObject(locomotion);
+            sl.FindProperty("mxm").objectReferenceValue = mxm;
+            sl.FindProperty("trajectory").objectReferenceValue = trajectory;
+            sl.ApplyModifiedPropertiesWithoutUndo();
         }
 
         // ─── Validation ──────────────────────────────────────────────────────────────
@@ -709,16 +796,23 @@ namespace WarriorWoke.EditorTools
                 Transform model = prefab.transform.Find(ModelChildName);
                 Animator animator = model != null ? model.GetComponent<Animator>() : null;
                 ok &= Check(animator != null && animator.runtimeAnimatorController == controller, "Animator de 'Model' usa PlayerAnimator.controller");
-                ok &= Check(animator != null && !animator.applyRootMotion, "Apply Root Motion desactivado por defecto (solo se activa en parkour)");
+                ok &= Check(animator != null && animator.applyRootMotion, "Apply Root Motion activado (lo maneja PlayerAnimatorIK: el motor lo usa en la locomoción y en el parkour)");
                 ok &= Check(prefab.GetComponent<PlayerAnimator>() != null, "Player.prefab tiene PlayerAnimator");
                 ok &= Check(prefab.GetComponent<PlayerContactIK>() != null, "Player.prefab tiene PlayerContactIK");
                 ok &= Check(model != null && model.GetComponent<PlayerAnimatorIK>() != null, "'Model' tiene PlayerAnimatorIK");
-                ok &= Check(prefab.GetComponent<Rigidbody>().interpolation == RigidbodyInterpolation.Interpolate, "Rigidbody interpolado");
+                var body = prefab.GetComponent<CharacterController>();
+                ok &= Check(body != null && prefab.GetComponent<Rigidbody>() == null && prefab.GetComponent<CapsuleCollider>() == null,
+                            "El cuerpo es un CharacterController (sin Rigidbody ni CapsuleCollider, P30)");
+                var locomotion = prefab.GetComponent<PlayerMxMLocomotion>();
+                var mxm = model != null ? model.GetComponent<MxM.MxMAnimator>() : null;
+                ok &= Check(locomotion != null && mxm != null && mxm.AnimData != null && mxm.AnimData.Length == 1 && mxm.AnimData[0] != null,
+                            "Motion matching configurado (PlayerMxMLocomotion y MxMAnimator con su base de datos)");
 
-                if (model != null)
+                if (model != null && body != null)
                 {
-                    float halfHeight = prefab.GetComponent<CapsuleCollider>().height * 0.5f;
+                    float halfHeight = body.height * 0.5f - body.center.y + body.skinWidth;
                     float soleGap = model.localPosition.y + halfHeight + MeasureIdleSole(prefab);
+
                     ok &= Check(Mathf.Abs(soleGap) < 0.01f, $"De pie, las suelas tocan la base del collider (diferencia {soleGap * 100f:F1} cm)");
                 }
 

@@ -18,7 +18,7 @@ public class PlayerJumpState : PlayerState
     public override void Enter()
     {
         base.Enter();
-        Vector3 horizontal = new Vector3(player.Rb.linearVelocity.x, 0f, player.Rb.linearVelocity.z);
+        Vector3 horizontal = new Vector3(player.Velocity.x, 0f, player.Velocity.z);
         player.SetVelocity(horizontal, player.JumpSpeed);
     }
 
@@ -33,7 +33,7 @@ public class PlayerJumpState : PlayerState
         }
 
         // ── Apex reached: land if already on the ground, otherwise start falling ──
-        if (player.Rb.linearVelocity.y <= 0f)
+        if (player.Velocity.y <= 0f)
         {
             stateMachine.ChangeState(player.IsGrounded ? (PlayerState)player.IdleState : player.FallState);
         }
@@ -72,7 +72,7 @@ public class PlayerFallState : PlayerState
             return;
         }
 
-        if (player.IsGrounded && player.Rb.linearVelocity.y <= 0f)
+        if (player.IsGrounded && player.Velocity.y <= 0f)
         {
             player.RegisterLanding();
             stateMachine.ChangeState(player.HasMoveInput ? (PlayerState)player.RunState : player.IdleState);

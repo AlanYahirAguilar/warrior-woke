@@ -445,8 +445,13 @@ namespace MxM
         *********************************************************************************************/
         protected virtual void OnDisable()
         {
-            Pause();
-            ResetMotion();
+            // Warrior Woke patch: an object disabled before Start (e.g. a pooled character) has no
+            // playable graph yet, and Pause() threw ArgumentNullException
+            if (IsInitialized)
+            {
+                Pause();
+                ResetMotion();
+            }
 
             m_poseJobHandle.Complete();
             m_trajJobHandle.Complete();

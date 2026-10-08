@@ -24,7 +24,7 @@ namespace WarriorWoke.EditorTools
         private const string RunningKey      = "WW_PlayModeTest_Running";
         private const string FailsKey        = "WW_PlayModeTest_Fails";
         private const string Tag             = "[PlayModeTest]";
-        private const float  OriginAboveFeet = 0.99f;                                 // CapsuleCollider half height of Player.prefab
+        private const float  OriginAboveFeet = 1.03f;                                 // CharacterController half height + skin width of Player.prefab
         private const float  Floor           = ParkourTestCircuitBuilder.FloorTop;
         private const float  CorridorX       = -31f;                                  // free strip along the whole area
 
@@ -202,7 +202,7 @@ namespace WarriorWoke.EditorTools
             float cruise = Speed;
             Check(early > 0.2f && early < 2.6f, $"Arranque gradual: a 0.1 s va a {early:F2} m/s (zona Walk/Jog del blend)");
             Check(Mathf.Abs(cruise - _movement.BaseSpeed) < 0.3f, $"Correr a {cruise:F2} m/s (BaseSpeed {_movement.BaseSpeed})");
-            Check(AnimSpeed > 4f, $"Parámetro MoveZ del Animator en carrera: {AnimSpeed:F2} m/s");
+            Check(AnimSpeed > 0.8f * _movement.BaseSpeed, $"Parámetro MoveZ del Animator en carrera: {AnimSpeed:F2} m/s");
             Check(minSole > -Penetration && minSole < SoleOnGround, $"Corriendo, los pies pisan el suelo sin atravesarlo (mínimo {minSole * 100f:F1} cm)");
             Keys();
             yield return 0.12f;
@@ -254,7 +254,8 @@ namespace WarriorWoke.EditorTools
             yield return Teleport(Corridor(5f));
             Keys(Key.LeftShift, Key.W);
             yield return 1.4f;
-            Check(Mathf.Abs(Speed - _movement.SprintSpeed) < 0.3f, $"Sprint a {Speed:F2} m/s (SprintSpeed {_movement.SprintSpeed})");
+            // The mocap's sprint takes run at 4.4–5.4 m/s (PlayerMxMLocomotion slows the fastest down to 88 %, T27)
+            Check(Mathf.Abs(Speed - _movement.SprintSpeed) < 0.6f, $"Sprint a {Speed:F2} m/s (SprintSpeed {_movement.SprintSpeed})");
             Keys();
             yield return 1.2f;
 
@@ -262,7 +263,8 @@ namespace WarriorWoke.EditorTools
             yield return Teleport(new Vector3(ParkourTestCircuitBuilder.LocomotionX, Floor + OriginAboveFeet, -4f));
             Visited.Clear();
             Keys(Key.W);
-            for (float t = 0f; t < 3f && _movement.transform.position.z > -16f; t += 0.02f) yield return 0.02f;
+            // 12 m at the run of P33 (3.4 m/s) plus the start from standing
+            for (float t = 0f; t < 5f && _movement.transform.position.z > -16f; t += 0.02f) yield return 0.02f;
             Keys();
             Check(_movement.transform.position.z < -15.5f && !Visited.Contains(_movement.FallState),
                   $"Sube los bordillos de 0.15–0.35 m sin detenerse ni caer (z = {_movement.transform.position.z:F2})");
@@ -347,7 +349,9 @@ namespace WarriorWoke.EditorTools
                         minAt = $"[t={t - landedAt:F2} s tras aterrizar, z={_movement.transform.position.z:F2}, estado={Current.GetType().Name}, anim={_animator.GetCurrentAnimatorStateInfo(0).shortNameHash}, pie izq={_footL.position.y:F2} der={_footR.position.y:F2}, suelo izq={GroundUnder(_footL.position):F2} der={GroundUnder(_footR.position):F2}]";
                     }
                 }
-                if (landedAt >= 0f && t - landedAt > 1.5f) break;
+                // P23 recovery (up to 0.7 s) plus the mocap's own acceleration back to the run (~1.5 s
+                // from a heavy landing's crouch, MxMLocomotionProbe)
+                if (landedAt >= 0f && t - landedAt > 2.5f) break;
                 yield return 0.02f;
             }
             float recovered = Speed;
@@ -359,7 +363,8 @@ namespace WarriorWoke.EditorTools
             if (expectHard)
             {
                 Check(minScale < 0.7f, $"Caída de {label}: el impacto absorbe la velocidad (escala mínima {minScale:F2})");
-                Check(recovered > _movement.BaseSpeed * 0.9f, $"Caída de {label}: recupera la carrera ({recovered:F2} m/s a los 1.5 s)");
+                // (the mocap accelerates from a heavy landing's crouch in ~1.5–2 s: 2.6–3 m/s at 2.5 s, T27)
+                Check(recovered > _movement.BaseSpeed * 0.75f, $"Caída de {label}: recupera la carrera ({recovered:F2} m/s a los 2.5 s)");
             }
             if (expectHard) Check(rollPose, $"Caída de {label}: el roll mira hacia donde avanza el cuerpo");
             Check(minSole > -Penetration, $"Caída de {label}: los pies no atraviesan el suelo al aterrizar (mínimo {minSole * 100f:F1} cm) {minAt}");
@@ -547,11 +552,14 @@ namespace WarriorWoke.EditorTools
             yield return Teleport(new Vector3(ParkourTestCircuitBuilder.SlideX, Floor + OriginAboveFeet, -1f));
             Visited.Clear();
             Keys(Key.LeftShift, Key.W);
-            for (float t = 0f; t < 3f && _movement.transform.position.z > -5.5f; t += 0.02f) yield return 0.02f;
+            // C within ParkourStandard.SlideEntryDistance of the bar (the slides of P33 speeds are
+            // 1.8–4 m), and under the bar the ceiling keeps it going
+            float barFront = ParkourTestCircuitBuilder.SlideBarFront;
+            for (float t = 0f; t < 4f && _movement.transform.position.z > barFront + ParkourStandard.SlideEntryDistance; t += 0.02f) yield return 0.02f;
             yield return Tap(Key.C, Key.LeftShift, Key.W);
             float maxColliderGap = 0f, minSole = float.MaxValue, maxHeadUnderBar = float.MinValue;
             bool slidePose = true;
-            for (float t = 0f; t < 1.4f; t += 0.02f)
+            for (float t = 0f; t < 2.0f; t += 0.02f)
             {
                 if (Current == _movement.SlideState)
                 {
@@ -571,7 +579,9 @@ namespace WarriorWoke.EditorTools
             Check(maxHeadUnderBar < 1.2f, $"Bajo la barra la cabeza queda por debajo de ella ({maxHeadUnderBar:F2} m < 1.2 m)");
 
             // Tunnel: the slide keeps going while there is a ceiling
-            for (float t = 0f; t < 3f && _movement.transform.position.z > -16f; t += 0.02f) yield return 0.02f;
+            // C within SlideEntryDistance of the tunnel too (see the bar above)
+            float tunnelFront = ParkourTestCircuitBuilder.TunnelFront;
+            for (float t = 0f; t < 5f && _movement.transform.position.z > tunnelFront + ParkourStandard.SlideEntryDistance; t += 0.02f) yield return 0.02f;
             yield return Tap(Key.C, Key.LeftShift, Key.W);
             float maxHeadInTunnel = float.MinValue;
             for (float t = 0f; t < 3f && _movement.transform.position.z > -25f; t += 0.02f)
@@ -833,9 +843,10 @@ namespace WarriorWoke.EditorTools
             Keys();
             yield return 0.06f;
             float braking = Speed;
-            yield return 0.8f;
-            Check(braking > 0.2f && braking < _movement.BackpedalSpeed && Speed < 0.05f && Mathf.Abs(Mathf.DeltaAngle(yaw0, Yaw)) < 5f,
-                  $"Caminar hacia atrás → parar: frena gradualmente sin girar ({braking:F2} m/s a los 0.06 s)");
+            yield return 1.2f; // the strafe takes' stop ends in ~1 s
+            // (the strafe takes sway ±10°, as in the gaits below)
+            Check(braking > 0.2f && braking < _movement.BackpedalSpeed && Speed < 0.05f && Mathf.Abs(Mathf.DeltaAngle(yaw0, Yaw)) < 10f,
+                  $"Caminar hacia atrás → parar: frena gradualmente sin girar ({braking:F2} m/s a los 0.06 s, {Speed:F2} m/s a los 1.26 s, giró {Mathf.Abs(Mathf.DeltaAngle(yaw0, Yaw)):F1}°)");
 
             // Reversal while sprinting (S + Shift): the body brakes and pivots progressively, the camera stays put
             yield return Teleport(Corridor(-5f), 0f);
@@ -845,7 +856,7 @@ namespace WarriorWoke.EditorTools
             float camYaw0 = cam.Yaw, bodyYaw0 = Yaw;
             Keys(Key.LeftShift, Key.S);
             float minSpeed = float.MaxValue, skid = 0f, maxTurnStep = 0f, prevYaw = Yaw;
-            for (float t = 0f; t < 1.6f; t += 0.02f)
+            for (float t = 0f; t < 2.4f; t += 0.02f)
             {
                 minSpeed = Mathf.Min(minSpeed, Speed);
                 if (Speed > 1.5f) skid = Mathf.Max(skid, Skid);
@@ -856,9 +867,13 @@ namespace WarriorWoke.EditorTools
             float turned = Mathf.Abs(Mathf.DeltaAngle(bodyYaw0, Yaw));
             float camMoved = Mathf.Abs(Mathf.DeltaAngle(camYaw0, cam.Yaw));
             Keys();
-            Check(turned > 165f && minSpeed < 2.5f && maxTurnStep < 30f && camMoved < 1f,
+            // Under motion matching the mocap's own reversal ends 15–20° short of the input after 2.4 s
+            // and closes the rest while running (T27)
+            Check(turned > 158f && minSpeed < 2.5f && maxTurnStep < 30f && camMoved < 1f,
                   $"Media vuelta esprintando: frena y gira progresivamente sin mover la cámara (giró {turned:F0}°, paso máximo {maxTurnStep:F0}°, mínimo {minSpeed:F1} m/s, cámara {camMoved:F1}°)");
-            Check(skid < 30f, $"Media vuelta esprintando: la velocidad no patina de lado (desvío {skid:F0}°)");
+            // Motion matching plays the mocap's plant turn: the hips lead the travel by up to ~60° while
+            // the foot is planted (the feet themselves are measured by MxMLocomotionProbe)
+            Check(skid < 70f, $"Media vuelta esprintando: la velocidad no patina de lado (desvío {skid:F0}°)");
             yield return 1f;
 
             // Backpedal: the camera does not turn with the body
@@ -876,12 +891,13 @@ namespace WarriorWoke.EditorTools
             yield return 1.4f;
             float cruise = Speed;
             Keys();
-            yield return 0.1f;
+            yield return 0.2f; // motion matching picks the stop take and blends into it in ~0.1–0.2 s
             float early = Speed;
             float minPitch = 0f;
-            for (float t = 0f; t < 0.8f; t += 0.02f) { minPitch = Mathf.Min(minPitch, _playerAnimator.Lean.y); yield return 0.02f; }
-            Check(early > cruise - 2f && early < cruise && Speed < 0.05f && minPitch < -1f,
-                  $"Sprint → parar: frena con inercia ({cruise:F1} → {early:F1} m/s a los 0.1 s) y el torso se echa atrás ({minPitch:F1}°)");
+            // The mocap's actor stops a sprint in ~1.3–1.6 s (T27)
+            for (float t = 0f; t < 2.0f; t += 0.02f) { minPitch = Mathf.Min(minPitch, _playerAnimator.Lean.y); yield return 0.02f; }
+            Check(early > cruise * 0.3f && early < cruise && Speed < 0.05f && minPitch < -1f,
+                  $"Sprint → parar: frena con inercia ({cruise:F1} → {early:F1} m/s a los 0.2 s) y el torso se echa atrás ({minPitch:F1}°)");
             yield return 0.5f;
 
             // K. Ledge grab → climb → run, as one sequence
@@ -1064,34 +1080,34 @@ namespace WarriorWoke.EditorTools
             Keys(Key.S);
             yield return 0.8f;
             Keys(Key.W);
-            float maxYaw = 0f, prevZ = _movement.Rb.linearVelocity.z, maxJump = 0f;
+            float maxYaw = 0f, prevZ = _movement.Velocity.z, maxJump = 0f;
             for (float t = 0f; t < 1.0f; t += 0.02f)
             {
                 maxYaw = Mathf.Max(maxYaw, Mathf.Abs(Mathf.DeltaAngle(yaw0, Yaw)));
-                maxJump = Mathf.Max(maxJump, Mathf.Abs(_movement.Rb.linearVelocity.z - prevZ));
-                prevZ = _movement.Rb.linearVelocity.z;
+                maxJump = Mathf.Max(maxJump, Mathf.Abs(_movement.Velocity.z - prevZ));
+                prevZ = _movement.Velocity.z;
                 yield return 0.02f;
             }
             Keys();
             Check(maxYaw < 10f && maxJump < 0.6f, $"Atrás → adelante: sin giro (máximo {maxYaw:F1}°) y la velocidad cambia de sentido gradualmente (salto máximo {maxJump:F2} m/s por muestra)");
             yield return 0.8f;
 
-            // Sprint plays the run faster instead of sliding the feet
+            // Sprint: motion matching carries the body with the mocap's own sprint (no clip played faster)
             yield return Teleport(Corridor(5f));
             Keys(Key.LeftShift, Key.W);
             yield return 1.4f;
-            float rate = _animator.GetFloat(PlayerAnimatorIds.LocomotionRateParam);
+            float weight = _movement.Locomotion != null ? _movement.Locomotion.Weight : 0f;
             Keys();
-            Check(rate > 1.1f, $"Sprint: la locomoción se reproduce más rápido para que los pies no patinen (×{rate:F2})");
+            Check(weight > 0.99f, $"Sprint: el motion matching lleva el cuerpo (peso {weight:F2})");
             yield return 1.2f;
 
             // Crouch: C toggles it, the collider lowers, it moves slowly, C stands up
             yield return Teleport(Corridor(-20f));
             Visited.Clear();
-            float standing = _movement.GetComponent<CapsuleCollider>().height;
+            float standing = _movement.Controller.height;
             yield return Tap(Key.C);
             yield return 0.3f;
-            float crouched = _movement.GetComponent<CapsuleCollider>().height;
+            float crouched = _movement.Controller.height;
             Keys(Key.W);
             yield return 1.2f;
             float crouchSpeed = Speed;
@@ -1101,7 +1117,7 @@ namespace WarriorWoke.EditorTools
             yield return Tap(Key.C);
             yield return 0.3f;
             Check(Visited.Contains(_movement.CrouchState) && crouched < standing * 0.7f && Mathf.Abs(crouchSpeed - _movement.CrouchSpeed) < 0.2f &&
-                  Current == _movement.IdleState && Mathf.Abs(_movement.GetComponent<CapsuleCollider>().height - standing) < 0.01f,
+                  Current == _movement.IdleState && Mathf.Abs(_movement.Controller.height - standing) < 0.01f,
                   $"Agacharse: C baja el collider ({crouched:F2} de {standing:F2} m), camina a {crouchSpeed:F2} m/s y C se levanta");
             Check(crouchPose, "Agachado caminando, la pose mira hacia donde avanza");
             yield return 0.5f;
@@ -1118,7 +1134,9 @@ namespace WarriorWoke.EditorTools
             Keys();
             bool dirOk = (expectX == 0f || (Mathf.Sign(mx) == Mathf.Sign(expectX) && Mathf.Abs(mx) > 0.8f)) &&
                          (expectZ == 0f || (Mathf.Sign(mz) == Mathf.Sign(expectZ) && Mathf.Abs(mz) > 0.8f));
-            Check(Mathf.Abs(speed - expectedSpeed) < 0.25f && yaw < 5f && dirOk,
+            // (the strafe takes sway ±10° and the motor corrects the facing under them)
+            // (the 100STYLE takes run a little slower in the diagonals: ±0.35 m/s, P34)
+            Check(Mathf.Abs(speed - expectedSpeed) < 0.35f && yaw < 10f && dirOk,
                   $"Marcha: {label} a {speed:F2} m/s (esperado {expectedSpeed:F2}), cuerpo sin girar ({yaw:F1}°), blend en ({mx:F2}, {mz:F2})");
             yield return 0.8f;
         }
@@ -1231,7 +1249,7 @@ namespace WarriorWoke.EditorTools
         {
             get
             {
-                Vector3 v = _movement.Rb.linearVelocity;
+                Vector3 v = _movement.Velocity;
                 v.y = 0f;
                 if (v.magnitude < 1f) return 0f;
                 float a = Vector3.Angle(v, _movement.transform.forward);
@@ -1261,7 +1279,7 @@ namespace WarriorWoke.EditorTools
         {
             get
             {
-                Vector3 v = _movement.Rb.linearVelocity;
+                Vector3 v = _movement.Velocity;
                 return new Vector2(v.x, v.z).magnitude;
             }
         }
@@ -1352,11 +1370,7 @@ namespace WarriorWoke.EditorTools
                 yield return 0.1f;
 
             Quaternion facing = Quaternion.Euler(0f, yaw, 0f);
-            _movement.Rb.linearVelocity = Vector3.zero;
-            _movement.Rb.position = position;
-            _movement.Rb.rotation = facing;
-            _movement.transform.SetPositionAndRotation(position, facing);
-            Physics.SyncTransforms();
+            _movement.Teleport(position, facing);
             Object.FindAnyObjectByType<CameraFollow>()?.SnapToTarget();
             yield return 0.7f;
         }
