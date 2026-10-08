@@ -192,14 +192,16 @@ namespace WarriorWoke.EditorTools
                 importer.importLights       = false;
 
                 // Root motion is kept in the clip (motion matching reads the trajectory from it). Only
-                // the clip setter is used (T22).
+                // the clip setter is used (T22); these takes have no curves to lose.
                 ModelImporterClipAnimation[] takes = importer.defaultClipAnimations;
                 if (takes.Length == 0) { Debug.LogWarning($"[MocapProbe] {path} no tiene tomas."); continue; }
                 ModelImporterClipAnimation take = takes[0];
                 take.name                    = name;
                 take.loopTime                = false;
                 take.lockRootRotation        = false;
-                take.lockRootHeightY         = false;
+                // Ground locomotion of the motion matching database: height baked into the pose
+                // (MxMLocomotionBuilder.IsGroundLocomotion); parkour takes keep their vertical root motion
+                take.lockRootHeightY         = MxMLocomotionBuilder.IsGroundLocomotion(path);
                 take.lockRootPositionXZ      = false;
                 take.keepOriginalOrientation = false;
                 take.keepOriginalPositionY   = false;

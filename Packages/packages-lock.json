@@ -1,5 +1,15 @@
 {
   "dependencies": {
+    "com.frost-blade-studios.motion-matching": {
+      "version": "file:com.frost-blade-studios.motion-matching",
+      "depth": 0,
+      "source": "embedded",
+      "dependencies": {
+        "com.unity.mathematics": "1.3.1",
+        "com.unity.collections": "2.4.2",
+        "com.unity.burst": "1.8.29"
+      }
+    },
     "com.unity.2d.sprite": {
       "version": "1.0.0",
       "depth": 1,

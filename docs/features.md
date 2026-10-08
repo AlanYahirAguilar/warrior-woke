@@ -14,6 +14,9 @@
 > calidad del movimiento (momentum, slide, transiciones), las marchas, la orientación de la pose, el
 > mantle, el drop y el salto desde la cornisa (F32). Reconstrucción del movimiento (P28): §5. Lo que la prueba no mide (la calidad visual de las poses y la sensación al jugar) falta
 > revisarlo jugando.
+>
+> 2026-10-07: la base de **motion matching** (MxM) existe y tiene su propia prueba en Play Mode
+> (`MxMLocomotionProbe`, 50/57; detalle en §5). El jugador todavía no la usa.
 
 ---
 
@@ -813,10 +816,25 @@ problema, la causa, la solución y el estado (formato del GDD §29 para bugs).
 | 2026-10-05 | (ver `git log`) | Axel | Segunda auditoría de locomoción, parkour, animación y combate; decisiones P29–P32 (motion matching con MxM, `CharacterController`, Animation Rigging, repo privado). Fase 0: mocap del Kinematica Demo (22 tomas, Unity Companion License) importado como Humanoid y probado sobre Ch45 con la sonda de retarget (hoy `MocapRetargetProbe`; detalle abajo). El jugador todavía no lo usa. |
 | 2026-10-05 | (ver `git log`) | Axel | Retroceso y strafe de 100STYLE (P34): 8 tomas Neutral (CC BY 4.0) convertidas de BVH a FBX con Blender, importadas como Humanoid con mapeo explícito y probadas sobre Ch45; la sonda pasa a `MocapRetargetProbe` y prueba las dos fuentes. Retarget limpio, pero Neutral solo cubre velocidades bajas (detalle abajo). El jugador todavía no lo usa. |
 | 2026-10-05 | (ver `git log`) | Axel | Retroceso y strafe rápidos: búsqueda de otra fuente de mocap (ninguna libre y compatible pasa de ~2 m/s); se agregan las 8 tomas **Rushed** de 100STYLE (atrás ~2.0, de lado ~2.2 m/s) y el convertidor acepta cualquier estilo. Retarget limpio con Foot IK. |
+| 2026-10-07 | (ver `git log`) | Axel | Motion matching, fase 1 (P29): MxM 2.3.3 embebido con un parche para Unity 6.6 (T26), base de datos horneada desde código (`MxMLocomotionBuilder`: 24 118 poses de Kinematica y 100STYLE, el estilo de strafe separado por tag) y prueba en Play Mode (`MxMLocomotionProbe`). 50/57: velocidades, respuesta, giros de 180°, retroceso y patinaje cumplen; quedan suelas hundidas en giros de 90° y strafe, frenado lento y strafe derecho lento (T27). La base va por Git LFS. El jugador todavía no la usa (detalle abajo). |
 | 2026-10-02 | (sin commit) | Axel | Reconstrucción del movimiento (P28), fases 2–10: animaciones CC0 de Quaternius, herramienta de medición de clips, locomoción direccional con marchas (caminar, strafe, retroceso a 3.5 m/s, agacharse), slide con bucle real, mantle, drop y salto de cornisa, roll de aterrizaje, laboratorio S11 y limpieza (detalle abajo). 341/341 en Play Mode. |
 | 2026-10-02 | (sin commit) | Axel | Reconstrucción del movimiento (P28): auditoría, investigación de repositorios y licencias, arquitectura D aprobada; fase 1: cámara orbital con ratón (P5) y giro limitado por la aceleración lateral (media vuelta que frena y pivota). 304/304 en Play Mode. |
 | 2026-10-02 | (sin commit) | Axel | Calidad de movimiento, segunda fase (P27): momentum en la locomoción, inclinación del torso, slide contextual, aproximación del vault, transiciones sin cambios de velocidad, T24 resuelto y laboratorio de fluidez (detalle abajo). 301/301 en Play Mode, dos corridas. |
 | 2026-10-02 | (sin commit) | Axel | Parkour Obstacle Standard: estándar centralizado, 10 prefabs de obstáculos con validación y gizmos, Parkour Test Area reconstruida con ellos y pruebas de consistencia por posición (detalle abajo). 212/212 en Play Mode. |
+
+### Detalle — motion matching, fase 1 (2026-10-07)
+
+| Problema | Causa | Solución | Estado |
+|---|---|---|---|
+| MxM no compilaba en Unity 6.6 (`error CS0619` en `MxMAssetHandler.cs`) | Desde Unity 6.3 el cast de `int` a `EntityId` es un error | Paquete **embebido** en `Packages/` (se quitó la URL de git del manifest) con la firma `OpenAsset(EntityId, int)` bajo `UNITY_6000_3_OR_NEWER` (T26) | ✅ |
+| La base de MxM se arma a mano en un inspector grande | Flujo de MxM | `MxMLocomotionBuilder` recrea el `MxMPreProcessData` desde listas en código y corre el pre-proceso; el `MxMAnimData` conserva su GUID | ✅ |
+| El `MxMAnimator` de la prueba arrancaba sin datos | `EditorSceneManager.NewScene` descarga los assets sin uso y mataba la referencia cargada antes | Los datos se cargan después de crear la escena | ✅ |
+| Patinaje y "saltos de pose" enormes en la primera medición | El batch corre a ~1000 fps: a 1 ms por frame un milímetro de temblor se lee como 1 m/s | Tiempo de juego fijo a 60 fps (`Time.captureFramerate`) y patinaje con la misma métrica que `MocapRetargetProbe` (comparable con el mocap original) | ✅ |
+| Al correr hacia adelante MxM saltaba entre Kinematica y 100STYLE | Dos estilos de actor compitiendo en la misma búsqueda | Las tomas de 100STYLE llevan el tag `Strafe`; MxM solo busca poses con los tags requeridos exactos, así que el modo libre usa Kinematica y el strafe usa 100STYLE | ✅ |
+| Pie plantado patinando al correr (0.59 m/s; el mocap solo: 0.08–0.16) | Barrido diagnóstico: la altura de la raíz venía en el root motion y el motor sostiene el cuerpo sobre el suelo, así que el cuerpo bajaba en cada apoyo; el warping angular sumaba otra parte | Las tomas de la base se importan con la altura **horneada en la pose** (basada en los pies): 0.12 m/s. El warping angular se mantiene (sin él se pierde precisión de dirección) | ✅ |
+| Suelas bajo el suelo en el giro de 90° (−5.5 cm) y en strafe (−5 a −11 cm) | Strafe: desfase constante de las tomas de lado de 100STYLE (`Neutral_SR`); giro: la mezcla de tomas durante el giro | Apoyo de pies con Animation Rigging (P31, fase 3) | 📋 T27 |
+| Frenado de 1.3–1.4 s (se pidió ≤ 1.2 s) | Así frena el actor en `Start_Stop_2`; una trayectoria más reactiva (25/15) no lo mejoró | Warping longitudinal en la fase del motor | 📋 T27 |
+| Strafe a la derecha a 1.36 m/s | Las tomas de lado de 100STYLE promedian ~1.5 m/s y no hay espejo | Generar espejos o aceptar el tope (P34) | 📋 T27 |
 
 ### Detalle — retroceso y strafe de 100STYLE (2026-10-05)
 

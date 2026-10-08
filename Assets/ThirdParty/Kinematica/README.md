@@ -12,16 +12,17 @@
   paso, trote y sprint, vaults, subidas a cornisa, escaladas y wall runs. **No** trae caminar hacia
   atrás, strafe ni combate.
 
-## Estado: 🔧 prueba de retarget (decisión del 2026-10-05: motion matching con MxM)
+## Estado: 🔧 base de motion matching (decisión del 2026-10-05: motion matching con MxM)
 
-Por ahora solo hay un subconjunto de 22 tomas para comprobar que el mocap se retargetea bien sobre
-Ch45. Todavía **no** las usa el jugador. La herramienta es **Tools → Warrior Woke → Probar Retarget del
+Un subconjunto de 22 tomas, retargeteado a Ch45. Desde el 2026-10-07, 12 tomas de locomoción y `Idle`
+forman la base de MxM (`Assets/Data/MxM`, ver `docs/arquitectura.md` §7.2). Todavía **no** las usa el
+jugador. La herramienta es **Tools → Warrior Woke → Probar Retarget del
 Mocap** (`Assets/scripts/Editor/MocapRetargetProbe.cs`), que también prueba `ThirdParty/100STYLE`.
 
 | Carpeta | Contenido | Importación |
 |---|---|---|
 | `Character/Unit.FBX` | Modelo del actor del mocap | Humanoid con su propio Avatar (mapeo automático; sin `Eye_L/R` ni `Jaw`, que los clips no tienen) |
-| `Animations/*.fbx` | 22 tomas (abajo) | Humanoid copiando el Avatar de `Unit`, con root motion completo (sin bloquear rotación, altura ni posición) |
+| `Animations/*.fbx` | 22 tomas (abajo) | Humanoid copiando el Avatar de `Unit`, con root motion completo (sin bloquear rotación ni posición). Las tomas de locomoción de la base de motion matching llevan la altura horneada en la pose (basada en los pies); las de parkour conservan la altura en la raíz (`MxMLocomotionBuilder.IsGroundLocomotion`) |
 
 Tomas copiadas: `Idle`, `Acceleration`, `Start_Stop_1`, `Start_Stop_2`, `Stop_to_Face_1`,
 `Plants_Turns_Regular_1`, `Plants_Turns_Fancy_1`, `Circles_Walk_1`, `Circles_Jog_1`,

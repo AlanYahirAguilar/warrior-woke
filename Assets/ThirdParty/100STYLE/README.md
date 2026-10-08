@@ -45,7 +45,8 @@ usan el mismo esqueleto, así que todas las tomas copian el Avatar de `Neutral_S
 `Neutral_Skeleton.fbx` se importa como Humanoid con **mapeo explícito**, porque los nombres de
 100STYLE engañan al mapeo automático: `Collar` es el hombro, `Shoulder` el brazo y `Hip` el muslo.
 `Chest` = Spine, `Chest2` = Chest, `Chest4` = UpperChest (`Chest3` queda como hueso intermedio). Sin
-dedos. Las tomas se importan como Humanoid copiando ese Avatar, con root motion completo. Lo hace
+dedos. Las tomas se importan como Humanoid copiando ese Avatar, con root motion completo; las que
+entran a la base de motion matching llevan la altura horneada en la pose (basada en los pies). Lo hace
 **Tools → Warrior Woke → Probar Retarget del Mocap** (`Assets/scripts/Editor/MocapRetargetProbe.cs`).
 
 ## Velocidades medidas (punta, m/s)
@@ -58,6 +59,7 @@ dedos. Las tomas se importan como Humanoid copiando ese Avatar, con root motion 
 Con Foot IK, Ch45 patina lo mismo que el esqueleto original (mediana 0.03–0.15 m/s) en los dos
 estilos.
 
-## Estado: 🔧 prueba de retarget
+## Estado: 🔧 base de motion matching
 
-Todavía **no** las usa el jugador; entran a motion matching (MxM) junto con Kinematica.
+Desde el 2026-10-07, `BW`, `BR`, `SW`, `SR` y `TR1` de los dos estilos forman la parte de strafe de la base
+de MxM (tag `Strafe`, `docs/arquitectura.md` §7.2). Todavía **no** las usa el jugador.

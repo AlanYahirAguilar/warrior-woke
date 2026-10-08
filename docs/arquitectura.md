@@ -10,7 +10,8 @@
 > movimiento y **reconstrucción del movimiento y del parkour (P28)**: cámara orbital, locomoción
 > direccional con marchas, agacharse, slide con clips nuevos, mantle, drop y salto de cornisa, roll
 > de aterrizaje; ver el historial en `features.md` §5). Lo que todavía no existe
-> aparece marcado como 📋 Planeado o ⬜ Pendiente.
+> aparece marcado como 📋 Planeado o ⬜ Pendiente. Desde el 2026-10-07 también existe la base de datos
+> de **motion matching** (MxM) con su prueba en Play Mode (§7.2); el jugador todavía no la usa.
 
 ---
 
@@ -25,12 +26,13 @@
 | Física | 3D (PhysX). Fixed Timestep **0.02 s** (50 Hz). Gravedad −9.81 | `TimeManager.asset`, `DynamicsManager.asset` |
 | Navegación | `com.unity.ai.navigation` 2.0.14 instalado, **sin uso todavía** | manifest |
 | Otros paquetes relevantes | ProBuilder 6.1.2, Timeline 6.6.0, uGUI 2.6.0, Test Framework 1.8.0, Profile Analyzer 1.4.0 | manifest |
+| Motion matching | **MxM 2.3.3** (fork de Frost-Blade, MIT, commit `b84345b`) **embebido** en `Packages/com.frost-blade-studios.motion-matching` con un parche para Unity 6.6 (T26). Trae Burst, Collections y Mathematics. 🔧 Solo lo usan las herramientas de §7.2 | `Packages/`, `packages-lock.json` |
 | Paquetes instalados sin uso | Visual Scripting, AI Assistant (preview) / Inference, Collab Proxy, Device Simulator Devices, `com.unity.pipeline` 0.6.0-exp.1 (experimental), uGUI, Adaptive Performance settings | manifest / `Assets/` |
 | Serialización | Force Text | `EditorSettings.asset` |
 | Color space | Linear (`m_ActiveColorSpace: 1`) | `ProjectSettings.asset` |
 | Lenguaje | C# puro, sin ECS/DOTS ni Visual Scripting | — |
 | Namespaces | Solo las herramientas de Editor (`WarriorWoke.EditorTools`). El runtime está en el namespace global | — |
-| Assembly definitions | Ninguna (todo compila en `Assembly-CSharp`) | — |
+| Assembly definitions | Ninguna propia (todo compila en `Assembly-CSharp`). MxM trae las suyas (`MxM.Runtime`, `MxM.Editor`, `UTIL.*`); `MxM.Runtime` se referencia sola | — |
 | Tests | Sin assembly de Test Framework. Pruebas propias de Editor: validación en batch y recorrido en Play Mode real (§5.9) | `scripts/Editor/` |
 
 ### Capas y tags (`ProjectSettings/TagManager.asset`)
@@ -69,7 +71,10 @@ Assets/
                               ParkourObstacle (componente de los obstáculos estándar)
     Editor/                   SceneAutoLoader, PlayerCharacterSetup, PlayerAnimationSetup,
                               ClipMeasurement, ParkourObstaclePrefabs, ParkourTestCircuitBuilder,
-                              ParkourPlayModeTest, MocapRetargetProbe (no van al build)
+                              ParkourPlayModeTest, MocapRetargetProbe, MxMLocomotionBuilder,
+                              MxMLocomotionProbe (no van al build)
+  Data/MxM/                   🔧 MxM_Locomotion_PreProcess.asset (generado) + MxM_Locomotion_AnimData.asset
+                              (base horneada, ~30 MB, Git LFS; §7.2)
   Prefabs/                    Player, Enemy, GameManager, Spawner, Main Camera,
                               Directional Light, Particle System
     Parkour/                  ParkourObstacle_{Step, LowVault, MediumVault, HighVault, Barrier,
@@ -100,6 +105,8 @@ Assets/
   LowPolyCity/                asset pack de entorno (placeholder) + escena demo
   material/                   enemy, floors (.mat), ZeroFriction.physicMaterial
   ProBuilder Data/, URPDefaultResources/, Adaptive Performance/
+Packages/com.frost-blade-studios.motion-matching/
+                              MxM embebido (MIT) con el parche de Unity 6.6 (T26)
 docs/                         contexto.md, arquitectura.md, features.md
 GDD_Awakened_Warrior.pdf      GDD final
 ```
@@ -519,7 +526,21 @@ zoom por contexto y stick de gamepad.
   y hojas de poses `Logs/MocapProbe/<fuente>/<toma>.png` (arriba el actor, abajo Ch45). Fuera de Play Mode combina dos
   muestreos: `SampleAnimationClip` (con el desplazamiento de la raíz, sin Foot IK) y un
   `PlayableGraph` muestreado con `AnimationMode.SamplePlayableGraph` (con Foot IK, en el sitio); un
-  `PlayableGraph` evaluado a mano en el Editor deja el cuerpo en la pose de bind.
+  `PlayableGraph` evaluado a mano en el Editor deja el cuerpo en la pose de bind. Las tomas de
+  locomoción de la base de MxM se importan con la altura de la raíz horneada en la pose (§7.2); las de
+  parkour conservan todo el root motion.
+- `MxMLocomotionBuilder` (🔧, menú **Construir Datos de Motion Matching**; batch: `-executeMethod
+  WarriorWoke.EditorTools.MxMLocomotionBuilder.RunBatch`): arma desde código el
+  `MxMPreProcessData` (lo borra y lo recrea, así que nunca depende de ediciones a mano en el inspector)
+  y corre el pre-proceso de MxM hacia `MxMAnimData` (conserva su GUID y su calibración). Ver §7.2.
+- `MxMLocomotionProbe` (🔧, menú **Probar Motion Matching**; batch sin `-quit`: `-executeMethod
+  WarriorWoke.EditorTools.MxMLocomotionProbe.RunBatch`; barrido diagnóstico: `RunSweepBatch`): crea una
+  escena vacía con Ch45, `MxMAnimator` y `MxMTrajectoryGenerator`, entra a Play Mode con el tiempo fijo a
+  60 fps (`Time.captureFramerate`; en batch el Editor corre a ~1000 fps y el temblor de un milímetro se
+  leería como 1 m/s) y recorre idle, caminar, correr, sprint, giros de 90° y 180°, frenadas, retroceso y
+  strafe con input simulado. Mide velocidad sostenida, tiempo de respuesta, patinaje (la misma métrica
+  que `MocapRetargetProbe`, para compararlo con el mocap original), suelas, orientación en strafe,
+  saltos de pose y qué tomas elige MxM. Escribe `Logs/MxMProbe/metrics.csv`.
 
 ### 5.10 Animación y contacto físico — 🟡 Parcial (funciona, con clips provisionales)
 
@@ -959,6 +980,54 @@ una mano, el agarre desde parado) y la física hace el pivot y la frenada.
 | **Flujo de juego** | Escenas `MainMenu`, `World1_Level1`, `World1_Level2`, `World2_Level3`, cargadas con `SceneManager.LoadSceneAsync`. Pausa con `Time.timeScale = 0` y un panel de UI (uGUI). | GDD §17. |
 | **Audio** | `AudioManager` con fuentes de audio pooleadas para SFX, que se suscribe a los eventos de combate. | GDD §23, D6, D7. |
 
+### 7.2 Motion matching de la locomoción (P29) — 🔧 En desarrollo
+
+Fases de la segunda reconstrucción (P29–P35). El jugador **todavía usa el sistema anterior**; nada de
+esto está conectado al Player.prefab.
+
+| Fase | Estado | Qué quedó |
+|---|---|---|
+| 0 Mocap | ✅ 2026-10-05 | 22 tomas de Kinematica y 16 de 100STYLE retargeteadas a Ch45 (`MocapRetargetProbe`) |
+| 1 Datos de MxM + prueba | ✅ 2026-10-07 | MxM embebido y parcheado, base horneada, prueba en Play Mode (abajo) |
+| 2 Motor `CharacterController` (P30) | 📋 | Locomoción MxM en el Player real, intención filtrada, velocidades de P33 |
+| 3 Animation Rigging (P31) | 📋 | Apoyo de pies sobre el suelo, bloqueo del pie plantado, mirada |
+| 4 Warper y acciones | 📋 | Parkour y combate como acciones con clip, warper por segmentos |
+
+**Base de datos** (`MxMLocomotionBuilder`, `Assets/Data/MxM/`):
+
+| Parámetro | Valor | Motivo |
+|---|---|---|
+| Modelo objetivo | `Characters/Player/character.fbx` (Ch45) | El Animator de su raíz tiene el Avatar Humanoid |
+| Tomas sin tag (modo libre) | Kinematica: `Acceleration`, `Start_Stop_1/2`, `Stop_to_Face_1`, `Plants_Turns_Regular_1`, `Circles_{Walk,Jog,Sprint}_1`, `Circles_Sprint_2`, `Snakes_{Walk,Jog,Sprint}` | Locomoción hacia adelante, arranques, frenadas y giros de un mismo actor. `Plants_Turns_Fancy_1` (giros de exhibición) y las tomas de parkour quedan fuera |
+| Tomas con tag `Strafe` (`ETags.Tag1`) | 100STYLE Neutral y Rushed: `BW`, `BR`, `SW`, `SR`, `TR1` | MxM solo busca poses cuyo tag **es igual** a los tags requeridos: sin tag, MxM mezclaba los dos estilos al correr hacia adelante. El modo strafe requiere el tag. Las tomas FW/FR/ID de 100STYLE no entran (Kinematica ya las cubre) |
+| Idle | Kinematica `Idle` (idle set) | — |
+| Poses | 24 118 de 19.9 min de mocap, cada 0.05 s | El valor por defecto de MxM (0.1 s) da la mitad de opciones |
+| Trayectoria | −0.5, −0.25, 0.2, 0.4, 0.7, 1.0 s | Dos puntos de historia y cuatro de predicción |
+| Articulaciones de la pose | pie izquierdo, pie derecho, cadera | — |
+| Importación | Las tomas de la base llevan la **altura de la raíz horneada en la pose** (Root Transform Position Y: Bake Into Pose, basada en los pies) | Medido: con la altura en la raíz, el motor (que sostiene el cuerpo sobre el suelo) hunde los pies en el apoyo y el pie plantado patina (0.59 m/s al correr; horneada: 0.09–0.12). Las tomas de parkour conservan la altura en la raíz |
+
+**Configuración del `MxMAnimator`** (la que usa la prueba y usará el jugador): root motion `On`, Foot IK
+Humanoid activado (obligatorio para este mocap sobre Ch45), favorecer la pose actual y prueba de
+tolerancia de la siguiente pose (menos cambios de toma), warping angular por defecto (45 °/s).
+Trayectoria por defecto (sesgo de posición 15 y de dirección 10): 25/15 no mejoró de forma consistente.
+La transición inercial de MxM (experimental) no se puede cambiar en runtime.
+
+**Resultado de `MxMLocomotionProbe`** (2026-10-07, 60 fps, determinista: 50/57 comprobaciones). El
+patinaje se compara con el del mismo mocap reproducido solo sobre Ch45 (misma métrica):
+
+| Escenario | Velocidad | Respuesta | Patinaje (mediana) | Suelas (p5) | Estado |
+|---|---|---|---|---|---|
+| Caminar 1.3 | 1.27 | 0.93 s | 0.05 (mocap 0.04–0.06) | −0.6 cm | ✅ |
+| Correr 3.4 | 3.45 | 1.07 s | 0.12 (mocap 0.08–0.16) | **−2.5 cm** | ⚠️ suelas |
+| Sprint 4.8 | 4.36 | 0.97 s | 0.26 (mocap 0.19) | +0.5 cm | ✅ |
+| Giro 90° corriendo | 3.45 | 0.67 s | 0.14 | **−5.5 cm** | ⚠️ suelas |
+| Giro 180° corriendo / en sprint | 3.50 / 4.53 | 0.92 / 0.95 s | 0.20 / 0.23 | 0 cm | ✅ |
+| Frenar corriendo / en sprint | — | **1.40 / 1.33 s** (1.67 m) | 0.03 | 0 cm | ⚠️ pedido ≤ 1.2 s |
+| Retroceso 2.0 (strafe) | 2.08 | — | 0.16 | −1.4 cm | ✅ orientación ±10° |
+| Strafe derecha / izquierda | **1.36** / 1.56 | — | 0.12 / 0.13 | **−4.9 / −11.3 cm** | ⚠️ velocidad y suelas |
+
+Sin saltos de pose en ningún escenario. Lo pendiente queda como T27 y se ataca en las fases 2–3.
+
 ## 8. Decisiones de alcance
 
 | # | Tema | Decisión | Fecha | Estado |
@@ -991,12 +1060,12 @@ una mano, el agarre desde parado) y la física hace el pivot y la frenada.
 | P27 | Calidad de movimiento (segunda fase) | Sin cambiar la arquitectura ni agregar dependencias (P26): velocidad que sigue la orientación y giro limitado por la rapidez, inclinación procedural del torso, slide contextual con pose mantenida (C con momentum, ya no solo esprintando), aproximación del vault al punto de despegue, reproducción del vault a la velocidad de carrera del clip y salidas del parkour con la velocidad del root motion. Sección de laboratorio S10 en el área. §5.15–§5.16. | 2026-10-02 | ✅ Implementada |
 | P28 | Reconstrucción del movimiento y del parkour | Auditoría del 2026-10-02 (§7.1): arquitectura **D, híbrido propio** (un único motor de locomoción + percepción + selector de acciones + warping + IK; código MIT de Traverser adaptable con atribución). Clips nuevos de **Mixamo** que el equipo descarga (lista en §7.1). Alcance ampliado sobre el GDD §28: caminar/agacharse, strafe y retroceso rápido, mantle y step over, drop y salto de cornisa. Cámara orbital primero. Se ejecuta por fases con revisión jugando en cada una. | 2026-10-02 | ✅ Fases 1–10 hechas (§7.1). Clips nuevos de Quaternius (CC0, descargables) en lugar de esperar a Mixamo; los de Mixamo quedan para lo que Quaternius gratuito no cubre |
 | P26 | Active ragdoll y plugins de animación | Evaluados contra la referencia de calidad (Tricking 0, Uncharted, TLOU, AC Unity): **no se agregan** PuppetMaster, Final IK, Animancer, Animation Rigging ni un active ragdoll. Lo que falta para el realismo no es física sino clips (vault de una mano, solo braced hang, sin patada; T17). La arquitectura queda preparada: el cuerpo ya alterna dinámico/kinemático por estado y el IK está aislado en `PlayerContactIK`. | 2026-10-02 | ⏸️ En lo que toca a Animation Rigging, reemplazada por P31 (2026-10-05). Active ragdoll, PuppetMaster, Final IK y Animancer siguen fuera. |
-| P29 | Locomoción con motion matching | Auditoría del 2026-10-05: la rigidez venía de mezclar clips de tres orígenes en un blend sin fase común, de no tener intención filtrada ni clips de giro, de `MatchTarget` (un objetivo, nada durante un cross-fade) y de dos dueños del movimiento. La locomoción pasa a **motion matching con MxM** (fork de Frost-Blade, MIT, probado en Unity 6) alimentado con el **mocap del Kinematica Demo** (Unity Companion License). El parkour y el combate quedan como acciones con clip, warper propio por segmentos e inercialización. | 2026-10-05 | ✔ Aprobada; 🔧 fase 0 (retarget) hecha: con Foot IK el mocap sobre Ch45 patina como el original (P33–P35 resuelven velocidades, retroceso y versionado) |
+| P29 | Locomoción con motion matching | Auditoría del 2026-10-05: la rigidez venía de mezclar clips de tres orígenes en un blend sin fase común, de no tener intención filtrada ni clips de giro, de `MatchTarget` (un objetivo, nada durante un cross-fade) y de dos dueños del movimiento. La locomoción pasa a **motion matching con MxM** (fork de Frost-Blade, MIT, probado en Unity 6) alimentado con el **mocap del Kinematica Demo** (Unity Companion License). El parkour y el combate quedan como acciones con clip, warper propio por segmentos e inercialización. | 2026-10-05 | ✔ Aprobada; 🔧 fase 0 (retarget) y fase 1 (base de MxM y prueba en Play Mode, 2026-10-07) hechas (§7.2). El jugador todavía no la usa |
 | P30 | Motor del personaje | **`CharacterController`** como único dueño del movimiento: el root motion de las acciones se aplica con `Move`; desaparece el cambio dinámico/kinemático del Rigidbody. Reemplaza a D1 cuando se implemente. | 2026-10-05 | ✔ Aprobada, 📋 por implementar |
 | P31 | IK y ajustes procedurales | **Animation Rigging** (paquete core en Unity 6.6, 6.6.0) para el contacto de manos y pies, stride/orientation warping y la mirada de cabeza y torso. Corre sobre la pose final, también durante las mezclas (T25). Reemplaza al IK Pass Humanoid de `PlayerContactIK`. | 2026-10-05 | ✔ Aprobada, 📋 por implementar |
 | P33 | Velocidades del personaje | El juego se ajusta al mocap en lugar de acelerarlo: caminar ~1.3, correr ~3.4 y sprint ~4.8 m/s (sprint +41 %, GDD §5.2). Medido: el mocap camina a ~1.1–1.6, trota a ~3.2 y esprinta con punta de ~4.5–5.1 m/s. Reemplaza `BaseSpeed` 5 / sprint 7 de P12 cuando se implemente el motor (P30). | 2026-10-05 | ✔ Aprobada, 📋 por implementar |
 | P34 | Retroceso y strafe | Kinematica no los tiene: se toman de **100STYLE** (estilo Neutral, CC BY 4.0, con atribución), convertidos de BVH con Blender. | 2026-10-05 | ✔ Aprobada; 🔧 importadas y probadas sobre Ch45 (retarget limpio con Foot IK) las 8 tomas **Neutral** (lentas: atrás y de lado hasta ~1.3–1.6 m/s) y, tras buscar otra fuente, las 8 **Rushed** (atrás ~2.0 y de lado ~2.2 m/s). Ninguna fuente libre compatible llega a ~3.4 m/s (LaFAN1 y Bandai Namco son NC-ND, MotionPersona NC, CMU solo camina; Mixamo bloqueado por P32): el retroceso y el strafe tendrán tope de ~2 m/s (2026-10-05) |
-| P35 | Versionado del mocap | **Git LFS solo para el mocap** (`Assets/ThirdParty/Kinematica/**/*.fbx` y `Assets/ThirdParty/100STYLE/**/*.fbx` en `.gitattributes`): sin reescribir el historial; cada máquina instala Git LFS. | 2026-10-05 | ✅ Configurado en `.gitattributes` |
+| P35 | Versionado del mocap | **Git LFS solo para el mocap** (`Assets/ThirdParty/Kinematica/**/*.fbx` y `Assets/ThirdParty/100STYLE/**/*.fbx` en `.gitattributes`): sin reescribir el historial; cada máquina instala Git LFS. | 2026-10-05 | ✅ Configurado en `.gitattributes`. Ampliada el 2026-10-07 a la base horneada de MxM (`Assets/Data/MxM/*_AnimData.asset`, ~30 MB de YAML por versión) |
 | P32 | FBX de Mixamo en un repo público | La licencia de Mixamo prohíbe redistribuir los archivos sueltos y el repo es público. El equipo decidió **hacer privado el repo** (lo hace su dueño; no es un cambio de código). Mientras siga público no se agregan FBX nuevos de Mixamo. | 2026-10-05 | ✔ Aprobada; pendiente del dueño del repo |
 
 ## 9. Deuda técnica y bugs conocidos
@@ -1017,4 +1086,6 @@ más rápido).
 | T18 | Los FBX de las transiciones Ch45 incluyen la malla y las texturas | `Characters/Player/Animations/` | ~16 MB cada uno y el importador avisa de polígonos autointersectados de esa malla, que no se usa. Re-descargarlos de Mixamo "Without Skin" los reduciría a ~1 MB. |
 | T22 | `ModelImporter.clipAnimations` falla en Unity 6000.6 | API de Editor | El getter registra `Cannot unmarshal intptr objects in structs` y devuelve los clips sin curvas; reescribirlos borra las curvas (así se perdió `LHandCurve`). **Regla:** editar los clips con `SerializedObject` sobre `m_ClipAnimations`, como `PlayerAnimationSetup`. |
 | T23 | Las constantes del parkour dependen de los clips | `ParkourTimings.cs` | Los tiempos de contacto y los offsets se miden muestreando los clips (**Tools → Warrior Woke → Medir Clips**, `ClipMeasurement`; la locomoción se coloca sola con sus velocidades medidas). Si se cambia un clip de vault, agarre o subida, hay que volver a medir; la prueba de Play Mode detecta el desajuste (manos lejos del borde, pies dentro de la geometría). Las medidas del Parkour Obstacle Standard se derivan de estas (fence 0.8 m, aterrizaje 1.6 m, alcance de la mano), así que un clip nuevo obliga a revisar también `ParkourStandard` y regenerar los prefabs. |
+| T26 | MxM no compila tal cual en Unity 6.6 | `Packages/com.frost-blade-studios.motion-matching/MxM/Editor/MxMAssetHandler.cs` | El cast de `int` a `EntityId` es un error desde Unity 6.3. Por eso el paquete va **embebido** con el parche (firma `OpenAsset(EntityId, int)` bajo `UNITY_6000_3_OR_NEWER`). Si se actualiza MxM hay que volver a aplicarlo. |
+| T27 | Pendientes de la locomoción MxM (§7.2) | `MxMLocomotionProbe` | Suelas hasta 5.5 cm bajo el suelo en el giro de 90° corriendo y 5–11 cm en strafe (100STYLE `Neutral_SR` queda hundido de forma constante); frenado de 1.3–1.4 s (el actor del mocap frena así; se puede acortar con warping longitudinal); strafe a la derecha a 1.36 m/s (las tomas de lado de 100STYLE promedian ~1.5 m/s y no hay espejo). El apoyo de pies de Animation Rigging (P31) y el motor (P30) deben resolver las suelas. |
 | T25 | El IK no siempre llega a los huesos durante una transición del Animator | `PlayerContactIK` | Medido en dos casos: la mano del slide en la mezcla hacia su bucle (el objetivo pedía 5 cm y el hueso quedaba en 1 cm, ni subir el cuerpo lo cambiaba) y un pie al subir una escalera durante la mezcla de un aterrizaje (11–23 cm dentro del peldaño, intermitente). Mitigado: la entrada al bucle del slide es en seco y la salvaguarda de los pies corrige la pose final. Falta entender la causa (orden de evaluación del IK en las transiciones de Humanoid). |

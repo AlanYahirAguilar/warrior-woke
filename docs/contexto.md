@@ -284,9 +284,10 @@ final · SFX y música básica · build para Windows.
    (P29–P32, `arquitectura.md` §8): locomoción con motion matching (MxM) sobre el mocap del Kinematica
    Demo, `CharacterController` como único motor, Animation Rigging para el IK y repo privado por las
    licencias de Mixamo. Por ahora existen la fase 0 (el mocap importado y probado sobre Ch45 en
-   `Assets/ThirdParty/Kinematica`) y el retroceso y strafe de 100STYLE
-   (`Assets/ThirdParty/100STYLE`, estilos Neutral y Rushed, hasta ~2 m/s, P34); el jugador sigue usando el
-   sistema anterior.
+   `Assets/ThirdParty/Kinematica`), el retroceso y strafe de 100STYLE
+   (`Assets/ThirdParty/100STYLE`, estilos Neutral y Rushed, hasta ~2 m/s, P34) y, desde el 2026-10-07, la
+   fase 1: MxM embebido en `Packages/`, la base de datos horneada (`Assets/Data/MxM`) y su prueba en Play
+   Mode (`arquitectura.md` §7.2). El jugador sigue usando el sistema anterior.
 3. **No se implementa nada fuera del MVP** sin que antes funcione el MVP (GDD §25 y §28).
 
 ## 11. Cómo abrir el proyecto
@@ -327,6 +328,10 @@ final · SFX y música básica · build para Windows.
   cambias la escena, regenérala con **Tools → Warrior Woke → Construir Parkour Test Area**. Si
   cambias el estándar de obstáculos, regenera los prefabs con **Generar Prefabs de Obstáculos** y
   revisa con **Validar Obstáculos de Parkour**.
+- **Motion matching** (🔧, todavía sin uso en el jugador): **Tools → Warrior Woke → Construir Datos de
+  Motion Matching** rehace la base de MxM (hazlo si cambias las tomas de la base) y **Probar Motion
+  Matching** la prueba en Play Mode (`[MxMProbe]` en la consola, `Logs/MxMProbe/metrics.csv`). Ver
+  `arquitectura.md` §7.2.
 
 ### "Hice pull y no veo los cambios"
 
@@ -381,7 +386,8 @@ git config merge.unityyamlmerge.recursive binary
 - La serialización es **Force Text** (`EditorSettings.asset`, `m_SerializationMode: 2`). No la
   cambies a Binary.
 - **Git LFS solo para el mocap** (P35, 2026-10-05): `.gitattributes` manda a LFS los FBX de
-  `Assets/ThirdParty/Kinematica/` y `Assets/ThirdParty/100STYLE/`. Cada máquina necesita Git LFS (`git lfs install`, una vez); sin él,
+  `Assets/ThirdParty/Kinematica/` y `Assets/ThirdParty/100STYLE/` y, desde el 2026-10-07, la base horneada
+  de motion matching (`Assets/Data/MxM/*_AnimData.asset`, ~30 MB). Cada máquina necesita Git LFS (`git lfs install`, una vez); sin él,
   esos FBX llegan como punteros de texto y Unity no los importa. No reescribe el historial: el resto
   del arte sigue en git normal. Al final de `.gitattributes` hay un bloque comentado para extender LFS
   al resto de binarios; eso sí exigiría migrar el historial y coordinarlo con todo el equipo.
