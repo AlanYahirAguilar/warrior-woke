@@ -358,6 +358,17 @@ namespace WarriorWoke.EditorTools
             new QuaterniusClip(Ual1, "Rig|Hit_Head", CombatTimings.HitHeadClip, RootMode.InPlace, false),
             // Death (the player's and the enemies'): the body falls in place
             new QuaterniusClip(Ual1, "Rig|Death01", PlayerAnimatorIds.DeathClip, RootMode.InPlace, false),
+            // The enemies' takes (EnemySetup, P40): sword cuts and their combo, the dash and the shield
+            // charge (their step stays root motion: EnemyRootMotion applies it), the guard, the knockback
+            new QuaterniusClip(Ual2, "Armature|Sword_Regular_A", "Sword_Regular_A", RootMode.InPlace, false),
+            new QuaterniusClip(Ual2, "Armature|Sword_Regular_B", "Sword_Regular_B", RootMode.InPlace, false),
+            new QuaterniusClip(Ual2, "Armature|Sword_Regular_C", "Sword_Regular_C", RootMode.InPlace, false),
+            new QuaterniusClip(Ual2, "Armature|Sword_Regular_Combo", "Sword_Regular_Combo", RootMode.InPlace, false),
+            new QuaterniusClip(Ual2, "Armature|Sword_Dash_RM", "Sword_Dash", RootMode.InPlace, false),
+            new QuaterniusClip(Ual2, "Armature|Shield_Dash_RM", "Shield_Dash", RootMode.InPlace, false),
+            new QuaterniusClip(Ual2, "Armature|Sword_Block", "Sword_Block", RootMode.InPlace, false),
+            new QuaterniusClip(Ual2, "Armature|Hit_Knockback", "Hit_Knockback", RootMode.InPlace, false),
+            new QuaterniusClip(Ual1, "Rig|Sword_Attack", "Sword_Attack", RootMode.InPlace, false),
         };
 
         /// <summary>
@@ -367,7 +378,7 @@ namespace WarriorWoke.EditorTools
         /// on the body orientation, the result depended on the pose and came out facing backward.) Only
         /// the clip setter is used (T22).
         /// </summary>
-        private static void ConfigureQuaternius()
+        internal static void ConfigureQuaternius()
         {
             foreach (string path in new[] { Ual1, Ual2 })
             {

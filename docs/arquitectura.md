@@ -21,7 +21,9 @@
 > `CharacterController.Move`**: el controller ya no se apaga y solo deja pasar el obstáculo de la acción.
 > Desde el 2026-10-10 (fase de desarrollo de §7.3): obstáculos con acciones declaradas (P38), el
 > personaje **25 % más rápido y con más respuesta** (P39: el mocap se reproduce ×1.25) y **ambas manos
-> fijas sobre el borde** de una cornisa a una separación anatómica.
+> fijas sobre el borde** de una cornisa a una separación anatómica; y (P40) **enemigos y jefes en 3D**:
+> guerrero ligero, guerrero pesado, arquero, el líder del clan rival y el Comandante, con IA por estados,
+> turnos de ataque, golpes con ventanas medidas sobre sus clips y arenas de jefe (§5.5).
 
 ---
 
@@ -50,10 +52,10 @@
 
 | # | Layer | Uso actual |
 |---|---|---|
-| 6 | `Ground` | Suelo y edificios. Lo leen `GroundChecker` (Player) y `Enemy.groundLayer`. |
+| 6 | `Ground` | Suelo, fixtures y muros del área. Bloquea la vista y los golpes de los enemigos (`EnemyPerception`, `EnemyWeapon`, `Hitbox`). |
 | 7 | `Obstacle` | Geometría de parkour. `EnvironmentChecker.obstacleLayer` en el Player. |
 | 8 | `Player` | Objetos del Player.prefab. |
-| 9 | `Enemy` | Enemy.prefab. `Hitbox.targetLayers` del Player apunta aquí (bits 512). |
+| 9 | `Enemy` | La cápsula de golpe de los enemigos (P40) y el muñeco de entrenamiento. `Hitbox.targetLayers` del Player apunta aquí (bits 512). Player y Enemy no colisionan entre sí: cada enemigo lleva además una cápsula en Default (`Cuerpo`) que detiene al `CharacterController` del jugador. |
 
 Tags: solo los integrados (`Player`, `Untagged`, …). No hay tags personalizados.
 
@@ -68,9 +70,10 @@ Assets/
                               TrainingDummy (fixture de pruebas)
       Interfaces/             IDamageable, IDamageModifier, IGroundChecker, IInputProvider, IPoolable
       Spawning/               ObjectPoolManager, Spawner, ReturnToPoolDelay
-    Enemy/
-      Enemy.cs
-      StateMachine/           EnemyState, EnemyStateMachine, States/EnemyGroundedStates.cs
+    Enemy/                    Enemy (contexto de la FSM), EnemyPerception, EnemyCoordinator (turnos),
+                              EnemyWeapon (golpe medido), EnemyAnimator, EnemyRootMotion, Arrow,
+                              EnemyZone, BossArena (P40)
+      StateMachine/           EnemyState, EnemyStateMachine, States/EnemyStates.cs
     Player/
       Player.cs, PlayerMovement.cs, PlayerInputHandler.cs,
       PlayerAnimator.cs, PlayerAnimatorIds.cs, PlayerAnimatorIK.cs, PlayerContactIK.cs,
@@ -90,16 +93,21 @@ Assets/
                               ClipMeasurement, ParkourObstaclePrefabs, ParkourTestCircuitBuilder,
                               ParkourPlayModeTest, MocapRetargetProbe, MxMLocomotionBuilder,
                               MxMLocomotionProbe, VaultCatalogBuilder, CombatClipReview,
-                              PoseSheetRenderer (no van al build)
+                              PoseSheetRenderer, EnemySetup, ParkourPlayModeTest.Enemies
+                              (no van al build)
   Data/MxM/                   MxM_Locomotion_PreProcess.asset (generado) + MxM_Locomotion_AnimData.asset
                               (base horneada, ~30 MB, Git LFS; §7.2)
   Data/Parkour/               VaultCatalog.asset (generado por VaultCatalogBuilder; §5.17)
-  Prefabs/                    Player, Enemy, GameManager, Spawner, Main Camera,
+  Data/Enemies/               Ligero, Pesado, Arquero, LiderClan, Comandante (EnemyData, generados por EnemySetup)
+  Data/Navigation/            Level1_NavMesh.asset (NavMesh de S13 y S14, horneado por el constructor del área)
+  Prefabs/                    Player, GameManager, Spawner, Main Camera,
                               Directional Light, Particle System
+    Enemies/                  Enemigo_{Ligero, Pesado, Arquero}, Jefe_{LiderClan, Comandante} (generados, P40)
     Parkour/                  ParkourObstacle_{Step, LowVault, MediumVault, HighVault, Barrier,
                               Ledge, ClimbWall, Slide, JumpGap, Combined} (generados) +
                               Materials/ (Step, Vault, Mantle, Barrier, Ledge, Slide)
   Scenes/                     Level-1.unity (la iluminación horneada Scenes/<Escena>/ no se versiona)
+  Characters/Enemy/           EnemyAnimator.controller y Materials/ (tintes y armas; generados por EnemySetup)
   Characters/Player/          character.fbx (modelo Ch45 de Mixamo, Humanoid),
                               PlayerAnimator.controller (generado),
                               Textures/ (5 texturas extraídas de character.fbx),
@@ -153,7 +161,7 @@ Desde el 2026-10-01 (decisión P24) la escena es el área de pruebas del parkour
 2026-10-02 (P25) **todos sus obstáculos son instancias de los prefabs estándar** (§5.13). La construye
 `ParkourTestCircuitBuilder` (**Tools → Warrior Woke → Construir Parkour Test Area**) y contiene:
 instancias de `GameManager`, `Spawner`, `Main Camera` y `Directional Light`, y el objeto
-`ParkourTestArea` (suelo, límite de caída y once secciones; desde el 2026-10-10, P38, sin perímetro, pilares, bordillos ni el carril S04). **El Player no está colocado en la escena:**
+`ParkourTestArea` (suelo, límite de caída y trece secciones; desde el 2026-10-10, P38, sin perímetro, pilares, bordillos ni el carril S04; S13 y S14 con enemigos, P40, y un `NavMeshSurface` en la raíz). **El Player no está colocado en la escena:**
 lo crea el `Spawner` al iniciar (ver §5.6). La escena no referencia datos de iluminación horneada
 (`m_LightingDataAsset` vacío); la luz direccional es Mixed y alumbra en tiempo real. No hay textos,
 UI de depuración ni objetos fuera del área; la validación comprueba que no queda ningún collider
@@ -161,10 +169,13 @@ fuera de ella y que cada obstáculo cumple el estándar.
 
 | Objeto | Qué es |
 |---|---|
-| `Suelo` | Caja de 78 × 80 m con la cara superior en y = 0 (layer Ground), x −34…44, z 15…−65. Material `Tests/ParkourTestArea/Materials/Losa.mat`. |
+| `Suelo` | Caja de 78 × 165 m con la cara superior en y = 0 (layer Ground), x −34…44, z 15…−150 (hasta −65 antes de P40). Material `Tests/ParkourTestArea/Materials/Losa.mat`. |
 | `LimiteDeCaida` | Desde el 2026-10-10 (P38) el área no tiene perímetro: un trigger 6 m bajo el suelo, 30 m más ancho que él por cada lado (layer Ignore Raycast), con `KillZone`. Lo que cae por el borde muere (caída mortal, GDD §5.12) y el jugador reaparece en la entrada (`PlayerDeadState`). |
 | `S01_Locomocion` … `S11_Mantle` | Carriles paralelos que empiezan en z = 0 y avanzan hacia −Z (S04 ya no existe). Contenido en `features.md` F32. |
 | `S12_Combate` | El muñeco de entrenamiento (`TrainingDummy`, P37) en la franja libre de la entrada, en (38, 0, 10): un cuerpo de cápsula (0.25 × 1.8 m, layer Enemy, lo que golpean los ataques) que se inclina con los golpes, y dentro un poste delgado (radio 0.12, layer Ground) que detiene el cuerpo del jugador, porque las layers Player y Enemy no colisionan entre sí. Rigidbody kinemático (se mueve al retroceder), `HealthSystem` de 1000 HP con i-frames de 0.1 s. |
+| `S13_Encuentro` | (P40) Encuentro mixto: una zona (`Zona_Encuentro`, 34 × 36 m centrada en (−14, −82)) con dos guerreros ligeros, uno pesado y dos arqueros en puestos elevados de 1.6 m (con escalera) al fondo; cobertura: un vault bajo, dos medios y un muro de 2.6 m. Al lado, la **pista de pruebas** (`Zona_Pruebas`, 34 × 36 m centrada en (25, −82), sin enemigos) con un muro de 3 × 6 m; la usa la prueba de enemigos. |
+| `S14_Jefes` | (P40) Dos arenas amuralladas de 28 × 28 m (muros de 3 m en Ground) en z = −128: la del líder del clan (x = −14) y la del Comandante (x = 24). Cada una con su puerta (inactiva hasta que el jugador entra), un trigger `BossArena` 2 m adentro de los muros y la zona del jefe (la arena). |
+| `NavMeshSurface` (en la raíz) | Hornea el NavMesh de S13 y S14 (volumen al sur de los carriles, mallas en Ground y Obstacle) en `Data/Navigation/Level1_NavMesh.asset`. |
 | `Spawner` | (0, 1.2, 8), mirando a −Z, en la entrada del área. |
 
 Layers del área: los obstáculos estándar llevan la layer de su tipo (§5.13). Las escaleras y las
@@ -177,7 +188,7 @@ entrenamiento también es un fixture.
 | Prefab | Componentes de scripts propios | Notas |
 |---|---|---|
 | `Player` | `Player`, `PlayerMovement` (con `vaultCatalog` = `Data/Parkour/VaultCatalog`), `PlayerMxMLocomotion`, `PlayerInputHandler`, `PlayerAnimator`, `PlayerContactIK`, `PlayerRig`, `GroundChecker`, `EnvironmentChecker`, `HealthSystem` (i-frames 0.5 s), `Hitbox` (layer Enemy; los ataques del jugador usan su barrido y su búsqueda de objetivo, §5.4), `WeaponHolder` (sin arma inicial); en `Model`: `PlayerAnimatorIK`, `MxMAnimator` y `MxMTrajectoryGenerator` (paquete MxM), `RigBuilder` (Animation Rigging) con el hijo `ContactRig` (`Rig`) y sus hijos `FeetContact` (`GroundContactConstraint`) y `HeadLook` (`HeadLookConstraint`), §5.10 | Tag `Player`, layer 8. **`CharacterController`** (P30): altura 1.975, radio 0.35, piel 0.035, step offset 0.4, slope 45°, min move 0; sin Rigidbody ni CapsuleCollider. Hijos `CenterPoint`, `HeadPoint`, `Model` (character.fbx, en y = −1.009: las suelas de la pose idle tocan el suelo, debajo de la piel del controller). El `Animator` de `Model` usa `PlayerAnimator.controller`, culling **Always Animate** y Apply Root Motion activado (lo maneja `PlayerAnimatorIK`: el motor lo usa en la locomoción y en el parkour). El `MxMAnimator` usa `Data/MxM/MxM_Locomotion_AnimData`, root motion por aplicador (`PlayerAnimatorIK`), Foot IK Humanoid y raíz de animación = el Player. `stepLayer`, `ceilingLayer`, `landingLayer` y las capas de `PlayerContactIK` = Ground + Obstacle (los muros del IK, solo Obstacle). |
-| `Enemy` | `HealthSystem` (100 HP, i-frames 0.2 s), `Hitbox` (daño 5) | Tag `Untagged`, layer 9. ⚠️ **No tiene `Enemy.cs`**, así que la IA no corre, y `Hitbox.targetLayers = 0`. La vida y el daño no son valores del GDD: el prefab se rehace con P4. Desde P24 no está colocado en ninguna escena. |
+| `Enemies/Enemigo_*`, `Enemies/Jefe_*` | `Enemy`, `EnemyPerception`, `EnemyAnimator`, `EnemyWeapon` (cuerpo a cuerpo), `HealthSystem` (vida del GDD, i-frames 0.1 s); en `Model`: `EnemyRootMotion` | (P40) Layer Enemy. Raíz en los pies: `NavMeshAgent` (giro propio: `angularSpeed` 0), `Rigidbody` cinemático, cápsula de golpe (Enemy) y `Cuerpo` (cápsula en Default que detiene al jugador). `Model`: Ch45 teñido por tipo (×1.12 el pesado, ×1.05 el líder, ×1.08 el Comandante), `EnemyAnimator.controller`, Always Animate. Arma primitiva en la mano con sus puntos `Base` y `Punta`; el arquero lleva arco en la mano izquierda, aljaba y cuatro flechas (pool). Los genera `EnemySetup`. El `Enemy.prefab` 2.5D anterior se eliminó (T2, T3) |
 | `GameManager` | `ObjectPoolManager` | Pools: `player` → Player.prefab (1), `spawnVFX` → Particle System (1). |
 | `Spawner` | `Spawner` | `entityId: player`, `triggerType: OnStart`. |
 | `Main Camera` | `CameraFollow` | `autoDetectTarget` activo. |
@@ -505,7 +516,7 @@ No hay ningún asset `.inputactions` en el proyecto (la plantilla por defecto se
 | Script | Responsabilidad |
 |---|---|
 | `HealthSystem : IDamageable` | Vida con clamp, i-frames por tiempo (`iFramesDuration`: 0.5 s el jugador, 0.2 s el enemigo, 0.1 s el muñeco de entrenamiento, por debajo de la cadencia de la cadena), `ActivateIFrames(d)` (nunca acorta unos i-frames ya activos), `Heal` (no revive), `InstantKill`, `InitializeHealth(max)` (reinicia y revive). Eventos `OnHealthChanged`, `OnDeath`, `OnDamageReceived`. Sin `Update`. |
-| `Hitbox` | Aplica daño a los `IDamageable` de `targetLayers` (en el jugador, Enemy). Tres consultas sin allocations: `Activate()` (pulso de una esfera al frente, el que usará el enemigo), **`Sweep(desde, hasta, radio, daño, golpeados)`** (el recorrido del puño o del pie en el frame: una cápsula; cada objetivo una vez por ataque) y **`FindTarget(origen, dirección, alcance, ángulo)`** (el objetivo hacia el que gira un ataque: el mejor entre cercano y de frente). El collider puede ser hijo del objeto que recibe el daño (`GetComponentInParent`). Evento `OnHit`. |
+| `Hitbox` | Aplica daño a los `IDamageable` de `targetLayers` (en el jugador, Enemy); desde P40 nunca a través de un muro (`ClearPath`: nada en Ground u Obstacle entre el centro del jugador y el punto golpeado, salvo los últimos 15 cm). Tres consultas sin allocations: `Activate()` (pulso de una esfera al frente, el que usará el enemigo), **`Sweep(desde, hasta, radio, daño, golpeados)`** (el recorrido del puño o del pie en el frame: una cápsula; cada objetivo una vez por ataque) y **`FindTarget(origen, dirección, alcance, ángulo)`** (el objetivo hacia el que gira un ataque: el mejor entre cercano y de frente). El collider puede ser hijo del objeto que recibe el daño (`GetComponentInParent`). Evento `OnHit`. |
 | `WeaponData` (SO) | Nombre, icono, daño ligero/pesado, radio de hitbox, knockback, `weaponId`. Menú `Create > WarriorWoke > Weapon Data`. **No hay assets creados.** |
 | `WeaponHolder` | Arma equipada, `Equip(data)`, `GetLightDamage()` (10 desarmado), `GetHeavyDamage()` (20 desarmado), `GetKnockback()` (sin uso todavía), evento `OnWeaponChanged`. Está en el Player.prefab sin arma inicial. |
 | `CombatTimings` / `AttackData` | Los cuatro ataques desarmados (jab, cross, gancho, patada) con su clip, velocidad, punto de entrada y fases **medidas sobre Ch45** (`CombatClipReview`): inicio y fin del golpe, máxima extensión, apertura de la cadena, punto desde el que moverse lo interrumpe, alcance, paso propio del clip y hit stop. |
@@ -556,12 +567,76 @@ detenerse en 0.5 s (antes, 6 m a 12 m/s constantes); 0.2 s invulnerable, cooldow
 invulnerabilidad (0.3 s), J o K responden con un ataque. No se puede esquivar durante un golpe ni
 durante una reacción al daño; sí en la recuperación de un ataque (desde `MoveCancel`).
 
-**Limitaciones reales:** no hay armas ni pickups (F16), los enemigos siguen sin IA en 3D (P4) y el muñeco
-es el único objetivo; `WeaponHolder.GetKnockback` no se usa (el retroceso lo decide quien recibe el
+**Limitaciones reales:** no hay armas ni pickups (F16); desde el 2026-10-10 hay enemigos (§5.5, P40) además
+del muñeco; `WeaponHolder.GetKnockback` no se usa (el retroceso lo decide quien recibe el
 golpe); las reacciones al daño son frontales (el cuerpo gira hacia el golpe); no hay camera shake, SFX
 ni VFX de impacto (F28, F29).
 
-### 5.5 Enemigos — 🟡 Parcial / ⚠️ desalineado con el GDD
+### 5.5 Enemigos y jefes — ✅ Implementado (P40, 2026-10-10)
+
+Reescritos en 3D (P4) con la arquitectura del jugador: un **contexto** (`Enemy`) con sus componentes y
+una **FSM por clases** (D2, `EnemyStates.cs`), los datos de cada arquetipo en un `EnemyData` (D5) y sin
+allocations en el bucle (D9).
+
+| Script | Responsabilidad |
+|---|---|
+| `Enemy` | Contexto: `NavMeshAgent` (el agente mueve el cuerpo; el enemigo gira el cuerpo a su ritmo), percepción, zona, guardia (`IDamageModifier`: de frente pasa `guardDamageKept`, un golpe de 20+ la rompe), aguante (`poise`: daño en 1.5 s que lo interrumpe; un golpe pesado comprometido tiene hyper armor ante golpes ligeros), elección de ataque por arquetipo, root motion de los ataques que avanzan (frenado a 0.85 m del objetivo), lo que el Comandante aprende del jugador (bloqueos, esquivas, ataques), `Engage` y `ResetToPost` (arenas) |
+| `EnemyPerception` | Sentidos cinco veces por segundo (escalonado): vista (rango, ángulo y línea libre de Ground/Obstacle hasta el pecho o la cabeza), oído (un jugador que corre, esprinta, ataca o esquiva dentro de `hearingRange`), golpe recibido; última posición conocida. Usa los **pies** del jugador (su raíz es el centro del cuerpo) |
+| `EnemyCoordinator` | Turnos de ataque (tokens, como DOOM 2016): 2 atacantes cuerpo a cuerpo y 2 arqueros a la vez, el que más esperó va primero, un turno nunca dura más de 4 s; los jefes siempre tienen el suyo. Reparte **posiciones alrededor del jugador** (al menos 60° entre ellos) para que rodeen en lugar de amontonarse |
+| `EnemyWeapon` | El golpe: solo con la ventana medida abierta, el barrido del arma (cápsula de la base a la punta, también entre cuadros) o, en una embestida, del frente del cuerpo; una vez por objetivo y ataque; **nunca a través de un muro** (línea libre del pecho al punto golpeado) |
+| `EnemyAnimator` + `EnemyRootMotion` | Locomoción por blend de la velocidad real (la animación sigue al agente; más allá del clip más rápido se acelera el blend), cruce a cada acción, hit stop; el root motion pasa al agente solo cuando la acción lo pide |
+| `Arrow` | Flecha con un rayo por cuadro (sin túneles), algo de gravedad, 10 de daño, se clava y vuelve al carcaj (pool) |
+| `EnemyZone` | La zona que el enemigo no abandona (GDD §5.14), con ruta de patrulla opcional |
+| `BossArena` | Arena de jefe (GDD §5.15): al entrar se cierra la puerta y el jefe ataca; al morir el jefe queda abierta; si el jugador muere dentro, se abre y el jefe vuelve a su puesto con la vida completa. Sin fases ni barras de vida |
+
+**Estados** (`EnemyStates.cs`, GDD §21): `Idle` (guardia o patrulla) → `Investigate` (un ruido o la última
+posición) → `Chase` → `Combat` (distancia y posición, defensa, ataque con turno; el arquero dispara desde
+donde ve y, con la línea bloqueada, va al punto lateral más cercano con línea libre) → `Attack` (anticipo →
+golpe en la ventana medida → recuperación; combo si el objetivo sigue al alcance) / `Shoot` / `Block` /
+`Dodge` / `Hit` (Hit, HitHeavy o Knockback según el golpe y el arquetipo) / `Reposition` (el arquero se
+aleja si se le acercan, hacia un puesto elevado si tiene) → `Return` → `Dead` (cae, sin colisiones ni
+navegación, se retira a los 8 s).
+
+**Ataques medidos (`EnemySetup`).** Cada ataque es un clip de Quaternius (CC0) o del paquete LowPoly
+muestreado sobre el propio prefab con su arma: la **ventana de golpe** es el tramo donde la punta se mueve
+a un tercio o más de su velocidad máxima (respecto a la cadera); el **alcance** es la mayor distancia a la
+que un cuerpo de 0.35 m de radio justo enfrente todavía es tocado por la hoja a la altura de un cuerpo
+(0.4–1.8 m), con 10 cm de margen y con el paso del clip si el ataque lo usa (root motion cuando el clip
+avanza más de 15 cm); la suelta de la flecha es el inicio del movimiento más rápido de la mano que tensa.
+Hojas de revisión en `Logs/EnemyClips/` (una por ataque, con la punta marcada en la ventana, y `lineup.png`).
+
+| Arquetipo | Vida | Daño | Velocidad (caminar/correr) | Aguante | Distancia que guarda | Defensa | Ataques (ventana medida, alcance) |
+|---|---|---|---|---|---|---|---|
+| Guerrero ligero (katana) | 80 | 12 | 1.6 / 4.6 m/s | 10 (todo golpe lo hace retroceder) | 1.5–2.3 m | esquiva 35 %, castiga 60 % | combo corte 1 → 2 → 3 (n 0.44–0.69, 2.41 m; 0.38–0.55, 1.56 m; 0.30–0.35, 2.75 m), estocada (0.18–0.24, 3.81 m, con su avance de 3.8 m) |
+| Guerrero pesado (kanabo) | 150 | 25 | 1.3 / 3.0 m/s | 45 (solo golpes fuertes) | 2.4–3.3 m | bloquea 35 % | golpe alto (anticipo de 0.45 s, 1.97 m), tajo pesado (0.3 s, 2.11 m), embestida con el cuerpo (avanza 1.2 m); abierto 0.6–1.0 s después |
+| Arquero (arco) | 50 | 10 por flecha | 1.6 / 4.2 m/s | 10 | 7–15 m; se aleja a menos de 5 m | esquiva 30 % | disparo (suelta en n = 0.45, flecha a 28 m/s con algo de anticipación) |
+| Líder del clan rival | 300 | 15–25 | 1.7 / 5.0 m/s | 35 | 1.7–2.6 m | bloquea 25 %, esquiva 25 %, castiga 75 % | combos de tres cortes, estocada desde lejos, golpe alto (25, abierto 1.1 s después) |
+| El Comandante | 450 | 20–30 | 1.7 / 5.2 m/s | 40 | 1.8–2.8 m | bloquea 30 % (55 % contra un jugador que ataca mucho), esquiva 30 % | los cortes, estocada, tajo y golpe alto (30); contra un jugador que bloquea elige golpes que rompen la guardia, contra uno que esquiva retiene el anticipo; ventanas cortas (0.2–0.45 s) |
+
+Los dos jefes no repiten la misma apertura dos veces seguidas. La apariencia es provisional (Ch45 teñido
+por tipo con armas primitivas, elegido con el usuario) hasta que el equipo entregue sus modelos (P4).
+
+**Probado** (`ParkourPlayModeTest`, secciones `Enemies` y `Bosses`, detalle en `features.md` F17 y F18):
+vista de frente a 10 m en 0.05 s, ciego por la espalda, oído a menos de 8 m, el muro de 3 m tapa la
+vista; el ligero encadena sus cortes (12 de daño, una vez por ataque, siempre dentro de su ventana); el
+pesado anuncia sus golpes (1.3 s del inicio al golpe contra 0.17 s del ligero), hace 25, queda abierto
+1.4 s y un golpe ligero le hace daño sin interrumpirlo; reacciones Hit, Knockback (1.2 m) y HitHeavy;
+guardia (2 de 10 de frente, 10 por la espalda); muerte; ningún corte atraviesa un muro; el arquero
+dispara desde 16 m, acierta, retrocede si se le acercan, no dispara con el muro en medio y busca la línea;
+nunca atacan más de 2 a la vez, los turnos se reparten y rodean al jugador (≥ 80° entre ellos); las
+puertas de las arenas, los repertorios y la adaptación del Comandante.
+
+**Referencias consultadas** (ideas, sin código copiado): el sistema de turnos de ataque de DOOM (2016)
+descrito en la charla de GDC de id Software sobre su combate, el presupuesto de atacantes cuerpo a cuerpo
+de The Last of Us Part II (artículo de StraySpark) y la documentación de AI Navigation 2.0 de Unity
+(`NavMeshSurface`, acoplar animación y navegación). No se agregó ningún paquete ni repositorio externo.
+
+**Limitaciones:** no hay audio ni efectos de impacto (F28, F29); la embestida del pesado usa un clip de
+carga con escudo; el combo de Quaternius (`Sword_Regular_Combo`, varios golpes en un clip) no se usa
+porque cada ataque tiene una sola ventana; los enemigos no saltan ni hacen parkour (el NavMesh no une
+alturas de más de 0.75 m sin escaleras); la apariencia es provisional.
+
+### 5.5b Enemigos anteriores (2.5D) — 🗑️ Eliminados el 2026-10-10
 
 - **`Enemy : MonoBehaviour, IPoolable`**: el mismo patrón de contexto + FSM que el jugador, con una
   diferencia: `LogicUpdate` corre en `Update` y `PhysicsUpdate` en `FixedUpdate`. Lee sus valores de
@@ -573,7 +648,7 @@ ni VFX de impacto (F28, F29).
   3D libre, así que los enemigos **no pueden perseguirlo en profundidad**. Se reescribe con P4.
 - ⚠️ No hay subclases por tipo: `Looter`/`Brute` (GDD anterior) se eliminaron; los tipos del GDD
   (arquero, guerrero ligero, guerrero pesado) llegan con P4.
-- ⚠️ `Enemy.prefab` no usa este script (ver §3).
+- ⚠️ `Enemy.prefab` no usaba este script. Todo lo de esta subsección fue reemplazado por §5.5 (P40).
 
 ### 5.6 Spawning y object pooling — ✅ Implementado
 
@@ -1410,8 +1485,8 @@ decisiones de alcance se tomaron con el usuario (P38, P39 y la apariencia de los
 | 1 Auditoría y línea base | ✅ 2026-10-10 | `ParkourPlayModeTest` 540/541 antes de empezar (el slide anticipado, intermitente) |
 | 2 Obstáculos | ✅ 2026-10-10 (`567f906`) | P38: pilares y bordillos verdes de S01, vault alto naranja de S04 y perímetro fuera; mesas azules (slide) y muros morados (mantle) se quedan; cada obstáculo declara sus acciones (§5.13); límite de caída |
 | 3 Movimiento y parkour | ✅ 2026-10-10 | P39 (abajo): +25 % de velocidad y más respuesta; manos fijas en el borde de la cornisa; correcciones del motor |
-| 4–6 Combate, IA enemiga y jefes | 🔧 | P40: enemigos de Ch45 teñidos por tipo con armas primitivas, FSM por clase, tokens de ataque, ataques medidos sobre el modelo, dos jefes en arenas propias (S13, S14) |
-| 7–8 Integración, validación y documentación | ⬜ | — |
+| 4–6 Combate, IA enemiga y jefes | ✅ 2026-10-10 | P40 (§5.5): cinco enemigos de Ch45 teñidos por tipo con armas primitivas, FSM por clases, percepción, turnos de ataque, ataques medidos sobre el modelo, golpes que no atraviesan muros (también los del jugador), arquero con línea de tiro, dos jefes en arenas (S13, S14) |
+| 7–8 Integración, validación y documentación | ✅ 2026-10-10 | Todo en `Level-1` y en una sola prueba en Play Mode (secciones `Enemies` y `Bosses` nuevas); documentación en los tres archivos |
 
 **Fase 3 — velocidad y respuesta (P39).** El mocap se reproduce ×1.25 (`MxMAnimator.UserPlaybackSpeedMultiplier`
 = `TimeScale` × el regulador de velocidad): el cuerpo, que mueve el root motion, va 25 % más rápido con
@@ -1453,7 +1528,7 @@ de la articulación (excluía el muro entero bajo un vault).
 | P1 | Controles | Adoptar los del GDD §14 (J/K/L/Q/E, Shift = sprint mantenido, Espacio = salto/vault). El slide pasa a **C** (solo mientras se esprinta; desde P27, corriendo con momentum). | 2026-09-29 / 30 | ✅ Implementada (J/K/L/Q, Shift, Espacio para salto y vault, C). Faltan E (sin sistema de armas) y ESC (sin pausa). |
 | P2 | Parkour fuera del GDD | Wall jump fuera (desactivado el 29-sep, **eliminado** el 30-sep por P8). Ledge grab/climb y slide se conservan activos. | 2026-09-29 / 30 | ✅ Implementada |
 | P3 | Sistema de XP | Eliminarlo: el juego no tiene XP. | 2026-09-29 | ✅ Implementada |
-| P4 | Enemigos | Reescribir en 3D con NavMeshAgent. El equipo entrega el paquete de apariencia. | 2026-09-29 | ✔ Aprobada, 📋 por implementar |
+| P4 | Enemigos | Reescribir en 3D con NavMeshAgent. El equipo entrega el paquete de apariencia. | 2026-09-29 | ✅ Implementada con P40 (2026-10-10); la apariencia sigue provisional |
 | P5 | Cámara | Extender `CameraFollow` con control de ratón (sin Cinemachine). | 2026-09-29 | ✅ Implementada el 2026-10-02 (cámara orbital, §5.7). Faltan shake, encuadre de combate y gamepad. |
 | P6 | Input | Migrar a un asset `.inputactions` propio. La plantilla por defecto ya se eliminó. | — | ❓ Pendiente: el equipo pidió primero una explicación |
 | P7 | Estamina y HUD | Quedan fuera del desarrollo: el GDD no tiene estamina (§5.2) ni barras de vida (§16). Se eliminaron. | 2026-09-30 | ✅ Implementada |
@@ -1487,6 +1562,7 @@ de la articulación (excluía el muro entero bajo un vault).
 | P32 | FBX de Mixamo en un repo público | La licencia de Mixamo prohíbe redistribuir los archivos sueltos y el repo es público. El equipo decidió **hacer privado el repo** (lo hace su dueño; no es un cambio de código). Mientras siga público no se agregan FBX nuevos de Mixamo. | 2026-10-05 | ✔ Aprobada; pendiente del dueño del repo |
 | P36 | Vault con catálogo de mocap y warper propio | Auditoría de la Fase 3 (2026-10-08): el vault del DPS volaba en cámara lenta (~4.2 m/s²), aterrizaba lejos (~2.6 m) y era uno solo de carrera para todo. Se reemplaza por **vaults anotados del Kinematica Demo** medidos sobre Ch45 (`VaultCatalogBuilder`): un catálogo con la trayectoria, los apoyos y la envolvente de obstáculos de cada clip; `VaultPlanner` elige por obstáculo, velocidad, distancia y pie; `PlayerVaultState` lo warpea con perfiles validados (§5.17). Aprobado con el usuario: `MediumVault` de 0.3 m de fondo; el vault de 1.2 m queda fuera (`VaultMaxHeight` 1.1). Traverser (MIT) se evaluó como referencia y no se reutilizó (depende de Kinematica 0.8). | 2026-10-08 | ✅ Implementada el 2026-10-09 (§5.17) |
 | P38 | Limpieza y acciones declaradas de los obstáculos | Pedido del 2026-10-10 (elegido con el usuario): se quitan del área de pruebas los 4 pilares verdes y los bordillos de S01, el vault alto naranja de S04 y las barreras del perímetro; se conservan las barras de slide ("mesas azules") y los bloques de mantle ("muros morados"). Cada obstáculo estándar **declara sus acciones** (`ParkourActions`) y la detección solo actúa sobre lo declarado. La configuración central sigue siendo `ParkourStandard` (clase estática, D11: la leen la detección, el generador de prefabs y las pruebas en edición y en runtime; un ScriptableObject no aportaba nada y obligaba a cargarlo en el Editor). Sin perímetro, un límite de caída (`KillZone`) mata lo que cae por el borde y el jugador reaparece en la entrada | 2026-10-10 | ✅ Implementada (§3, §5.13) |
+| P40 | Enemigos y jefes | Pedido del 2026-10-10. Apariencia elegida con el usuario: **Ch45 teñido por tipo** con armas primitivas, hasta los modelos del equipo; ubicación: **secciones nuevas del área** (S13 encuentro mixto y pista de pruebas, S14 dos arenas). IA por estados (D2) con percepción, zonas, turnos de ataque (tokens) y posiciones alrededor del jugador; ataques con ventanas y alcances medidos sobre el modelo (`EnemySetup`); arquero con línea de tiro y búsqueda de posición; dos jefes con identidad propia (el líder presiona con combos y estocadas y queda abierto tras su golpe pesado; el Comandante se adapta al estilo del jugador) en arenas que se cierran, sin fases ni barras de vida | 2026-10-10 | ✅ Implementada (§5.5) |
 | P39 | Personaje más rápido y con más respuesta | Pedido del 2026-10-10 (elegido con el usuario: "+25 % y más respuesta"). **El mocap se reproduce ×1.25** (`PlayerMxMLocomotion.TimeScale`): caminar 1.6, correr 4.25, sprint 6.0, retroceso 2.5, agachado 1.25 m/s, con la cadencia de pasos, los giros y las frenadas del actor también 1.25 veces más cortos (acelerar la reproducción en lugar de estirar el paso no patina). La trayectoria sigue pidiendo en unidades del mocap (futuro ×1/1.25 y el historial real ×1/1.25 con un parche de MxM, T26 #5), las tomas de carrera orientada (100STYLE BR/SR) se favorecen cuando la marcha orientada es una carrera y el paso de una marcha orientada a la libre espera a que el cuerpo vaya a 1 m/s hacia la nueva dirección. Fuera de MxM: aceleración 14 / frenado 18 m/s², giros más cortos, recuperaciones de aterrizaje y roll más breves, esquiva de 3 m con respuesta desde 0.25 s | 2026-10-10 | ✅ Implementada (§7.3) |
 | P37 | Combate desarmado con fases medidas | Cadena ligera jab → cross → gancho (Quaternius CC0 y mocap CMU), patada frontal de mocap CMU como ataque fuerte (aprobado con el usuario), fases de cada clip medidas sobre Ch45 (`CombatTimings`), objetivo y acercamiento, golpe por contacto del miembro (`Hitbox.Sweep`), hit stop, cadena con cola de pulsaciones, ventanas de cancelación, patada fallada que deja expuesto, reacción al daño y esquiva de ~2.6 m que frena. Muñeco de entrenamiento como fixture (aprobado) mientras no hay enemigos (P4). Sin cuarto golpe ligero (GDD §5.6: hasta 3). `Melee_Hook` y `Hit_Knockback` de Quaternius se descartaron tras revisarlos. | 2026-10-08 / 09 | ✅ Implementada el 2026-10-09 (§5.4) |
 
@@ -1501,8 +1577,8 @@ más rápido).
 
 | # | Problema | Dónde | Impacto |
 |---|---|---|---|
-| T2 | `Enemy.prefab` no tiene `Enemy.cs`, `Hitbox.targetLayers = 0`, y su vida (100) y daño (5) no son del GDD | `Prefabs/Enemy.prefab` | El prefab no tiene IA ni puede hacer daño. Se rehace con P4. |
-| T3 | Enemigos 2.5D (freeze Z, eje X) | `Enemy.cs`, `EnemyGroundedStates.cs` | Incompatible con el jugador 3D. Se rehace con P4. |
+| ~~T2~~ | ~~`Enemy.prefab` sin IA ni daño del GDD~~ | — | **Resuelto el 2026-10-10 (P40):** el prefab se eliminó; los enemigos son los cinco prefabs de `Prefabs/Enemies`. |
+| ~~T3~~ | ~~Enemigos 2.5D~~ | — | **Resuelto el 2026-10-10 (P40):** reescritos en 3D con NavMeshAgent (§5.5). |
 | T15 | Licencia de las animaciones `LowPoly` sin confirmar | `Assets/LowPoly/` | Su origen ya se conoce: el `AssetOrigin` de los `.meta` indica el paquete gratuito *FREE Low Poly Human - RPG Character* de la Unity Asset Store (productId 219979). Falta confirmar sus términos en la página del paquete antes de publicar. |
 | T17 | Animaciones provisionales | `PlayerAnimator.controller` | Las transiciones de guardia Ch45 se aceleran de ~1 s a 0.3 s. Solo braced hang (sin muro bajo el borde los pies cuelgan), agarre solo desde parado, sin giros en el sitio ni frenadas animadas fuera de MxM. (La patada y los vaults se resolvieron en la Fase 3: P36, P37.) |
 | T18 | Los FBX de las transiciones Ch45 incluyen la malla y las texturas | `Characters/Player/Animations/` | ~16 MB cada uno y el importador avisa de polígonos autointersectados de esa malla, que no se usa. Re-descargarlos de Mixamo "Without Skin" los reduciría a ~1 MB. |

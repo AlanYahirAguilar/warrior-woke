@@ -1,30 +1,30 @@
 using UnityEngine;
 
 /// <summary>
-/// Base class for all enemy states.
-/// Mirrors the PlayerState pattern for architectural consistency.
-/// Receives a reference to the Enemy MonoBehaviour (context) and its StateMachine.
+/// One state of an enemy's AI (D2: one class per state, its transitions inside it). Ticks every frame
+/// from Enemy.Update; the enemy's perception and the coordinator are read through the context.
 /// </summary>
 public abstract class EnemyState
 {
-    protected Enemy         enemy;
-    protected EnemyStateMachine stateMachine;
-    protected float         startTime;
+    protected readonly Enemy enemy;
+    protected readonly EnemyStateMachine stateMachine;
+    protected float startTime;
 
-    public EnemyState(Enemy enemy, EnemyStateMachine stateMachine)
+    protected EnemyState(Enemy enemy, EnemyStateMachine stateMachine)
     {
-        this.enemy        = enemy;
+        this.enemy = enemy;
         this.stateMachine = stateMachine;
     }
 
-    public virtual void Enter()
-    {
-        startTime = Time.time;
-    }
+    /// <summary>Seconds since the state was entered.</summary>
+    public float Elapsed => Time.time - startTime;
 
-    public virtual void LogicUpdate() { }
+    /// <summary>Short name for logs and tests.</summary>
+    public virtual string Name => GetType().Name.Replace("Enemy", "").Replace("State", "");
 
-    public virtual void PhysicsUpdate() { }
+    public virtual void Enter() => startTime = Time.time;
+
+    public virtual void Tick(float dt) { }
 
     public virtual void Exit() { }
 }

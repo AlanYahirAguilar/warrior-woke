@@ -1,0 +1,104 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d164ef91c54d4334c8ef2d713d4a4bb8, type: 3}
+  m_Name: Ligero
+  m_EditorClassIdentifier: Assembly-CSharp::EnemyData
+  enemyName: Guerrero ligero
+  kind: 0
+  bossStyle: 0
+  weapon: 0
+  tint: {r: 0.8, g: 0.32, b: 0.26, a: 1}
+  maxHealth: 80
+  poise: 10
+  iFrames: 0.1
+  walkSpeed: 1.6
+  runSpeed: 4.6
+  strafeSpeed: 2
+  turnRate: 600
+  sightRange: 18
+  sightAngle: 70
+  hearingRange: 8
+  loseTime: 3
+  investigateTime: 4
+  preferredMin: 1.5
+  preferredMax: 2.3
+  attackIntervalMin: 0.5
+  attackIntervalMax: 1.1
+  attacks:
+  - name: Corte 1
+    state: Corte_A
+    length: 0.43333337
+    rate: 1.15
+    activeStart: 0.4375
+    activeEnd: 0.6875
+    damage: 12
+    heavy: 0
+    reach: 2.4147918
+    rootMotion: 1
+    bodyHit: 0
+    lunge: 0
+    windupHold: 0
+    vulnerableAfter: 0.15
+    next: 1
+  - name: Corte 2
+    state: Corte_B
+    length: 0.53333336
+    rate: 1.15
+    activeStart: 0.375
+    activeEnd: 0.55
+    damage: 12
+    heavy: 0
+    reach: 1.5629739
+    rootMotion: 0
+    bodyHit: 0
+    lunge: 0
+    windupHold: 0
+    vulnerableAfter: 0.15
+    next: 2
+  - name: Corte 3
+    state: Corte_C
+    length: 2
+    rate: 1.1
+    activeStart: 0.3
+    activeEnd: 0.35
+    damage: 12
+    heavy: 0
+    reach: 2.7528527
+    rootMotion: 1
+    bodyHit: 0
+    lunge: 0
+    windupHold: 0
+    vulnerableAfter: 0.35
+    next: -1
+  - name: Estocada
+    state: Estocada
+    length: 1.5666667
+    rate: 1
+    activeStart: 0.175
+    activeEnd: 0.2375
+    damage: 12
+    heavy: 0
+    reach: 3.8121939
+    rootMotion: 1
+    bodyHit: 0
+    lunge: 0
+    windupHold: 0
+    vulnerableAfter: 0.4
+    next: -1
+  blockChance: 0.05
+  dodgeChance: 0.35
+  punishChance: 0.6
+  guardDamageKept: 0.3
+  arrowDamage: 10
+  arrowSpeed: 28
+  aimTime: 0.7
+  retreatDistance: 5

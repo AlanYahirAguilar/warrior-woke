@@ -1,6 +1,8 @@
+using Unity.AI.Navigation;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
+using UnityEngine.AI;
 using UnityEngine.SceneManagement;
 
 namespace WarriorWoke.EditorTools
@@ -15,6 +17,10 @@ namespace WarriorWoke.EditorTools
     /// (GDD §5.12) and the player reappears at the entrance.
     ///   Locomotion (x = −25) · LowVault (−16) · MediumVault (−10) · Slide (2) · Ledge (8) · ClimbWall (14)
     ///   Jump (20) · Combined (26) · Flow lab (32) · Mantle (38)
+    /// South of the lanes (P40): S13, a mixed encounter (two light warriors, a heavy one and two archers on
+    /// raised posts, with cover) and an empty test pad with a wall for the enemy tests; S14, the two boss
+    /// arenas (the rival clan's leader and the Commander), walled, with a gate that closes behind the player.
+    /// A NavMeshSurface on the root bakes the walkable floor of S13 and S14 (Assets/Data/Navigation).
     /// Menu: Tools → Warrior Woke → Construir Parkour Test Area.
     /// </summary>
     internal static class ParkourTestCircuitBuilder
@@ -25,11 +31,11 @@ namespace WarriorWoke.EditorTools
         private const string FixtureMaterial = ParkourObstaclePrefabs.Folder + "/Materials/Step.mat";
         private const float  LaneWidth      = ParkourStandard.PrefabWidth;
         public  const float  FloorTop       = 0f;
-        private const int    LaneCount      = 11;
+        private const int    LaneCount      = 13;
         private const string DummyMaterial  = "Assets/material/enemy.mat";
 
-        // Floor (x and z limits of the walkable area)
-        private const float MinX = -34f, MaxX = 44f, MinZ = -65f, MaxZ = 15f;
+        // Floor (x and z limits of the walkable area). Since P40 it runs south to the enemies' sections.
+        private const float MinX = -34f, MaxX = 44f, MinZ = -150f, MaxZ = 15f;
 
         // Lane centers (x). Every lane starts at z = 0 and runs toward −Z. HighVaultX is the free lane where
         // the Play Mode test places its own high vault (the S04 obstacle was removed, P38).
@@ -51,6 +57,20 @@ namespace WarriorWoke.EditorTools
         public const float DummyRadius = 0.25f, DummyHeight = 1.8f, DummyPostRadius = 0.12f;
 
         public static readonly Vector3 SpawnPosition = new Vector3(0f, 1.2f, 8f);
+
+        // S13 (P40): the mixed encounter (its zone) and the empty test pad beside it
+        public const float EncounterX = -14f, EncounterZ = -82f, EncounterWidth = 34f, EncounterDepth = 36f;
+        public const float ArcherPostHeight = 1.6f, ArcherPostZ = -93.5f, ArcherPostAX = -26f, ArcherPostBX = -2f;
+        public const float PadX = 25f, PadZ = -82f, PadWidth = 34f, PadDepth = 36f;
+        /// <summary>The wall of the test pad (3 m high: nothing sees or shoots through it).</summary>
+        public const float PadWallX = 25f, PadWallZ = -90f, PadWallWidth = 6f, PadWallHeight = 3f, PadWallThickness = 0.5f;
+
+        // S14 (P40): the boss arenas (inner size, wall height, gate width)
+        public const float ArenaZ = -128f, ArenaSize = 28f, ArenaWallHeight = 3f, ArenaGateWidth = 4f;
+        public const float LeaderArenaX = -14f, CommanderArenaX = 24f;
+
+        /// <summary>Where the baked NavMesh of S13 and S14 is saved.</summary>
+        public const string NavMeshPath = "Assets/Data/Navigation/Level1_NavMesh.asset";
 
         /// <summary>Lanes face −Z: the prefab's +Z (approach) turns toward −Z.</summary>
         private static readonly Quaternion LaneFacing = Quaternion.Euler(0f, 180f, 0f);
@@ -96,6 +116,9 @@ namespace WarriorWoke.EditorTools
             BuildFlow(Lane(root, "S10_Fluidez", FlowX));
             BuildMantle(Lane(root, "S11_Mantle", MantleX));
             BuildCombat(Lane(root, "S12_Combate", CombatX));
+            BuildEncounter(Section(root, "S13_Encuentro"), fixture);
+            BuildArenas(Section(root, "S14_Jefes"), fixture);
+            if (!BakeNavMesh(root)) return false;
 
             PlaceSpawner(scene);
 
@@ -312,6 +335,161 @@ namespace WarriorWoke.EditorTools
             var td = new SerializedObject(trainingDummy);
             td.FindProperty("body").objectReferenceValue = body.transform;
             td.ApplyModifiedPropertiesWithoutUndo();
+        }
+
+        // S13 (P40): the mixed encounter. One zone holds them all: two light warriors in front, the heavy
+        // one behind them, two archers on raised posts at the back (stairs up to each, so they can walk up
+        // and down). Cover: a low and two medium vaults (they can be vaulted) and a 2.6 m wall nothing sees
+        // or shoots through. Beside it, an empty pad (its own zone, no enemies) for the enemy tests, with a
+        // 3 m wall.
+        private static void BuildEncounter(Transform section, Material fixture)
+        {
+            Zone(section, "Zona_Encuentro", new Vector3(EncounterX, 0f, EncounterZ), new Vector2(EncounterWidth, EncounterDepth));
+            Transform zone = section.Find("Zona_Encuentro");
+            Instantiate(ParkourObstacleType.LowVault, section, new Vector3(EncounterX, 0f, -70f), LaneFacing).name = "Cobertura_Baja";
+            Instantiate(ParkourObstacleType.MediumVault, section, new Vector3(EncounterX - 7f, 0f, -77f), LaneFacing).name = "Cobertura_Media_A";
+            Instantiate(ParkourObstacleType.MediumVault, section, new Vector3(EncounterX + 7f, 0f, -79f), LaneFacing).name = "Cobertura_Media_B";
+            Box(section, "Muro_Cobertura", new Vector3(EncounterX, 1.3f, -86f), new Vector3(4f, 2.6f, 0.5f), fixture);
+
+            var posts = new Transform[2];
+            float[] xs = { ArcherPostAX, ArcherPostBX };
+            for (int i = 0; i < 2; i++)
+            {
+                var lane = new GameObject($"Puesto_Arquero_{(char)('A' + i)}").transform;
+                lane.SetParent(section, false);
+                lane.localPosition = new Vector3(xs[i], FloorTop, 0f);
+                Stairs(lane, "Escalera", -88f, 0f, ArcherPostHeight, 8, 0.5f, 3f, fixture, true);
+                Box(lane, "Plataforma", new Vector3(0f, ArcherPostHeight * 0.5f, ArcherPostZ), new Vector3(3f, ArcherPostHeight, 3f), fixture);
+                posts[i] = new GameObject("Puesto").transform;
+                posts[i].SetParent(lane, false);
+                posts[i].localPosition = new Vector3(0f, ArcherPostHeight, ArcherPostZ);
+            }
+
+            EnemyZone encounter = zone.GetComponent<EnemyZone>();
+            PlaceEnemy(section, EnemySetup.LightPrefab, "Ligero_A", new Vector3(EncounterX - 4f, 0f, -74f), encounter, null);
+            PlaceEnemy(section, EnemySetup.LightPrefab, "Ligero_B", new Vector3(EncounterX + 4f, 0f, -75f), encounter, null);
+            PlaceEnemy(section, EnemySetup.HeavyPrefab, "Pesado", new Vector3(EncounterX, 0f, -82f), encounter, null);
+            PlaceEnemy(section, EnemySetup.ArcherPrefab, "Arquero_A", posts[0].position, encounter, posts);
+            PlaceEnemy(section, EnemySetup.ArcherPrefab, "Arquero_B", posts[1].position, encounter, posts);
+
+            Zone(section, "Zona_Pruebas", new Vector3(PadX, 0f, PadZ), new Vector2(PadWidth, PadDepth));
+            Box(section, "Muro_Pruebas", new Vector3(PadWallX, PadWallHeight * 0.5f, PadWallZ), new Vector3(PadWallWidth, PadWallHeight, PadWallThickness), fixture);
+        }
+
+        // S14 (P40, GDD §5.15): one walled arena per boss. Walking in closes its gate (BossArena) until the
+        // boss dies; if the player dies inside, the gate opens and the boss starts over. Each boss keeps to
+        // its arena (its zone is the arena's floor).
+        private static void BuildArenas(Transform section, Material fixture)
+        {
+            Material gateMat = AssetDatabase.LoadAssetAtPath<Material>(DummyMaterial);
+            BuildArena(section, "Arena_LiderClan", LeaderArenaX, EnemySetup.LeaderPrefab, fixture, gateMat);
+            BuildArena(section, "Arena_Comandante", CommanderArenaX, EnemySetup.CommanderPrefab, fixture, gateMat);
+        }
+
+        private static void BuildArena(Transform section, string name, float x, string bossPrefab, Material wall, Material gateMat)
+        {
+            var arena = new GameObject(name).transform;
+            arena.SetParent(section, false);
+            arena.localPosition = new Vector3(x, FloorTop, ArenaZ);
+            float half = ArenaSize * 0.5f, h = ArenaWallHeight, t = 0.5f, side = (ArenaSize - ArenaGateWidth) * 0.5f;
+            // North wall (toward the lanes) has the gate in its middle
+            Box(arena, "Muro_Norte_Izq", new Vector3(-half + side * 0.5f, h * 0.5f, half + t * 0.5f), new Vector3(side, h, t), wall);
+            Box(arena, "Muro_Norte_Der", new Vector3(half - side * 0.5f, h * 0.5f, half + t * 0.5f), new Vector3(side, h, t), wall);
+            Box(arena, "Muro_Sur", new Vector3(0f, h * 0.5f, -half - t * 0.5f), new Vector3(ArenaSize + 2f * t, h, t), wall);
+            Box(arena, "Muro_Oeste", new Vector3(-half - t * 0.5f, h * 0.5f, 0f), new Vector3(t, h, ArenaSize), wall);
+            Box(arena, "Muro_Este", new Vector3(half + t * 0.5f, h * 0.5f, 0f), new Vector3(t, h, ArenaSize), wall);
+            GameObject gate = Box(arena, "Puerta", new Vector3(0f, h * 0.5f, half + t * 0.5f), new Vector3(ArenaGateWidth, h, t), gateMat);
+            gate.isStatic = false; // it opens and closes
+            gate.SetActive(false);
+
+            Zone(arena, "Zona", Vector3.zero, new Vector2(ArenaSize - 1f, ArenaSize - 1f), true);
+            EnemyZone zone = arena.Find("Zona").GetComponent<EnemyZone>();
+            Enemy boss = PlaceEnemy(arena, bossPrefab, "Jefe", arena.position + new Vector3(0f, 0f, -half + 6f), zone, null);
+            boss.transform.rotation = Quaternion.identity; // facing the gate (+Z)
+
+            // The fight starts once the player is 2 m inside (the gate closes behind, not on it)
+            var trigger = new GameObject("Arena");
+            trigger.layer = LayerMask.NameToLayer("Ignore Raycast");
+            trigger.transform.SetParent(arena, false);
+            var area = trigger.AddComponent<BoxCollider>();
+            area.isTrigger = true;
+            area.size = new Vector3(ArenaSize - 4f, 4f, ArenaSize - 4f);
+            area.center = new Vector3(0f, 2f, 0f);
+            var bossArena = trigger.AddComponent<BossArena>();
+            bossArena.Configure(boss, new[] { gate });
+            EditorUtility.SetDirty(bossArena);
+        }
+
+        /// <summary>An enemy zone (a trigger box on Ignore Raycast: no ray or bake sees it) centred at <paramref name="center"/>.</summary>
+        private static void Zone(Transform parent, string name, Vector3 center, Vector2 size, bool local = false)
+        {
+            var go = new GameObject(name);
+            go.layer = LayerMask.NameToLayer("Ignore Raycast");
+            go.transform.SetParent(parent, false);
+            go.transform.localPosition = local ? center : center - parent.position;
+            var box = go.AddComponent<BoxCollider>();
+            box.isTrigger = true;
+            box.size = new Vector3(size.x, 4f, size.y);
+            box.center = new Vector3(0f, 2f, 0f);
+            go.AddComponent<EnemyZone>();
+        }
+
+        /// <summary>An instance of an enemy prefab at <paramref name="position"/> (world), facing the lanes' entrance (+Z), wired to its zone.</summary>
+        private static Enemy PlaceEnemy(Transform parent, string prefabPath, string name, Vector3 position, EnemyZone zone, Transform[] posts)
+        {
+            var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(prefabPath);
+            var go = (GameObject)PrefabUtility.InstantiatePrefab(prefab, parent);
+            go.name = name;
+            go.transform.SetPositionAndRotation(position, Quaternion.identity);
+            var enemy = go.GetComponent<Enemy>();
+            var so = new SerializedObject(enemy);
+            so.FindProperty("zone").objectReferenceValue = zone;
+            SerializedProperty list = so.FindProperty("archerPosts");
+            list.arraySize = posts != null ? posts.Length : 0;
+            for (int i = 0; i < list.arraySize; i++) list.GetArrayElementAtIndex(i).objectReferenceValue = posts[i];
+            so.ApplyModifiedPropertiesWithoutUndo();
+            return enemy;
+        }
+
+        /// <summary>
+        /// Bakes the NavMesh of S13 and S14 (a volume south of the lanes: the parkour lanes are not walked by
+        /// enemies) from the meshes on Ground and Obstacle, and saves it as an asset next to the scene's data.
+        /// </summary>
+        private static bool BakeNavMesh(Transform root)
+        {
+            var surface = root.gameObject.AddComponent<NavMeshSurface>();
+            surface.collectObjects = CollectObjects.Volume;
+            surface.center = new Vector3(5f, 2f, -105f);
+            surface.size = new Vector3(MaxX - MinX + 2f, 10f, 92f);
+            // The area's boxes and obstacles all have meshes: the render meshes are their exact shapes (the
+            // physics scene had not seen the colliders created a moment ago, and the bake came out empty)
+            surface.useGeometry = NavMeshCollectGeometry.RenderMeshes;
+            surface.layerMask = LayerMask.GetMask("Ground", "Obstacle");
+            Physics.SyncTransforms();
+            surface.BuildNavMesh();
+            if (surface.navMeshData == null)
+            {
+                Debug.LogError("[ParkourTestArea] No se pudo hornear el NavMesh.");
+                return false;
+            }
+            if (!AssetDatabase.IsValidFolder("Assets/Data/Navigation")) AssetDatabase.CreateFolder("Assets/Data", "Navigation");
+            NavMeshData data = surface.navMeshData;
+            var existing = AssetDatabase.LoadAssetAtPath<NavMeshData>(NavMeshPath);
+            if (existing != null) AssetDatabase.DeleteAsset(NavMeshPath);
+            AssetDatabase.CreateAsset(data, NavMeshPath);
+            surface.navMeshData = AssetDatabase.LoadAssetAtPath<NavMeshData>(NavMeshPath);
+            surface.AddData();
+            EditorUtility.SetDirty(surface);
+            NavMeshTriangulation tri = NavMesh.CalculateTriangulation();
+            Debug.Log($"[ParkourTestArea] NavMesh de S13 y S14 horneado en {NavMeshPath} ({tri.indices.Length / 3} triángulos).");
+            return true;
+        }
+
+        private static Transform Section(Transform root, string name)
+        {
+            var section = new GameObject(name).transform;
+            section.SetParent(root, false);
+            return section;
         }
 
         /// <summary>A mesh without a collider (the dummy's look).</summary>

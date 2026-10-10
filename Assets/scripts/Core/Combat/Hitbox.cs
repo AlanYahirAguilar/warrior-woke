@@ -25,6 +25,8 @@ public class Hitbox : MonoBehaviour
     [SerializeField] private LayerMask targetLayers;
     [SerializeField] private int    damage         = 10;
     [SerializeField] private Collider ownerCollider;
+    [Tooltip("Surfaces a blow never goes through: nothing on them may stand between the owner and the point struck.")]
+    [SerializeField] private LayerMask blockingLayers;
 
     [Header("Debug")]
     [SerializeField] private bool showGizmos = true;
@@ -35,6 +37,24 @@ public class Hitbox : MonoBehaviour
     // ─── Events ───────────────────────────────────────────────────────────────────
     /// <summary>Fires for every unique IDamageable hit. Args: damageable, hit position.</summary>
     public event System.Action<IDamageable, Vector3> OnHit;
+
+    private void Awake()
+    {
+        if (blockingLayers.value == 0) blockingLayers = LayerMask.GetMask("Ground", "Obstacle");
+    }
+
+    /// <summary>
+    /// Nothing solid between the owner's centre and <paramref name="point"/> (the last 15 cm are not
+    /// checked: a fist sunk a little into a target must not be blocked by something inside it, like the
+    /// training dummy's post).
+    /// </summary>
+    public bool ClearPath(Vector3 point)
+    {
+        Vector3 from = transform.position;
+        Vector3 d = point - from;
+        float length = d.magnitude - 0.15f;
+        return length <= 0.01f || !Physics.Raycast(from, d.normalized, length, blockingLayers, QueryTriggerInteraction.Ignore);
+    }
 
     // ─── Public API ──────────────────────────────────────────────────────────────
 
@@ -79,9 +99,11 @@ public class Hitbox : MonoBehaviour
             if (ownerCollider != null && col == ownerCollider) continue;
             IDamageable target = col.GetComponentInParent<IDamageable>();
             if (target == null || target.IsDead || struck.Contains(target)) continue;
+            Vector3 point = col.ClosestPoint(to);
+            if (!ClearPath(point)) continue; // never through a wall
             struck.Add(target);
             target.TakeDamage(amount, transform.position);
-            OnHit?.Invoke(target, col.ClosestPoint(to));
+            OnHit?.Invoke(target, point);
             hits++;
         }
         return hits;

@@ -24,7 +24,7 @@ namespace WarriorWoke.EditorTools
     /// add "-wwSections Vaults,Slide" to run only some sections.
     /// </summary>
     [InitializeOnLoad]
-    internal static class ParkourPlayModeTest
+    internal static partial class ParkourPlayModeTest
     {
         private const string ScenePath       = "Assets/Scenes/Level-1.unity";
         private const string RunningKey      = "WW_PlayModeTest_Running";
@@ -64,7 +64,7 @@ namespace WarriorWoke.EditorTools
         private const float TeleportSpeed = 13f;
 
         // Real seconds the whole Play Mode test may take before it is stopped as failed
-        private const double TimeoutSeconds = 1500.0;
+        private const double TimeoutSeconds = 2700.0;
 
         static ParkourPlayModeTest()
         {
@@ -209,6 +209,8 @@ namespace WarriorWoke.EditorTools
             if (Runs("Rig"))            yield return Rig();
             if (Runs("ActionMotor"))    yield return ActionMotor();
             if (Runs("Combat"))         yield return Combat();
+            if (Runs("Enemies"))        yield return Enemies();
+            if (Runs("Bosses"))         yield return Bosses();
         }
 
         /// <summary>

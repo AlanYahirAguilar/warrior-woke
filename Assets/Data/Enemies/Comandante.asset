@@ -1,0 +1,134 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d164ef91c54d4334c8ef2d713d4a4bb8, type: 3}
+  m_Name: Comandante
+  m_EditorClassIdentifier: Assembly-CSharp::EnemyData
+  enemyName: El Comandante
+  kind: 3
+  bossStyle: 2
+  weapon: 0
+  tint: {r: 0.8, g: 0.64, b: 0.22, a: 1}
+  maxHealth: 450
+  poise: 40
+  iFrames: 0.1
+  walkSpeed: 1.7
+  runSpeed: 5.2
+  strafeSpeed: 2.4
+  turnRate: 720
+  sightRange: 30
+  sightAngle: 90
+  hearingRange: 12
+  loseTime: 6
+  investigateTime: 4
+  preferredMin: 1.8
+  preferredMax: 2.8
+  attackIntervalMin: 0.5
+  attackIntervalMax: 1
+  attacks:
+  - name: Corte 1
+    state: Corte_A
+    length: 0.43333337
+    rate: 1.25
+    activeStart: 0.425
+    activeEnd: 0.6875
+    damage: 20
+    heavy: 0
+    reach: 2.5263128
+    rootMotion: 1
+    bodyHit: 0
+    lunge: 0
+    windupHold: 0
+    vulnerableAfter: 0
+    next: 1
+  - name: Corte 2
+    state: Corte_B
+    length: 0.53333336
+    rate: 1.25
+    activeStart: 0.375
+    activeEnd: 0.55
+    damage: 22
+    heavy: 0
+    reach: 1.6376249
+    rootMotion: 0
+    bodyHit: 0
+    lunge: 0
+    windupHold: 0
+    vulnerableAfter: 0
+    next: 2
+  - name: Corte 3
+    state: Corte_C
+    length: 2
+    rate: 1.2
+    activeStart: 0.3
+    activeEnd: 0.35
+    damage: 24
+    heavy: 0
+    reach: 2.9214723
+    rootMotion: 1
+    bodyHit: 0
+    lunge: 0
+    windupHold: 0
+    vulnerableAfter: 0.2
+    next: -1
+  - name: Estocada
+    state: Estocada
+    length: 1.5666667
+    rate: 1.15
+    activeStart: 0.175
+    activeEnd: 0.2375
+    damage: 24
+    heavy: 0
+    reach: 4.097627
+    rootMotion: 1
+    bodyHit: 0
+    lunge: 0
+    windupHold: 0
+    vulnerableAfter: 0.25
+    next: -1
+  - name: Golpe alto
+    state: Golpe_Alto
+    length: 1.9333334
+    rate: 1
+    activeStart: 0.3875
+    activeEnd: 0.425
+    damage: 30
+    heavy: 1
+    reach: 1.9368075
+    rootMotion: 0
+    bodyHit: 0
+    lunge: 0
+    windupHold: 0.25
+    vulnerableAfter: 0.45
+    next: -1
+  - name: Tajo
+    state: Tajo
+    length: 1.5333334
+    rate: 1.1
+    activeStart: 0.2375
+    activeEnd: 0.3125
+    damage: 26
+    heavy: 0
+    reach: 1.8804224
+    rootMotion: 0
+    bodyHit: 0
+    lunge: 0
+    windupHold: 0
+    vulnerableAfter: 0.3
+    next: -1
+  blockChance: 0.3
+  dodgeChance: 0.3
+  punishChance: 0.8
+  guardDamageKept: 0.15
+  arrowDamage: 10
+  arrowSpeed: 28
+  aimTime: 0.7
+  retreatDistance: 5

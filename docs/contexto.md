@@ -13,8 +13,8 @@
 >
 > Última revisión completa: 2026-10-02. Actualizado el 2026-10-09 (Fase 3: vault, slide y combate;
 > fases 3 y 4 del motion matching: Animation Rigging y parkour con el `CharacterController`) y el
-> 2026-10-10 (obstáculos con acciones declaradas y personaje 25 % más rápido con las manos fijas en la
-> cornisa: P38, P39).
+> 2026-10-10 (obstáculos con acciones declaradas, personaje 25 % más rápido, manos fijas en la cornisa,
+> enemigos y jefes en 3D: P38–P40).
 
 ---
 
@@ -311,7 +311,10 @@ final · SFX y música básica · build para Windows.
    2026-10-10** (`arquitectura.md` §7.3): cada obstáculo declara las acciones que admite (P38); el
    personaje es **25 % más rápido** (el mocap se reproduce ×1.25: caminar 1.6, correr 4.25, sprint 6.0,
    atrás 2.5 m/s, P39) y responde antes; colgado de una cornisa, **las dos manos quedan fijas sobre el
-   borde** a la separación de los hombros.
+   borde** a la separación de los hombros; y hay **enemigos y jefes en 3D** (P40, `arquitectura.md`
+   §5.5): guerrero ligero, guerrero pesado, arquero, el líder del clan rival y el Comandante, en las
+   secciones 13 y 14 del área. Su apariencia (Ch45 teñido con armas de primitivas) es provisional hasta
+   los modelos del equipo.
 3. **No se implementa nada fuera del MVP** sin que antes funcione el MVP (GDD §25 y §28).
 
 ## 11. Cómo abrir el proyecto
@@ -321,12 +324,14 @@ final · SFX y música básica · build para Windows.
 - Unity Hub → **Add** → selecciona la carpeta `warrior-woke/`. La primera importación tarda varios
   minutos.
 - **Escena del juego:** `Assets/Scenes/Level-1.unity` (la única en Build Settings). Desde el
-  2026-10-01 es el **Parkour Test Area** (P24): un suelo plano y once secciones hechas con los prefabs
+  2026-10-01 es el **Parkour Test Area** (P24): un suelo plano y once secciones de parkour hechas con los prefabs
   estándar (P25), sin textos (01 locomoción · 02 vault bajo · 03 vault medio · 05 slide · 06 cornisa ·
   07 muro de escalada · 08 salto y aterrizaje · 09 combinado · 10 laboratorio de fluidez · 11 mantle ·
   12 combate, con un muñeco de entrenamiento a la derecha de la entrada; ver `features.md` F32). Desde el
   2026-10-10 (P38) no tiene perímetro, pilares, bordillos ni la sección 04: caer por el borde mata y se
-  reaparece en la entrada. Al dar Play apareces en su entrada,
+  reaparece en la entrada. Desde el mismo día (P40) el suelo sigue al sur de los carriles con la
+  sección 13 (un encuentro con cinco enemigos y una pista de pruebas vacía) y la 14 (las arenas de los
+  dos jefes: al entrar se cierra la puerta). Al dar Play apareces en su entrada,
   mirando hacia las secciones. Los niveles reales del GDD (§10) todavía no existen.
   `Assets/LowPolyCity/Scenes/CartoonLowPolyCityLite_01.unity` es solo la demo del asset pack y no
   tiene lógica del juego.
@@ -362,6 +367,11 @@ final · SFX y música básica · build para Windows.
   Motion Matching** rehace la base de MxM (hazlo si cambias las tomas de la base) y **Probar Motion
   Matching** la prueba en Play Mode (`[MxMProbe]` en la consola, `Logs/MxMProbe/metrics.csv`). Ver
   `arquitectura.md` §7.2.
+- **Enemigos:** **Tools → Warrior Woke → Configurar Enemigos** (`EnemySetup`) rehace el controller, los
+  datos (`Assets/Data/Enemies`) y los cinco prefabs (`Assets/Prefabs/Enemies`) midiendo cada ataque
+  sobre el modelo (`Logs/EnemyClips`). Después corre **Construir Parkour Test Area** (o Configurar
+  Animaciones del Jugador, que también lo hace): la escena coloca instancias de esos prefabs y hornea
+  el NavMesh. Ver `arquitectura.md` §5.5.
 - **Vaults y combate:** **Construir Catálogo de Vaults** rehace `Assets/Data/Parkour/VaultCatalog.asset`
   (hazlo si cambias las tomas de vault; después corre **Configurar Animaciones del Jugador**) y **Revisar
   Clips de Combate** dibuja y mide los golpes sobre Ch45 (`Logs/CombatClips`), de donde salen los tiempos

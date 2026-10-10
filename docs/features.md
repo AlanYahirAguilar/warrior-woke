@@ -440,31 +440,52 @@ Dependencias · Consideraciones técnicas · Falta**.
   diferencia de velocidad (kanabo más lento).
 - **Falta:** todo lo anterior. Plan en `arquitectura.md` §7.
 
-### F17 — IA de enemigos 🟡
+### F17 — IA de enemigos ✅ (P40, 2026-10-10)
 - **Objetivo:** arquero (50 HP, flechas de 10, distancia), guerrero ligero (80, cortes de 12,
   rápido, esquiva) y guerrero pesado (150, golpes de 25, lento, bloquea, embiste). FSM
   `Idle → Detectar → Acercarse → Atacar → Defenderse → Buscar → Regresar`, sin salir de su zona
   (GDD §5.14, §12, §21).
-- **Archivos:** `Enemy/Enemy.cs`, `Enemy/StateMachine/*`, `Core/Combat/EnemyData.cs`.
-- **Cómo funciona el código:** estados `Patrol → Chase → Attack → Dead`. La detección es una esfera
-  de `DetectionRange` filtrada por la layer `Player` + tag `Player` + línea de visión, y la pérdida
-  del objetivo es por `LoseTrackRange`. El ataque para al enemigo, activa la hitbox al 30 % de
-  `AttackDuration` y respeta `AttackCooldown`. Al morir espera 1.5 s y vuelve al pool; al salir del
-  pool revive con `InitializeHealth`.
-- **Cómo se implementó:** commit `796fac3` (29-sep), con la misma arquitectura que el jugador. El
-  2026-09-30 se corrigió que al morir desactivaba su propio GameObject (el `Hitbox` está en la
-  raíz) y nunca volvía al pool, que al reaparecer no revivía, que se detectaba a sí mismo como
-  jugador (tag `Player` + overlap sin máscara) y el `GetComponent` por tick. Se eliminaron
-  `Looter`/`Brute`.
-- **Problemas:** movimiento **2.5D** (Z congelado, eje X), el `Enemy.prefab` no tiene el script,
-  faltan los estados Defenderse, Buscar y Regresar, no hay zona asignada ni ataque a distancia y
-  no hay tipos del GDD.
-- **Falta:** reescritura 3D con NavMeshAgent (aprobada en P4; la apariencia llega en un paquete del
-  equipo). Plan en `arquitectura.md` §7.
+- **Archivos:** `Enemy/` (`Enemy`, `EnemyPerception`, `EnemyCoordinator`, `EnemyWeapon`, `EnemyAnimator`,
+  `EnemyRootMotion`, `Arrow`, `EnemyZone`), `Enemy/StateMachine/States/EnemyStates.cs`,
+  `Core/Combat/EnemyData.cs`, `Editor/EnemySetup.cs` (prefabs, controller y datos medidos),
+  `Editor/ParkourTestCircuitBuilder.cs` (S13 y el NavMesh).
+- **Cómo funciona:** cada enemigo es un `NavMeshAgent` con su FSM (`arquitectura.md` §5.5): ve (rango,
+  ángulo, línea libre), oye al jugador que corre o pelea, investiga, persigue dentro de su zona, guarda
+  su distancia y su posición alrededor del jugador, ataca **solo con turno** (2 cuerpo a cuerpo y 2
+  arqueros a la vez), se defiende (bloqueo, esquiva) y castiga la recuperación del jugador. Cada ataque
+  tiene anticipo, una **ventana de golpe medida en su clip** (fuera de ella el arma no hace daño), golpea
+  una vez por objetivo y nunca a través de un muro, y una recuperación castigable. El ligero entra
+  rápido, encadena tres cortes y se lanza con una estocada; el pesado avanza despacio, anuncia sus golpes
+  (anticipo retenido), bloquea, embiste y aguanta golpes ligeros sin dejar de golpear (pero le hacen
+  daño); el arquero dispara desde donde ve, no dispara si la línea está bloqueada (muros o aliados),
+  busca un punto con línea libre, se aleja si se le acercan y busca puestos elevados. Reacciones: Hit,
+  HitHeavy y Knockback según el golpe; muerte con animación.
+- **Apariencia:** Ch45 teñido por tipo (rojo el ligero, azul el pesado, verde el arquero) con katana,
+  kanabo o arco de primitivas, provisional hasta los modelos del equipo (P4). Imagen: `Logs/EnemyClips/lineup.png`.
+- **Dónde:** S13 (`features.md` F32): encuentro mixto y pista de pruebas.
+- **Probado (2026-10-10):** sección `Enemies` de `ParkourPlayModeTest` (resultados en `arquitectura.md` §5.5).
+- **Cómo se implementó:** el `Enemy.cs` 2.5D del 29-sep (con `EnemyGroundedStates`) se reescribió desde
+  cero; el `Enemy.prefab` anterior se eliminó (T2, T3). Al probar se corrigió: la IA usaba la raíz del
+  jugador (centro del cuerpo) como sus pies; los ataques que avanzan en su clip quedaban cortos sin root
+  motion; el alcance se medía con el punto más adelantado de la hoja, que en el golpe alto del pesado
+  está a un lado (fallaba por 7 cm): ahora es la mayor distancia a la que un cuerpo justo enfrente es tocado.
+- **Falta:** audio y efectos de impacto (F28, F29); modelos definitivos.
 
-### F18 — Jefes ⬜
-- Líder del clan rival (300 HP, katana, 15–25) y el Comandante (450 HP, katana, 20–30). Sin fases.
-  La arena bloquea la salida (GDD §5.15, §13). Plan: `Boss : Enemy` + `BossArena`.
+### F18 — Jefes ✅ (P40, 2026-10-10)
+- **Objetivo:** el líder del clan rival (300 HP, 15–25) y el Comandante (450, 20–30); al entrar en su
+  zona se bloquea la salida; sin fases (GDD §5.15, §13).
+- **Archivos:** los de F17 más `Enemy/BossArena.cs`; datos `Data/Enemies/LiderClan` y `Comandante`.
+- **Cómo funciona:** cada jefe tiene su arena amurallada en S14. Al entrar 2 m, la puerta se cierra y el
+  jefe ataca; al morir el jefe, la puerta queda abierta; si el jugador muere dentro, la puerta se abre y
+  el jefe vuelve a su puesto con la vida completa. **Líder:** presiona de cerca, abre con combos de tres
+  cortes (88 % de sus aperturas), se lanza con la estocada desde lejos, bloquea, esquiva y castiga, y queda
+  abierto 1.1 s tras su golpe alto. **Comandante:** más rápido y con ventanas cortas; cuenta lo que hace el
+  jugador frente a él y se adapta: contra un jugador que bloquea elige golpes que rompen la guardia (del
+  44 % al 94 % medido), contra uno que esquiva retiene el anticipo, contra uno que ataca mucho guarda más.
+  Ninguno repite la misma apertura dos veces seguidas. Sin barras de vida.
+- **Probado (2026-10-10):** sección `Bosses` de `ParkourPlayModeTest`: puertas, persecución, repertorio
+  variado (4–5 ataques distintos en 16 s), defensa ante los ataques del jugador, que no salen de su
+  arena, ventanas medidas, identidades y el reinicio al morir el jugador.
 
 ### F19 — Checkpoints, muerte y reaparición 🟡
 - Checkpoint automático al cruzarlo (una activación). Al morir, reaparecer en el último con la vida
@@ -594,6 +615,8 @@ Dependencias · Consideraciones técnicas · Falta**.
   | 09 Combinado | 26 | `Combined`: Step (−6) → MediumVault (−12) → Slide (−20.5) → Ledge de 3 m de fondo (−30) → LowVault (−42) → Mantle (−50) | Todo en una sola carrera |
   | 10 Laboratorio de fluidez | 32 | `LowVault` (−14) y pista libre detrás | Slide hacia un obstáculo (se detiene o encadena el vault), frenadas, giros y slides a distintas velocidades: para mirar peso, contacto, transición y recuperación |
   | 11 Mantle | 38 | `Mantle` 1.3 m (−8) · 0.9 m (−18) · 1.5 m (−28) | Subirse desde parado y corriendo, en todo el rango |
+  | 13 Encuentro (P40) | −14 / 25 (z −64…−100) | Encuentro mixto: dos ligeros, un pesado y dos arqueros en puestos de 1.6 m, con cobertura; al lado la pista de pruebas con un muro de 3 m | IA de enemigos (secciones `Enemies`) |
+  | 14 Jefes (P40) | −14 y 24 (z −114…−142) | Dos arenas amuralladas de 28 × 28 m con puerta | Jefes (sección `Bosses`) |
 
   Regenerar: **Tools → Warrior Woke → Construir Parkour Test Area** (valida que no quede ningún
   collider fuera del área y que cada obstáculo cumpla el estándar).
@@ -954,6 +977,7 @@ problema, la causa, la solución y el estado (formato del GDD §29 para bugs).
 | 2026-10-09/10 | (ver `git log`) | Axel | Motion matching, fase 4 (P30): el root motion del parkour (vault, agarre, subida, mantle, drop) se aplica con `CharacterController.Move` en lugar de apagar el controller; solo el obstáculo de la acción se deja atravesar (`Physics.IgnoreCollision` con los colliders que mide `EnvironmentChecker`) y la cápsula se reduce a torso y cabeza mientras dura (detalle abajo). Sección `ActionMotor` nueva; `ParkourPlayModeTest` **540/541** (el slide anticipado, intermitente). Con esto el plan de §7.2 quedó completo. |
 | 2026-10-10 | `567f906` | Axel | Fase de desarrollo del 2026-10-10, fases 1–2 (P38): auditoría y obstáculos: fuera pilares, bordillos, el vault alto de S04 y el perímetro; cada obstáculo declara sus acciones; límite de caída y muerte con reaparición (`arquitectura.md` §7.3). |
 | 2026-10-10 | (ver `git log`) | Axel | Fase 3 (P39): mocap ×1.25 con el parche `PastScale` de MxM (T26 #5), favour tag de las carreras de 100STYLE, traspaso de marcha orientada a libre a 1 m/s, `Velocity` medida sin el sesgo de la velocidad pedida, regulador que también acelera (hasta ×1.3, nunca más de ×1.1 el sprint), frenadas libres ×1.15 y un tope que impide volver a acelerar al detenerse, respuesta fuera de MxM y **agarres fijos de las dos manos en la cornisa**. Medido: caminar 1.54, correr 4.3, sprint 6.0, atrás 2.4 m/s, se detiene en ~1 s (`arquitectura.md` §7.3). |
+| 2026-10-10 | (ver `git log`) | Axel | Fases 4–8 (P40): enemigos y jefes en 3D (`arquitectura.md` §5.5, F17, F18): cinco prefabs generados por `EnemySetup` con ataques medidos, FSM, turnos de ataque, arquero, arenas de jefe; S13 y S14 en el área con NavMesh; golpes que no atraviesan muros; secciones `Enemies` y `Bosses` en la prueba. |
 | 2026-10-07 | (ver `git log`) | Axel | Motion matching, fase 1 (P29): MxM 2.3.3 embebido con un parche para Unity 6.6 (T26), base de datos horneada desde código (`MxMLocomotionBuilder`: 24 118 poses de Kinematica y 100STYLE, el estilo de strafe separado por tag) y prueba en Play Mode (`MxMLocomotionProbe`). 50/57: velocidades, respuesta, giros de 180°, retroceso y patinaje cumplen; quedan suelas hundidas en giros de 90° y strafe, frenado lento y strafe derecho lento (T27). La base va por Git LFS. El jugador todavía no la usa (detalle abajo). |
 | 2026-10-02 | (sin commit) | Axel | Reconstrucción del movimiento (P28), fases 2–10: animaciones CC0 de Quaternius, herramienta de medición de clips, locomoción direccional con marchas (caminar, strafe, retroceso a 3.5 m/s, agacharse), slide con bucle real, mantle, drop y salto de cornisa, roll de aterrizaje, laboratorio S11 y limpieza (detalle abajo). 341/341 en Play Mode. |
 | 2026-10-02 | (sin commit) | Axel | Reconstrucción del movimiento (P28): auditoría, investigación de repositorios y licencias, arquitectura D aprobada; fase 1: cámara orbital con ratón (P5) y giro limitado por la aceleración lateral (media vuelta que frena y pivota). 304/304 en Play Mode. |

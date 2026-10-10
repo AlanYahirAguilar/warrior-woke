@@ -1,0 +1,59 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d164ef91c54d4334c8ef2d713d4a4bb8, type: 3}
+  m_Name: Arquero
+  m_EditorClassIdentifier: Assembly-CSharp::EnemyData
+  enemyName: Arquero
+  kind: 2
+  bossStyle: 0
+  weapon: 2
+  tint: {r: 0.36, g: 0.56, b: 0.3, a: 1}
+  maxHealth: 50
+  poise: 10
+  iFrames: 0.1
+  walkSpeed: 1.6
+  runSpeed: 4.2
+  strafeSpeed: 1.8
+  turnRate: 480
+  sightRange: 26
+  sightAngle: 75
+  hearingRange: 9
+  loseTime: 3
+  investigateTime: 4
+  preferredMin: 7
+  preferredMax: 15
+  attackIntervalMin: 1.4
+  attackIntervalMax: 2.2
+  attacks:
+  - name: Disparo
+    state: Shoot
+    length: 0.96666676
+    rate: 1
+    activeStart: 0.45
+    activeEnd: 0.525
+    damage: 10
+    heavy: 0
+    reach: 0.1519647
+    rootMotion: 0
+    bodyHit: 0
+    lunge: 0
+    windupHold: 0
+    vulnerableAfter: 0
+    next: -1
+  blockChance: 0
+  dodgeChance: 0.3
+  punishChance: 0
+  guardDamageKept: 0.2
+  arrowDamage: 10
+  arrowSpeed: 28
+  aimTime: 0.7
+  retreatDistance: 5

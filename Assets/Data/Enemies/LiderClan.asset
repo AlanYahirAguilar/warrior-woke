@@ -1,0 +1,119 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d164ef91c54d4334c8ef2d713d4a4bb8, type: 3}
+  m_Name: LiderClan
+  m_EditorClassIdentifier: Assembly-CSharp::EnemyData
+  enemyName: "L\xEDder del clan rival"
+  kind: 3
+  bossStyle: 1
+  weapon: 0
+  tint: {r: 0.58, g: 0.12, b: 0.12, a: 1}
+  maxHealth: 300
+  poise: 35
+  iFrames: 0.1
+  walkSpeed: 1.7
+  runSpeed: 5
+  strafeSpeed: 2.2
+  turnRate: 600
+  sightRange: 30
+  sightAngle: 90
+  hearingRange: 12
+  loseTime: 6
+  investigateTime: 4
+  preferredMin: 1.7
+  preferredMax: 2.6
+  attackIntervalMin: 0.6
+  attackIntervalMax: 1.2
+  attacks:
+  - name: Corte 1
+    state: Corte_A
+    length: 0.43333337
+    rate: 1.2
+    activeStart: 0.4375
+    activeEnd: 0.6875
+    damage: 15
+    heavy: 0
+    reach: 2.484684
+    rootMotion: 1
+    bodyHit: 0
+    lunge: 0
+    windupHold: 0
+    vulnerableAfter: 0.1
+    next: 1
+  - name: Corte 2
+    state: Corte_B
+    length: 0.53333336
+    rate: 1.2
+    activeStart: 0.375
+    activeEnd: 0.55
+    damage: 15
+    heavy: 0
+    reach: 1.6102461
+    rootMotion: 0
+    bodyHit: 0
+    lunge: 0
+    windupHold: 0
+    vulnerableAfter: 0.1
+    next: 2
+  - name: Corte 3
+    state: Corte_C
+    length: 2
+    rate: 1.15
+    activeStart: 0.3
+    activeEnd: 0.35
+    damage: 18
+    heavy: 0
+    reach: 2.8582633
+    rootMotion: 1
+    bodyHit: 0
+    lunge: 0
+    windupHold: 0
+    vulnerableAfter: 0.3
+    next: -1
+  - name: Estocada
+    state: Estocada
+    length: 1.5666667
+    rate: 1.1
+    activeStart: 0.175
+    activeEnd: 0.2375
+    damage: 18
+    heavy: 0
+    reach: 3.9907622
+    rootMotion: 1
+    bodyHit: 0
+    lunge: 0
+    windupHold: 0
+    vulnerableAfter: 0.4
+    next: -1
+  - name: Golpe alto
+    state: Golpe_Alto
+    length: 1.9333334
+    rate: 0.95
+    activeStart: 0.3875
+    activeEnd: 0.425
+    damage: 25
+    heavy: 1
+    reach: 1.915939
+    rootMotion: 0
+    bodyHit: 0
+    lunge: 0
+    windupHold: 0.3
+    vulnerableAfter: 1.1
+    next: -1
+  blockChance: 0.25
+  dodgeChance: 0.25
+  punishChance: 0.75
+  guardDamageKept: 0.2
+  arrowDamage: 10
+  arrowSpeed: 28
+  aimTime: 0.7
+  retreatDistance: 5

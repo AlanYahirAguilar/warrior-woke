@@ -1,0 +1,89 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d164ef91c54d4334c8ef2d713d4a4bb8, type: 3}
+  m_Name: Pesado
+  m_EditorClassIdentifier: Assembly-CSharp::EnemyData
+  enemyName: Guerrero pesado
+  kind: 1
+  bossStyle: 0
+  weapon: 1
+  tint: {r: 0.32, g: 0.38, b: 0.55, a: 1}
+  maxHealth: 150
+  poise: 45
+  iFrames: 0.1
+  walkSpeed: 1.3
+  runSpeed: 3
+  strafeSpeed: 1.2
+  turnRate: 300
+  sightRange: 18
+  sightAngle: 70
+  hearingRange: 8
+  loseTime: 3
+  investigateTime: 4
+  preferredMin: 2.4
+  preferredMax: 3.3
+  attackIntervalMin: 1.3
+  attackIntervalMax: 2.1
+  attacks:
+  - name: Golpe alto
+    state: Golpe_Alto
+    length: 1.9333334
+    rate: 0.85
+    activeStart: 0.3875
+    activeEnd: 0.425
+    damage: 25
+    heavy: 1
+    reach: 1.9708225
+    rootMotion: 0
+    bodyHit: 0
+    lunge: 0
+    windupHold: 0.45
+    vulnerableAfter: 0.8
+    next: -1
+  - name: Tajo pesado
+    state: Tajo
+    length: 1.5333334
+    rate: 0.8
+    activeStart: 0.2375
+    activeEnd: 0.3125
+    damage: 25
+    heavy: 1
+    reach: 2.1050432
+    rootMotion: 0
+    bodyHit: 0
+    lunge: 0
+    windupHold: 0.3
+    vulnerableAfter: 0.6
+    next: -1
+  - name: Embestida
+    state: Embestida
+    length: 1.1
+    rate: 0.95
+    activeStart: 0.05
+    activeEnd: 0.15
+    damage: 25
+    heavy: 1
+    reach: 2.0339909
+    rootMotion: 1
+    bodyHit: 1
+    lunge: 0
+    windupHold: 0.35
+    vulnerableAfter: 1
+    next: -1
+  blockChance: 0.35
+  dodgeChance: 0
+  punishChance: 0.3
+  guardDamageKept: 0.2
+  arrowDamage: 10
+  arrowSpeed: 28
+  aimTime: 0.7
+  retreatDistance: 5
