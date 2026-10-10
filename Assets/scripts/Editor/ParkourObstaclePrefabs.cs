@@ -202,7 +202,7 @@ namespace WarriorWoke.EditorTools
         public static bool ValidateSceneObstacles(out int count)
         {
             var issues = new List<string>();
-            ParkourObstacle[] all = Object.FindObjectsByType<ParkourObstacle>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+            ParkourObstacle[] all = Object.FindObjectsByType<ParkourObstacle>(FindObjectsInactive.Include);
             count = all.Length;
             foreach (ParkourObstacle o in all) o.Validate(issues);
             foreach (string issue in issues) Debug.LogWarning($"[ParkourObstacle] {issue}");

@@ -43,6 +43,10 @@ namespace WarriorWoke.EditorTools
             d.groundLayers = LayerMask.GetMask("Ground", "Obstacle");
             if (d.groundLayers.value == 0) d.groundLayers = ~0;
 
+            // A hand constraint was tried and removed (P39): the ledge's hands stay in PlayerContactIK
+            Transform oldHands = rigTransform.Find("HandContact");
+            if (oldHands != null) Object.DestroyImmediate(oldHands.gameObject, true);
+
             Transform lookTransform = rigTransform.Find(LookName);
             if (withLook)
             {

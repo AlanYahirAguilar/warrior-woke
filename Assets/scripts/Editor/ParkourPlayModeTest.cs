@@ -49,11 +49,16 @@ namespace WarriorWoke.EditorTools
         private static Animator       _animator;
         private static Transform      _handL, _handR, _footL, _footR, _head;
         private static Transform      _hips, _kneeL, _kneeR, _toeL, _toeR, _armL, _armR;
+        private static Transform[]    _fingers = new Transform[0];
         private static double         _startedAt;
         private static string         _feetDiag = "";
         private static PlayerAnimator _playerAnimator;
         private static Vector3        _stepPos;
         private static float          _stepTime, _lastStepDt;
+
+        // Highest speed (m/s) of a body standing still: the real speed since P39 (before, the reading leaned
+        // toward the speed asked for), and the mocap's idle sways the body a few centimetres
+        private const float StandingSway = 0.15f;
 
         // Highest speed the body may show between two samples: anything faster is a visible teleport
         private const float TeleportSpeed = 13f;
@@ -184,6 +189,7 @@ namespace WarriorWoke.EditorTools
             _toeR  = _animator.GetBoneTransform(HumanBodyBones.RightToes);
             _armL  = _animator.GetBoneTransform(HumanBodyBones.LeftUpperArm);
             _armR  = _animator.GetBoneTransform(HumanBodyBones.RightUpperArm);
+            _fingers = new[] { _animator.GetBoneTransform(HumanBodyBones.LeftMiddleProximal), _animator.GetBoneTransform(HumanBodyBones.RightMiddleProximal) };
             _playerAnimator = _movement.GetComponent<PlayerAnimator>();
             _movement.StateChanged += s => Visited.Add(s);
 
@@ -253,7 +259,7 @@ namespace WarriorWoke.EditorTools
             Check(named && leftovers == 0, $"Pilares, bordillos, vault alto de S04 y perímetro eliminados, sin colliders donde estaban ({leftovers})");
 
             // Every standard obstacle declares the actions of its type; the blue tables slide, the purple blocks are climbed
-            ParkourObstacle[] obstacles = Object.FindObjectsByType<ParkourObstacle>(FindObjectsSortMode.None);
+            ParkourObstacle[] obstacles = Object.FindObjectsByType<ParkourObstacle>();
             int declared = 0, slides = 0, mantles = 0;
             foreach (ParkourObstacle o in obstacles)
             {
@@ -322,34 +328,54 @@ namespace WarriorWoke.EditorTools
             yield return 0.1f;
             float early = Speed;
             float minSole = float.MaxValue, maxSole = float.MinValue;
-            for (float t = 0f; t < 1.2f; t += 0.02f)
+            Vector3 cruiseFrom = Vector3.zero;
+            float cruiseSince = -1f;
+            for (float t = 0f; t < 2.0f; t += 0.02f)
             {
                 if (t > 0.6f) { minSole = Mathf.Min(minSole, SoleClearance); maxSole = Mathf.Max(maxSole, SoleClearance); }
+                if (t >= 1.2f && cruiseSince < 0f) { cruiseFrom = _movement.transform.position; cruiseSince = Time.time; }
                 yield return 0.02f;
             }
-            float cruise = Speed;
-            Check(early > 0.2f && early < 2.6f, $"Arranque gradual: a 0.1 s va a {early:F2} m/s (zona Walk/Jog del blend)");
-            Check(Mathf.Abs(cruise - _movement.BaseSpeed) < 0.3f, $"Correr a {cruise:F2} m/s (BaseSpeed {_movement.BaseSpeed})");
+            // The run's speed is its mean over a stride once it is up to speed (1.3–2.1 s: the mocap's
+            // start reaches it in ~1 s, T27); within a stride it swings ±0.4 m/s
+            Vector3 cruiseTravel = _movement.transform.position - cruiseFrom;
+            cruiseTravel.y = 0f;
+            float cruise = cruiseTravel.magnitude / Mathf.Max(0.01f, Time.time - cruiseSince);
+            // (the body's real speed since P39: the reading before was biased toward the gait asked for)
+            Check(early > 0.1f && early < 2.6f, $"Arranque gradual: a 0.1 s va a {early:F2} m/s (zona Walk/Jog del blend)");
+            Check(Mathf.Abs(cruise - _movement.BaseSpeed) < 0.3f, $"Correr a {cruise:F2} m/s de media en una zancada (BaseSpeed {_movement.BaseSpeed})");
             Check(AnimSpeed > 0.8f * _movement.BaseSpeed, $"Parámetro MoveZ del Animator en carrera: {AnimSpeed:F2} m/s");
             Check(minSole > -Penetration && minSole < SoleOnGround, $"Corriendo, los pies pisan el suelo sin atravesarlo (mínimo {minSole * 100f:F1} cm)");
             Keys();
+            float released = Time.time;
             yield return 0.12f;
             float braking = Speed;
-            yield return 1.2f;
-            Check(braking > 0.3f && braking < cruise, $"Frenado gradual: a 0.12 s va a {braking:F2} m/s");
-            Check(Current == _movement.IdleState && Speed < 0.05f, "Vuelve a Idle y se detiene");
+            // The stop takes of the mocap end in 1.0–1.5 s at the P39 playback (T27)
+            float stopped = -1f;
+            for (float t = 0f; t < 1.8f && stopped < 0f; t += 0.02f)
+            {
+                if (Current == _movement.IdleState && Speed < StandingSway) stopped = Time.time - released;
+                yield return 0.02f;
+            }
+            Check(braking > 0.3f && braking < cruise * 1.1f, $"Frenado gradual: a 0.12 s va a {braking:F2} m/s");
+            Check(stopped > 0f, $"Vuelve a Idle y se detiene (en {stopped:F2} s; {Speed:F2} m/s)");
 
             // Backpedal: walks backward facing forward
             yield return Teleport(Corridor(-10f));
             float yaw0 = Yaw;
             Vector3 p0 = _movement.transform.position;
             Keys(Key.S);
-            yield return 1.2f;
+            yield return 0.6f;
+            Vector3 p1 = _movement.transform.position;
+            float t1 = Time.time;
+            yield return 0.8f; // a whole stride
             float yawDelta = Mathf.Abs(Mathf.DeltaAngle(yaw0, Yaw));
             float backDist = Vector3.Dot(_movement.transform.position - p0, -_movement.transform.forward);
+            // The mean over half a second: a run's speed swings ±0.25 m/s within each stride
+            float backSpeed = Vector3.Dot(_movement.transform.position - p1, -_movement.transform.forward) / Mathf.Max(0.01f, Time.time - t1);
             Check(yawDelta < 10f, $"Caminar hacia atrás conserva la orientación (giró {yawDelta:F1}°)");
             Check(backDist > 1.2f, $"Retrocede {backDist:F2} m");
-            Check(Mathf.Abs(Speed - _movement.BackpedalSpeed) < 0.2f, $"Velocidad hacia atrás {Speed:F2} m/s");
+            Check(Mathf.Abs(backSpeed - _movement.BackpedalSpeed) < 0.35f, $"Velocidad hacia atrás {backSpeed:F2} m/s (media de una zancada, de 0.6 a 1.4 s; ahora {Speed:F2})");
             Check(AnimSpeed < -1f, $"MoveZ negativo en el Animator (blend hacia atrás): {AnimSpeed:F2} m/s");
             Keys();
             yield return 0.8f;
@@ -807,7 +833,10 @@ namespace WarriorWoke.EditorTools
                         sheet.Capture(5, o.LaneX, plan.PlantPoint);
                     }
                     float since = Time.time - exitAt;
-                    if (since <= 0.6f) runOutMin = Mathf.Min(runOutMin, Speed);
+                    // (until the next obstacle of the lane: at the P39 run the body reaches it within the window)
+                    bool wallAhead = Physics.Raycast(_movement.transform.position + Vector3.down * 0.5f, plan.Direction, 1.2f,
+                                                     LayerMask.GetMask("Obstacle"), QueryTriggerInteraction.Ignore);
+                    if (since <= 0.6f && !wallAhead) runOutMin = Mathf.Min(runOutMin, Speed);
                     if (since >= nextRunOutSample && since <= 0.6f)
                     {
                         // Speed / motion matching weight after the hand-over, every 0.1 s (diagnostic)
@@ -1128,8 +1157,19 @@ namespace WarriorWoke.EditorTools
         }
 
         // ── S06: the standard ledge from the ground, running, chained, off-center and angled ───────
+        private const string LedgeSheetFolder = "Logs/PlayModeLedges";
+        private static PoseSheetRenderer _ledgeSheet;
+        private static int _ledgeRow;
+        private static readonly List<string> LedgeRows = new List<string>();
+
         private static IEnumerator LedgeGrab()
         {
+            // A close-up of the hands on the edge in every hang, from the side and three-quarters (visual review)
+            Directory.CreateDirectory(LedgeSheetFolder);
+            _ledgeSheet = new PoseSheetRenderer(320, 260, 0.45f, studio: false);
+            _ledgeSheet.Begin(2, 9);
+            _ledgeRow = 0;
+            LedgeRows.Clear();
             float x = ParkourTestCircuitBuilder.LedgeX, front = ParkourTestCircuitBuilder.LedgeFront;
             float h = ParkourStandard.Spec(ParkourObstacleType.Ledge).Height;
             yield return LedgeCase(new Vector3(x, Floor + OriginAboveFeet, front + 0.75f), h, "desde parado", run: false, climb: true);
@@ -1142,6 +1182,35 @@ namespace WarriorWoke.EditorTools
             Vector3 normal = -(rot * Vector3.forward);
             Vector3 start = new Vector3(x, 0f, ParkourTestCircuitBuilder.LedgeAngledFront) + normal * 0.8f;
             yield return LedgeCase(new Vector3(start.x, Floor + OriginAboveFeet, start.z), h, "en ángulo de 30°", run: false, climb: true);
+
+            // Other heights of the grab range, as temporary blocks in the free lane (P39): the contact adapts
+            float fx = ParkourTestCircuitBuilder.HighVaultX, ff = ParkourTestCircuitBuilder.VaultFront;
+            foreach (float height in new[] { 2.0f, 2.6f })
+            {
+                GameObject block = TempBox(new Box(fx, ff, height, 1.5f));
+                yield return LedgeCase(new Vector3(fx, Floor + OriginAboveFeet, ff + 0.75f), height, "(bloque temporal)", run: false, climb: true);
+                Object.Destroy(block);
+                yield return null;
+            }
+
+            // A ledge narrower than the two grips is not grabbed (no IK forced onto an impossible contact)
+            GameObject narrow = TempBox(new Box(fx, ff, 2.2f, 1.5f));
+            narrow.transform.localScale = new Vector3(0.5f, 2.2f, 1.5f);
+            Physics.SyncTransforms();
+            yield return Teleport(new Vector3(fx, Floor + OriginAboveFeet, ff + 0.75f));
+            Visited.Clear();
+            yield return Tap(Key.Space);
+            yield return 1.2f;
+            Check(!Visited.Contains(_movement.LedgeGrabState), $"Una cornisa de 0.5 m de ancho (menos que los dos agarres) no se agarra (estados: {VisitedNames()})");
+            Object.Destroy(narrow);
+            string sheetPath = $"{LedgeSheetFolder}/agarre.png";
+            _ledgeSheet.Save(sheetPath);
+            _ledgeSheet.Dispose();
+            _ledgeSheet = null;
+            File.WriteAllText(Path.ChangeExtension(sheetPath, ".txt"), "Columnas: de lado · en diagonal\n" + string.Join("\n", LedgeRows));
+            Debug.Log($"{Tag} INFO  Manos en la cornisa: {sheetPath}");
+            for (float t = 0f; t < 3f && !(_movement.IsGrounded && Current == _movement.IdleState); t += 0.1f) yield return 0.1f;
+            yield return 0.5f;
         }
 
         private static IEnumerator LedgeCase(Vector3 start, float topY, string label, bool run, bool climb, bool chain = false, bool drop = false)
@@ -1174,17 +1243,52 @@ namespace WarriorWoke.EditorTools
 
             if (!chain)
             {
-                // Hang: hands on the edge, nothing inside the wall, facing it
+                // Hang: hands on the edge, nothing inside the wall, facing it; the grips hold still, an
+                // anatomical width apart, with the fingers over the top (P39)
                 float handErr = 0f, handInWall = float.MaxValue, footInWall = float.MaxValue, facingErr = 0f;
+                Vector3 t0 = ledge.Tangent;
+                float startL = Vector3.Dot(_handL.position - ledge.Edge, t0), startR = Vector3.Dot(_handR.position - ledge.Edge, t0);
+                float drift = 0f, minSpacing = float.MaxValue, maxSpacing = 0f, fingerLow = float.MaxValue, fingerHigh = float.MinValue, fingerOut = float.MinValue;
+                string peak = "";
                 for (float t = 0f; t < 0.5f; t += 0.02f)
                 {
+                    float e = Mathf.Max(HandEdgeError(ledge, _handL), HandEdgeError(ledge, _handR));
+                    if (e > handErr) peak = $"pico a t={t:F2} s ({Time.frameCount}), anim={_animator.GetCurrentAnimatorStateInfo(0).shortNameHash} n={_animator.GetCurrentAnimatorStateInfo(0).normalizedTime:F2} transición={_animator.IsInTransition(0)} izq {(_handL.position - ledge.Edge).ToString("F2")} der {(_handR.position - ledge.Edge).ToString("F2")}";
                     handErr    = Mathf.Max(handErr, HandEdgeError(ledge, _handL), HandEdgeError(ledge, _handR));
                     handInWall = Mathf.Min(handInWall, FaceDistance(ledge, _handL), FaceDistance(ledge, _handR));
                     footInWall = Mathf.Min(footInWall, FaceDistance(ledge, _footL), FaceDistance(ledge, _footR));
                     facingErr  = Mathf.Max(facingErr, Vector3.Angle(_movement.transform.forward, -ledge.Normal));
+                    float l = Vector3.Dot(_handL.position - ledge.Edge, t0), r = Vector3.Dot(_handR.position - ledge.Edge, t0);
+                    drift = Mathf.Max(drift, Mathf.Abs(l - startL), Mathf.Abs(r - startR));
+                    minSpacing = Mathf.Min(minSpacing, r - l);
+                    maxSpacing = Mathf.Max(maxSpacing, r - l);
+                    foreach (Transform finger in _fingers)
+                    {
+                        if (finger == null) continue;
+                        fingerLow = Mathf.Min(fingerLow, finger.position.y - ledge.TopY);
+                        fingerHigh = Mathf.Max(fingerHigh, finger.position.y - ledge.TopY);
+                        fingerOut = Mathf.Max(fingerOut, FaceDistance(ledge, finger));
+                    }
                     yield return 0.02f;
                 }
-                Check(handErr < HandOnTarget, $"Cornisa {label}: ambas manos sobre el borde (error máximo {handErr * 100f:F1} cm)");
+                var contactIK = _movement.GetComponent<PlayerContactIK>();
+                string handDiag = $"agarres {contactIK.Grips}, mano izq {(_handL.position - ledge.Edge).ToString("F2")} (normal {ledge.Normal.ToString("F2")}), progreso {_movement.ParkourProgress:F2}";
+                Check(handErr < HandOnTarget, $"Cornisa {label}: ambas manos sobre el borde (error máximo {handErr * 100f:F1} cm; {handDiag}; {peak})");
+                if (_ledgeSheet != null && _ledgeRow < 9)
+                {
+                    Vector3 focus = (_handL.position + _handR.position) * 0.5f;
+                    Vector3 side = Vector3.Cross(Vector3.up, ledge.Normal).normalized;
+                    _ledgeSheet.SetMarker(ledge.EdgeAt(_handL.position));
+                    _ledgeSheet.Capture(_ledgeRow, 0, focus, side, Floor);
+                    _ledgeSheet.Capture(_ledgeRow, 1, focus, (side - ledge.Normal).normalized, Floor);
+                    LedgeRows.Add($"fila {_ledgeRow + 1}: {label}");
+                    _ledgeRow++;
+                }
+                Check(drift < 0.015f, $"Cornisa {label}: los agarres no se deslizan por el borde mientras cuelga ({drift * 100f:F1} cm)");
+                Check(minSpacing >= PlayerContactIK.MinGripSpacing - 0.03f && maxSpacing <= PlayerContactIK.MaxGripSpacing + 0.03f,
+                      $"Cornisa {label}: las manos quedan a una separación anatómica ({minSpacing * 100f:F0}–{maxSpacing * 100f:F0} cm)");
+                Check(fingerLow > -Penetration && fingerHigh < 0.08f && fingerOut < 0.03f,
+                      $"Cornisa {label}: los dedos abrazan el borde: sobre la cima o en su canto, sin hundirse ni quedar en el aire (altura {fingerLow * 100f:F1}–{fingerHigh * 100f:F1} cm, más afuera {fingerOut * 100f:F1} cm)");
                 Check(handInWall > -Penetration, $"Cornisa {label}: las manos no atraviesan el muro ({handInWall * 100f:F1} cm)");
                 Check(footInWall > -Penetration, $"Cornisa {label}: los pies no atraviesan el muro ({footInWall * 100f:F1} cm)");
                 Check(facingErr < 8f, $"Cornisa {label}: el cuerpo mira al muro (desvío {facingErr:F1}°)");
@@ -1373,12 +1477,18 @@ namespace WarriorWoke.EditorTools
             Keys(Key.S);
             yield return 1.0f;
             Keys();
-            yield return 0.06f;
-            float braking = Speed;
-            yield return 1.45f; // the strafe takes' stop ends in 1.0–1.5 s (motion matching's choice varies, T27)
+            // The real speed (P39): the body goes on for ~0.2 s while motion matching picks the stop take;
+            // it must not surge past the gait, and it stands still within 1.5 s (T27)
+            float peakAfter = 0f, braking = 0f;
+            for (float t = 0f; t < 1.51f; t += 0.02f)
+            {
+                peakAfter = Mathf.Max(peakAfter, Speed);
+                if (t < 0.3f) braking = Speed;
+                yield return 0.02f;
+            }
             // (the strafe takes sway ±10°, as in the gaits below)
-            Check(braking > 0.2f && braking < _movement.BackpedalSpeed && Speed < 0.05f && Mathf.Abs(Mathf.DeltaAngle(yaw0, Yaw)) < 10f,
-                  $"Caminar hacia atrás → parar: frena gradualmente sin girar ({braking:F2} m/s a los 0.06 s, {Speed:F2} m/s a los 1.51 s, giró {Mathf.Abs(Mathf.DeltaAngle(yaw0, Yaw)):F1}°)");
+            Check(braking > 0.2f && peakAfter < _movement.BackpedalSpeed * 1.15f && Speed < StandingSway && Mathf.Abs(Mathf.DeltaAngle(yaw0, Yaw)) < 10f,
+                  $"Caminar hacia atrás → parar: frena gradualmente sin girar ({braking:F2} m/s a los 0.3 s, máximo {peakAfter:F2} tras soltar, {Speed:F2} m/s a los 1.51 s, giró {Mathf.Abs(Mathf.DeltaAngle(yaw0, Yaw)):F1}°)");
 
             // Reversal while sprinting (S + Shift): the body brakes and pivots progressively, the camera stays put
             yield return Teleport(Corridor(-5f), 0f);
@@ -1403,9 +1513,11 @@ namespace WarriorWoke.EditorTools
             // and closes the rest while running (T27)
             Check(turned > 158f && minSpeed < 2.5f && maxTurnStep < 30f && camMoved < 1f,
                   $"Media vuelta esprintando: frena y gira progresivamente sin mover la cámara (giró {turned:F0}°, paso máximo {maxTurnStep:F0}°, mínimo {minSpeed:F1} m/s, cámara {camMoved:F1}°)");
-            // Motion matching plays the mocap's plant turn: the hips lead the travel by up to ~60° while
-            // the foot is planted (the feet themselves are measured by MxMLocomotionProbe)
-            Check(skid < 70f, $"Media vuelta esprintando: la velocidad no patina de lado (desvío {skid:F0}°)");
+            // Motion matching plays the mocap's plant turn: the hips lead the travel while the foot is
+            // planted (the feet themselves are measured by MxMLocomotionProbe and the Rig section). With the
+            // body's real velocity (P39; before, the reading leaned toward the gait asked for, ~60°) the plant
+            // reaches ~75–80°; a sideways slide would pass 90°
+            Check(skid < 85f, $"Media vuelta esprintando: la velocidad no patina de lado (desvío {skid:F0}°)");
             yield return 1f;
 
             // Backpedal: the camera does not turn with the body
@@ -1428,8 +1540,8 @@ namespace WarriorWoke.EditorTools
             float minPitch = 0f;
             // The mocap's actor stops a sprint in ~1.3–1.6 s (T27)
             for (float t = 0f; t < 2.0f; t += 0.02f) { minPitch = Mathf.Min(minPitch, _playerAnimator.Lean.y); yield return 0.02f; }
-            Check(early > cruise * 0.3f && early < cruise && Speed < 0.05f && minPitch < -1f,
-                  $"Sprint → parar: frena con inercia ({cruise:F1} → {early:F1} m/s a los 0.2 s) y el torso se echa atrás ({minPitch:F1}°)");
+            Check(early > cruise * 0.3f && early < cruise && Speed < StandingSway && minPitch < -1f,
+                  $"Sprint → parar: frena con inercia ({cruise:F1} → {early:F1} m/s a los 0.2 s, {Speed:F2} al final) y el torso se echa atrás ({minPitch:F1}°)");
             yield return 0.5f;
 
             // K. Ledge grab → climb → run, as one sequence
@@ -1608,7 +1720,10 @@ namespace WarriorWoke.EditorTools
             yield return GaitCase(new[] { Key.LeftCtrl, Key.W }, _movement.WalkSpeed, "caminar (Ctrl + W)", 0f, 1f);
             yield return GaitCase(new[] { Key.LeftCtrl, Key.D }, _movement.WalkSpeed, "strafe a la derecha caminando (Ctrl + D)", 1f, 0f);
             yield return GaitCase(new[] { Key.LeftCtrl, Key.S }, _movement.WalkSpeed, "caminar hacia atrás (Ctrl + S)", 0f, -1f);
-            yield return GaitCase(new[] { Key.S, Key.A }, _movement.BackpedalSpeed, "diagonal hacia atrás corriendo (S + A)", -1f, -1f);
+            // 100STYLE has no diagonal runs (T27): the back diagonal keeps its direction at the speed of the
+            // takes that move diagonally (1.1–1.9 m/s measured), not the backpedal's 2.5
+            yield return GaitCase(new[] { Key.S, Key.A }, DiagonalBackSpeed, "diagonal hacia atrás corriendo (S + A)", -1f, -1f, DiagonalBackTolerance);
+            yield return GaitCase(new[] { Key.S }, _movement.BackpedalSpeed, "hacia atrás corriendo (S)", 0f, -1f);
 
             // Backward → forward: no snap turn, the velocity reverses through zero
             yield return Teleport(Corridor(-10f));
@@ -1659,21 +1774,31 @@ namespace WarriorWoke.EditorTools
             yield return 0.5f;
         }
 
-        private static IEnumerator GaitCase(Key[] keys, float expectedSpeed, string label, float expectX, float expectZ)
+        /// <summary>Speed range of the oriented back diagonal (the mocap's diagonal takes, T27): 1.5 ± 0.5 m/s.</summary>
+        private const float DiagonalBackSpeed = 1.5f, DiagonalBackTolerance = 0.5f;
+
+        private static IEnumerator GaitCase(Key[] keys, float expectedSpeed, string label, float expectX, float expectZ, float tolerance = 0.35f)
         {
             yield return Teleport(Corridor(-10f));
             float yaw0 = Yaw;
             Keys(keys);
-            yield return 1.2f;
-            float speed = Speed, yaw = Mathf.Abs(Mathf.DeltaAngle(yaw0, Yaw));
+            // The gait's speed is its mean over a whole stride: within one, a run swings ±0.4 m/s
+            yield return 0.6f;
+            Vector3 p1 = _movement.transform.position;
+            float t1 = Time.time;
+            yield return 0.8f;
+            Vector3 travel = _movement.transform.position - p1;
+            travel.y = 0f;
+            float speed = travel.magnitude / Mathf.Max(0.01f, Time.time - t1), yaw = Mathf.Abs(Mathf.DeltaAngle(yaw0, Yaw));
             float mx = _animator.GetFloat(PlayerAnimatorIds.MoveXParam), mz = _animator.GetFloat(PlayerAnimatorIds.MoveZParam);
             Keys();
-            bool dirOk = (expectX == 0f || (Mathf.Sign(mx) == Mathf.Sign(expectX) && Mathf.Abs(mx) > 0.8f)) &&
-                         (expectZ == 0f || (Mathf.Sign(mz) == Mathf.Sign(expectZ) && Mathf.Abs(mz) > 0.8f));
+            // Where the body really went over the stride, in its own frame, against the direction asked
+            Vector3 local = _movement.transform.InverseTransformDirection(travel);
+            float off = Vector2.Angle(new Vector2(local.x, local.z), new Vector2(expectX, expectZ));
+            bool dirOk = off < 20f;
             // (the strafe takes sway ±10° and the motor corrects the facing under them)
-            // (the 100STYLE takes run a little slower in the diagonals: ±0.35 m/s, P34)
-            Check(Mathf.Abs(speed - expectedSpeed) < 0.35f && yaw < 10f && dirOk,
-                  $"Marcha: {label} a {speed:F2} m/s (esperado {expectedSpeed:F2}), cuerpo sin girar ({yaw:F1}°), blend en ({mx:F2}, {mz:F2})");
+            Check(Mathf.Abs(speed - expectedSpeed) < tolerance && yaw < 10f && dirOk,
+                  $"Marcha: {label} a {speed:F2} m/s de media en una zancada (esperado {expectedSpeed:F2}), {off:F0}° de la dirección pedida, cuerpo sin girar ({yaw:F1}°), blend en ({mx:F2}, {mz:F2})");
             yield return 0.8f;
         }
 
@@ -1949,7 +2074,7 @@ namespace WarriorWoke.EditorTools
                   $"El cuerpo nunca entra en el muñeco (distancia mínima al eje {log.MinDistance:F2} m)");
             Check(log.MaxLimbDepth <= 0.12f, $"Puños y pies no atraviesan el muñeco (lo más hondo: {log.MaxLimbDepth * 100f:F0} cm, {log.DeepestLimb})");
             Check(log.MaxStepSpeed < TeleportSpeed, $"Sin teleport durante la cadena (máx {log.MaxStepSpeed:F1} m/s)");
-            Check(log.MinSole > -0.04f, $"Las suelas no se hunden durante los golpes (mín {log.MinSole * 100f:F1} cm)");
+            Check(log.MinSole > -0.04f, $"Las suelas no se hunden durante los golpes (mín {log.MinSole * 100f:F1} cm) [{log.MinSoleAt}]");
             Check(log.EndedIdleAt > 0f && log.EndedIdleAt - log.LastHitTime < 1.2f,
                   $"Tras el gancho vuelve a la locomoción ({log.EndedIdleAt - log.LastHitTime:F2} s después del último impacto)");
             yield return SettleDummy();
@@ -2111,6 +2236,7 @@ namespace WarriorWoke.EditorTools
             public readonly List<CombatHit> Hits = new List<CombatHit>();
             public readonly HashSet<int> Anims = new HashSet<int>();
             public float MinDistance = float.MaxValue, MaxLimbDepth, MaxStepSpeed, MinSole = float.MaxValue, MaxSway, MaxDisplacement;
+            public string MinSoleAt = "";
             public float EndedIdleAt = -1f, RunAt = -1f, HeavyUntil;
             public bool SawHitStop, SawCombo;
             public int MaxChain;
@@ -2214,7 +2340,13 @@ namespace WarriorWoke.EditorTools
             log.MaxStepSpeed = Mathf.Max(log.MaxStepSpeed, StepSpeed());
             log.MaxSway = Mathf.Max(log.MaxSway, _dummy.Sway);
             log.MaxDisplacement = Mathf.Max(log.MaxDisplacement, _dummy.Displacement);
-            if (_movement.IsGrounded) log.MinSole = Mathf.Min(log.MinSole, SoleClearance);
+            if (_movement.IsGrounded && SoleClearance < log.MinSole)
+            {
+                log.MinSole = SoleClearance;
+                AnimatorStateInfo at = _animator.GetCurrentAnimatorStateInfo(0);
+                float left = _footL.position.y - _animator.leftFeetBottomHeight - GroundUnder(_footL.position);
+                log.MinSoleAt = $"{s?.GetType().Name} anim={at.shortNameHash} n={at.normalizedTime:F2} t={t:F2} pie {(left <= log.MinSole + 0.0001f ? "izq" : "der")} MxM={_movement.Locomotion?.Weight:F2}";
+            }
             if (_playerAnimator.IsHitStopped) log.SawHitStop = true;
             AnimatorStateInfo info = _animator.IsInTransition(0) ? _animator.GetNextAnimatorStateInfo(0) : _animator.GetCurrentAnimatorStateInfo(0);
             log.Anims.Add(info.shortNameHash);

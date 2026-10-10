@@ -51,6 +51,20 @@ namespace WarriorWoke.EditorTools
         /// </summary>
         public const ETags StrafeTag = PlayerMxMLocomotion.StrafeTag;
 
+        /// <summary>
+        /// Favour tag of the 100STYLE fast runs (backward and sideways, P39): PlayerMxMLocomotion favours them
+        /// while the oriented gait is a run. Without it, from the real history of a start the search kept
+        /// the backward walk (1.5 m/s) for a 2.5 m/s backward diagonal: its past matched what the body did.
+        /// </summary>
+        public const ETags RunFavourTag = PlayerMxMLocomotion.RunFavourTag;
+
+        /// <summary>
+        /// The fast runs of the oriented set (favoured while running oriented): the Rushed style's backward
+        /// and sideways runs (~2.0–2.2 m/s of mocap, 2.5–2.75 in the game). The Neutral runs (~1.5 m/s) kept
+        /// a straight backpedal at 1.9 m/s of 2.5.
+        /// </summary>
+        private static bool IsOrientedRun(string clipName) => clipName.StartsWith("Rushed_") && (clipName.EndsWith("_BR") || clipName.EndsWith("_SR"));
+
         private static readonly (string category, ETags tags, string[] clips)[] Categories =
         {
             ("Kinematica", ETags.None, new[]
@@ -134,6 +148,7 @@ namespace WarriorWoke.EditorTools
             so.FindProperty("m_getBonesByName").boolValue = false;
             so.ApplyModifiedPropertiesWithoutUndo();
             data.TagNames[0] = "Strafe";
+            data.FavourTagNames[0] = "Run";
 
             data.CompositeCategories.Clear();
             int poses = 0;
@@ -151,7 +166,7 @@ namespace WarriorWoke.EditorTools
                     composite.IgnoreEdges = true;
                     composite.ExtrapolateTrajectory = true;
                     composite.GlobalTags = categories[c].tags;
-                    composite.GlobalFavourTags = ETags.None;
+                    composite.GlobalFavourTags = categories[c].tags == StrafeTag && IsOrientedRun(clip.name) ? RunFavourTag : ETags.None;
                     composite.TargetPreProcess = data;
                     composite.TargetPrefab = prefab;
                     composite.CategoryId = c;

@@ -736,18 +736,29 @@ namespace WarriorWoke.EditorTools
                 // Movement values of the human-scale tuning (P23) and the auto step layers
                 var movement = new SerializedObject(root.GetComponent<PlayerMovement>());
                 movement.FindProperty("vaultCatalog").objectReferenceValue = AssetDatabase.LoadAssetAtPath<VaultCatalog>(VaultCatalogBuilder.CatalogPath);
-                // Gaits of the motion matching mocap (P33, P34)
-                movement.FindProperty("BaseSpeed").floatValue = 3.4f;
+                // Gaits (P39, 2026-10-10: +25 % over the mocap's P33/P34, which motion matching plays ×1.25,
+                // PlayerMxMLocomotion.TimeScale)
+                movement.FindProperty("BaseSpeed").floatValue = 4.25f;
                 movement.FindProperty("SprintMultiplier").floatValue = 1.41f;
-                movement.FindProperty("WalkSpeed").floatValue = 1.3f;
-                movement.FindProperty("BackpedalSpeed").floatValue = 2.0f;
+                movement.FindProperty("WalkSpeed").floatValue = 1.6f;
+                movement.FindProperty("BackpedalSpeed").floatValue = 2.5f;
+                movement.FindProperty("CrouchSpeed").floatValue = 1.25f;
                 movement.FindProperty("SlideMinSpeed").floatValue = 1.8f;
                 movement.FindProperty("SlideFriction").floatValue = 2.5f;
                 movement.FindProperty("RollMinSpeed").floatValue = 2f;
                 movement.FindProperty("SlideSpeed").floatValue = 7.5f;
                 movement.FindProperty("JumpSpeed").floatValue = 4.5f;
-                movement.FindProperty("Acceleration").floatValue = 10f;
-                movement.FindProperty("Deceleration").floatValue = 13f;
+                // Response (P39): quicker starts, stops and turns outside the motion matching, and shorter
+                // recoveries after landings and rolls
+                movement.FindProperty("Acceleration").floatValue = 14f;
+                movement.FindProperty("Deceleration").floatValue = 18f;
+                movement.FindProperty("AirAcceleration").floatValue = 5f;
+                movement.FindProperty("HardLandingRecovery").floatValue = 0.5f;
+                movement.FindProperty("RollRecovery").floatValue = 0.35f;
+                movement.FindProperty("turnSmoothTime").floatValue = 0.09f;
+                movement.FindProperty("sprintTurnSmoothTime").floatValue = 0.15f;
+                movement.FindProperty("maxTurnRateStill").floatValue = 900f;
+                movement.FindProperty("maxLateralAcceleration").floatValue = 11f;
                 movement.FindProperty("stepLayer").intValue = LayerMask.GetMask("Ground", "Obstacle");
                 movement.FindProperty("ceilingLayer").intValue = LayerMask.GetMask("Ground", "Obstacle");
                 movement.ApplyModifiedPropertiesWithoutUndo();
@@ -822,7 +833,7 @@ namespace WarriorWoke.EditorTools
             var trajectory = model.GetComponent<MxM.MxMTrajectoryGenerator>() ?? model.gameObject.AddComponent<MxM.MxMTrajectoryGenerator>();
             var st = new SerializedObject(trajectory);
             st.FindProperty("m_customInput").boolValue = true;
-            st.FindProperty("m_maxSpeed").floatValue = 3.4f;
+            st.FindProperty("m_maxSpeed").floatValue = 4.25f;
             st.FindProperty("m_camTransform").objectReferenceValue = null; // the intention arrives in world space
             st.ApplyModifiedPropertiesWithoutUndo();
 
@@ -835,6 +846,9 @@ namespace WarriorWoke.EditorTools
             sm.FindProperty("m_rootMotionMode").enumValueIndex = (int)MxM.EMxMRootMotion.RootMotionApplicator;
             sm.FindProperty("m_applyHumanoidFootIK").boolValue = true;
             sm.FindProperty("m_favourCurrentPose").boolValue = true;
+            // The past of the goal is the body's real history (PlayerMxMLocomotion scales it to the mocap's
+            // units, P39): copied from the current pose, a slow take kept itself (the back diagonal stuck at 1.5 m/s)
+            sm.FindProperty("m_pastTrajectoryMode").enumValueIndex = (int)MxM.EPastTrajectoryMode.ActualHistory;
             sm.FindProperty("m_nextPoseToleranceTest").boolValue = true;
             sm.FindProperty("m_longErrorWarpType").enumValueIndex = (int)MxM.ELongitudinalErrorWarp.None;
             sm.FindProperty("m_debugGoal").boolValue = false;

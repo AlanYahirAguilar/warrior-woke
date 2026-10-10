@@ -6,8 +6,12 @@ using UnityEngine;
 /// limbs on the real surfaces measured by EnvironmentChecker:
 ///  - Vault: each planted palm rests on its plant point on the top while the clip has it down (P36).
 ///  - Ledge grab / hang: both hands on the edge, the feet against the wall, and the body is nudged
-///    so the animated hands meet the edge (the IK only does the last centimeters).
-///  - Climb: the hands stay on the edge while the body pulls up, then rest on the top surface.
+///    so the animated hands meet the edge (the IK only does the last centimeters). Since P39
+///    (2026-10-10) the grips are fixed where the hands arrive, an anatomical width apart and inside the
+///    edge's ends, so a swaying hang no longer slides them (it slid 2.7 cm). On the final pose
+///    (LateUpdate) each hand on the edge turns about its wrist so the palm rests on the top and the
+///    fingers go over the edge (the clip held them upright, palms against the edge's corner).
+///  - Climb: the hands stay on their grips while the body pulls up, then rest on the top surface.
 ///  - Mantle and slide: the supporting hand on the top or the floor, nothing through the block.
 /// The feet on the ground (terrain, pelvis, foot lock) are not solved here since phase 3 of the motion
 /// matching plan: GroundContactConstraint does it with Animation Rigging on the final pose (P31), also
@@ -27,15 +31,149 @@ public class PlayerContactIK : MonoBehaviour
     [Tooltip("Speed (1/s) at which the hanging body is nudged so its hands meet the edge.")]
     [SerializeField] private float hangAlignSpeed = 6f;
 
+    /// <summary>Narrowest and widest distance (m) between the two grips on an edge (shoulder width and an arm's spread).</summary>
+    public const float MinGripSpacing = 0.35f, MaxGripSpacing = 0.75f;
+
+    /// <summary>Closest a grip gets to an end of the edge (m): the whole hand on the edge, not over its corner.</summary>
+    public const float GripEndMargin = 0.08f;
+
     private static readonly AvatarIKGoal[] Hands = { AvatarIKGoal.LeftHand, AvatarIKGoal.RightHand };
 
     private PlayerMovement _movement;
+    private float _gripL = float.NaN, _gripR = float.NaN; // fixed grips (m along the edge's tangent), NaN = free
+    private Vector3 _gripEdge;                             // the edge they were fixed on
+    private float _gripWeight;                             // how much the hands hold the edge this frame
+    private Transform _handL, _handR, _indexL, _indexR, _littleL, _littleR, _middleL, _middleR;
+
+    /// <summary>How far down (°) the fingers point over the top from the horizontal.</summary>
+    private const float FingerPitch = 25f;
+
+    /// <summary>The grips on the current edge (m along its tangent from LedgeInfo.Edge; NaN while not fixed), for the tests.</summary>
+    public Vector2 Grips => new Vector2(_gripL, _gripR);
 
     private void Awake()
     {
         _movement = GetComponent<PlayerMovement>();
         if (groundLayer.value == 0) groundLayer = LayerMask.GetMask("Ground", "Obstacle");
         if (wallLayer.value == 0)   wallLayer   = LayerMask.GetMask("Obstacle");
+        Animator animator = GetComponentInChildren<Animator>();
+        if (animator != null && animator.isHuman)
+        {
+            _handL   = animator.GetBoneTransform(HumanBodyBones.LeftHand);
+            _handR   = animator.GetBoneTransform(HumanBodyBones.RightHand);
+            _indexL  = animator.GetBoneTransform(HumanBodyBones.LeftIndexProximal);
+            _indexR  = animator.GetBoneTransform(HumanBodyBones.RightIndexProximal);
+            _littleL = animator.GetBoneTransform(HumanBodyBones.LeftLittleProximal);
+            _littleR = animator.GetBoneTransform(HumanBodyBones.RightLittleProximal);
+            _middleL = animator.GetBoneTransform(HumanBodyBones.LeftMiddleProximal);
+            _middleR = animator.GetBoneTransform(HumanBodyBones.RightMiddleProximal);
+        }
+    }
+
+    /// <summary>
+    /// On the final pose: a hand holding the edge turns about its wrist so the palm faces the top and the
+    /// fingers point over the edge (into the top, FingerPitch down), as much as it holds the edge. The
+    /// wrist does not move, so the contact the IK placed stays.
+    /// </summary>
+    private void LateUpdate()
+    {
+        if (_gripWeight <= 0f || _handL == null) return;
+        PlayerState state = _movement.StateMachine.CurrentState;
+        if (state != _movement.LedgeGrabState && state != _movement.LedgeClimbState && state != _movement.LedgeDropState)
+        {
+            _gripWeight = 0f;
+            return;
+        }
+        LedgeInfo ledge = _movement.CurrentLedge;
+        Vector3 over = -ledge.Normal;
+        Vector3 finger = (over * Mathf.Cos(FingerPitch * Mathf.Deg2Rad) + Vector3.down * Mathf.Sin(FingerPitch * Mathf.Deg2Rad)).normalized;
+        Vector3 palm = Vector3.ProjectOnPlane(Vector3.down, finger).normalized;
+        Quaternion wanted = Quaternion.LookRotation(finger, -palm); // up = the back of the hand
+        GripHand(_handL, _indexL, _littleL, _middleL, true, wanted);
+        GripHand(_handR, _indexR, _littleR, _middleR, false, wanted);
+    }
+
+    private void GripHand(Transform hand, Transform index, Transform little, Transform middle, bool left, Quaternion wanted)
+    {
+        if (hand == null || index == null || little == null || middle == null) return;
+        Vector3 h = hand.position;
+        Vector3 finger = middle.position - h;
+        // The palm's side: for a left hand, index × little points out of the palm; mirrored for the right
+        Vector3 palm = Vector3.Cross(index.position - h, little.position - h);
+        if (!left) palm = -palm;
+        if (finger.sqrMagnitude < 1e-6f || palm.sqrMagnitude < 1e-8f) return;
+        Quaternion current = Quaternion.LookRotation(finger.normalized, -palm.normalized);
+        Quaternion turn = wanted * Quaternion.Inverse(current);
+        hand.rotation = Quaternion.Slerp(Quaternion.identity, turn, _gripWeight) * hand.rotation;
+    }
+
+    /// <summary>
+    /// Fixes the grips where the animated hands are (m along the edge), at least MinGripSpacing and at most
+    /// MaxGripSpacing apart around their middle, and GripEndMargin inside the edge's ends.
+    /// </summary>
+    private void FixGrips(LedgeInfo ledge, Vector3 animLeft, Vector3 animRight)
+    {
+        Vector3 t = ledge.Tangent;
+        float left = Vector3.Dot(animLeft - ledge.Edge, t), right = Vector3.Dot(animRight - ledge.Edge, t);
+        if (left > right) (left, right) = (right, left); // the left hand on the left
+        float middle = (left + right) * 0.5f;
+        float half = Mathf.Clamp((right - left) * 0.5f, MinGripSpacing * 0.5f, MaxGripSpacing * 0.5f);
+        if (EdgeExtent(ledge, out float min, out float max))
+        {
+            min += GripEndMargin + half;
+            max -= GripEndMargin + half;
+            middle = min <= max ? Mathf.Clamp(middle, min, max) : (min + max) * 0.5f;
+        }
+        _gripL = middle - half;
+        _gripR = middle + half;
+        _gripEdge = ledge.Edge;
+    }
+
+    /// <summary>
+    /// Where the edge ends (m along its tangent from LedgeInfo.Edge): the measured face collider's box (its
+    /// own orientation, so a turned ledge is exact), or its bounds.
+    /// </summary>
+    private static bool EdgeExtent(LedgeInfo ledge, out float min, out float max)
+    {
+        min = float.MinValue;
+        max = float.MaxValue;
+        Collider face = ledge.Face;
+        if (face == null) return false;
+        Vector3 t = ledge.Tangent;
+        min = float.MaxValue;
+        max = float.MinValue;
+        if (face is BoxCollider box)
+        {
+            Transform tr = box.transform;
+            Vector3 e = box.size * 0.5f;
+            for (int i = 0; i < 8; i++)
+            {
+                Vector3 corner = box.center + new Vector3((i & 1) == 0 ? -e.x : e.x, (i & 2) == 0 ? -e.y : e.y, (i & 4) == 0 ? -e.z : e.z);
+                float d = Vector3.Dot(tr.TransformPoint(corner) - ledge.Edge, t);
+                min = Mathf.Min(min, d);
+                max = Mathf.Max(max, d);
+            }
+        }
+        else
+        {
+            Bounds b = face.bounds;
+            for (int i = 0; i < 8; i++)
+            {
+                Vector3 corner = new Vector3((i & 1) == 0 ? b.min.x : b.max.x, (i & 2) == 0 ? b.min.y : b.max.y, (i & 4) == 0 ? b.min.z : b.max.z);
+                float d = Vector3.Dot(corner - ledge.Edge, t);
+                min = Mathf.Min(min, d);
+                max = Mathf.Max(max, d);
+            }
+        }
+        return true;
+    }
+
+    /// <summary>The wrist on the edge for a hand: at its fixed grip, or at the animated hand's place along the edge.</summary>
+    private Vector3 GripOnEdge(LedgeInfo ledge, bool left, Vector3 animatedHand)
+    {
+        float grip = left ? _gripL : _gripR;
+        if (float.IsNaN(grip)) return HandOnEdge(ledge, animatedHand);
+        return ledge.Edge + ledge.Tangent * grip + Vector3.up * ParkourTimings.WristAboveSurface + ledge.Normal * ParkourTimings.WristOutOfFace;
     }
 
     /// <summary>Solves every IK goal for this frame.</summary>
@@ -44,6 +182,8 @@ public class PlayerContactIK : MonoBehaviour
         ClearGoals(animator);
         PlayerState state = _movement.StateMachine.CurrentState;
         float progress = _movement.ParkourProgress;
+        bool ledgeState = state == _movement.LedgeGrabState || state == _movement.LedgeClimbState || state == _movement.LedgeDropState;
+        if (!ledgeState || (_movement.CurrentLedge.Edge - _gripEdge).sqrMagnitude > 0.0001f) _gripL = _gripR = float.NaN;
 
         if (state == _movement.VaultState)
             SolveVault(animator);
@@ -152,12 +292,15 @@ public class PlayerContactIK : MonoBehaviour
 
         Vector3 animLeft  = animator.GetIKPosition(AvatarIKGoal.LeftHand);
         Vector3 animRight = animator.GetIKPosition(AvatarIKGoal.RightHand);
-        Vector3 left  = HandOnEdge(ledge, animLeft);
-        Vector3 right = HandOnEdge(ledge, animRight);
+        bool held = progress >= ParkourTimings.GrabHandContact || _movement.LedgeGrabState.FromDrop;
+        if (held && float.IsNaN(_gripL)) FixGrips(ledge, animLeft, animRight);
+        Vector3 left  = GripOnEdge(ledge, true, animLeft);
+        Vector3 right = GripOnEdge(ledge, false, animRight);
 
-        // Once the hands arrived, move the body so the animated hands meet the edge by themselves
-        if (progress >= ParkourTimings.GrabHandContact)
+        // Once the hands arrived, move the body so the animated hands meet the grips by themselves
+        if (held)
             AlignBodyToHands(animLeft, animRight, left, right, hangAlignSpeed);
+        _gripWeight = handWeight;
 
         SetGoal(animator, AvatarIKGoal.LeftHand, left, InsideWall(ledge, animLeft) ? 1f : handWeight);
         SetGoal(animator, AvatarIKGoal.RightHand, right, InsideWall(ledge, animRight) ? 1f : handWeight);
@@ -170,19 +313,20 @@ public class PlayerContactIK : MonoBehaviour
         if (progress < 0f) progress = 0f;
         LedgeInfo ledge = _movement.CurrentLedge;
 
-        // While pulling up the body follows the hands, which stay where they grabbed
+        // While pulling up the body follows the hands, which stay where they grabbed (the drop fixes its
+        // grips as its hands come onto the edge)
+        Vector3 animLeft  = animator.GetIKPosition(AvatarIKGoal.LeftHand);
+        Vector3 animRight = animator.GetIKPosition(AvatarIKGoal.RightHand);
+        if (float.IsNaN(_gripL) && progress < ParkourTimings.ClimbHandsRelease + 0.15f) FixGrips(ledge, animLeft, animRight);
         if (progress < ParkourTimings.ClimbHandsRelease)
-        {
-            Vector3 animLeft  = animator.GetIKPosition(AvatarIKGoal.LeftHand);
-            Vector3 animRight = animator.GetIKPosition(AvatarIKGoal.RightHand);
-            AlignBodyToHands(animLeft, animRight, HandOnEdge(ledge, animLeft), HandOnEdge(ledge, animRight), hangAlignSpeed * 2f);
-        }
+            AlignBodyToHands(animLeft, animRight, GripOnEdge(ledge, true, animLeft), GripOnEdge(ledge, false, animRight), hangAlignSpeed * 2f);
 
-        // Hands: on the edge while pulling up, then resting on the top surface while the body goes over
+        // Hands: on their grips while pulling up, then resting on the top surface while the body goes over
         float toSurface = Mathf.InverseLerp(ParkourTimings.ClimbHandsRelease, ParkourTimings.ClimbHandsRelease + 0.15f, progress);
         float handWeight = 1f - Mathf.InverseLerp(0.8f, 0.92f, progress);
-        SolveClimbHand(animator, AvatarIKGoal.LeftHand, ledge, toSurface, handWeight);
-        SolveClimbHand(animator, AvatarIKGoal.RightHand, ledge, toSurface, handWeight);
+        _gripWeight = handWeight * (1f - toSurface); // gripping the edge until the hands move onto the top
+        SolveClimbHand(animator, AvatarIKGoal.LeftHand, true, ledge, toSurface, handWeight);
+        SolveClimbHand(animator, AvatarIKGoal.RightHand, false, ledge, toSurface, handWeight);
 
         // Feet push on the wall at the start of the climb, then step up freely
         float footWeight = 1f - Mathf.InverseLerp(0.15f, 0.35f, progress);
@@ -190,11 +334,11 @@ public class PlayerContactIK : MonoBehaviour
         FootOnWall(animator, AvatarIKGoal.RightFoot, ledge, footWeight);
     }
 
-    private static void SolveClimbHand(Animator animator, AvatarIKGoal goal, LedgeInfo ledge, float toSurface, float weight)
+    private void SolveClimbHand(Animator animator, AvatarIKGoal goal, bool left, LedgeInfo ledge, float toSurface, float weight)
     {
         if (weight <= 0f) return;
         Vector3 anim = animator.GetIKPosition(goal);
-        Vector3 onEdge = HandOnEdge(ledge, anim);
+        Vector3 onEdge = GripOnEdge(ledge, left, anim);
 
         // On the top surface: keep the animated position but never below the surface while over it
         Vector3 onTop = anim;

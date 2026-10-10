@@ -529,12 +529,15 @@ public class PlayerBlockState : PlayerState
 /// </summary>
 public class PlayerDodgeState : PlayerState
 {
-    private const float DodgeDuration   = 0.5f;
+    private const float DodgeDuration   = 0.5f;  // GDD §5.5: ~0.5 s, ~0.2 s invulnerable, 1 s cooldown
     private const float IFramesDuration = 0.2f;
-    private const float DodgeDistance   = 2.6f;
+    /// <summary>Distance (m) of the whole roll: 3.0 since P39 (2.6 at the P33 speeds).</summary>
+    private const float DodgeDistance   = 3.0f;
     private const float DodgeCooldown   = 1f;
     /// <summary>From here (s) an attack press ends the dodge with the attack.</summary>
-    private const float AttackFrom      = 0.3f;
+    private const float AttackFrom      = 0.25f;
+    /// <summary>From here (s), with a direction held, the dodge hands over to the run with the speed it still carries (P39).</summary>
+    private const float MoveOutFrom     = 0.4f;
 
     private float _lastDodgeTime = -999f;
 
@@ -581,12 +584,12 @@ public class PlayerDodgeState : PlayerState
             return;
         }
 
-        if (t >= DodgeDuration)
-        {
-            // Return to run if still holding a direction, otherwise idle
-            stateMachine.ChangeState(
-                player.HasMoveInput ? (PlayerState)player.RunState : player.IdleState);
-        }
+        // A direction held: run out of the roll while it still moves (no dead stop at its end); otherwise
+        // the roll plays out and the body stands
+        if (player.HasMoveInput && t >= MoveOutFrom)
+            stateMachine.ChangeState(player.RunState);
+        else if (t >= DodgeDuration)
+            stateMachine.ChangeState(player.HasMoveInput ? (PlayerState)player.RunState : player.IdleState);
     }
 
     public override void PhysicsUpdate()

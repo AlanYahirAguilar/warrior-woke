@@ -12,7 +12,9 @@
 > Si este documento y el GDD no coinciden, manda el GDD, y hay que corregir este documento.
 >
 > Última revisión completa: 2026-10-02. Actualizado el 2026-10-09 (Fase 3: vault, slide y combate;
-> fases 3 y 4 del motion matching: Animation Rigging y parkour con el `CharacterController`).
+> fases 3 y 4 del motion matching: Animation Rigging y parkour con el `CharacterController`) y el
+> 2026-10-10 (obstáculos con acciones declaradas y personaje 25 % más rápido con las manos fijas en la
+> cornisa: P38, P39).
 
 ---
 
@@ -305,7 +307,11 @@ final · SFX y música básica · build para Windows.
    cámara (`arquitectura.md` §5.10). **Fase 4 (el mismo día):** el parkour también se mueve con el
    `CharacterController`, que ya no se apaga: solo deja atravesar el obstáculo de la acción, así que un
    muro o un techo detienen el cuerpo también durante un vault o una subida. Con eso el plan de motion
-   matching (`arquitectura.md` §7.2) quedó completo; lo pendiente de calidad está en T27.
+   matching (`arquitectura.md` §7.2) quedó completo; lo pendiente de calidad está en T27. **Desde el
+   2026-10-10** (`arquitectura.md` §7.3): cada obstáculo declara las acciones que admite (P38); el
+   personaje es **25 % más rápido** (el mocap se reproduce ×1.25: caminar 1.6, correr 4.25, sprint 6.0,
+   atrás 2.5 m/s, P39) y responde antes; colgado de una cornisa, **las dos manos quedan fijas sobre el
+   borde** a la separación de los hombros.
 3. **No se implementa nada fuera del MVP** sin que antes funcione el MVP (GDD §25 y §28).
 
 ## 11. Cómo abrir el proyecto

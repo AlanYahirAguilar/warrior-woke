@@ -26,20 +26,20 @@ public class PlayerMovement : MonoBehaviour, IDamageModifier
 {
     // ─── Inspector Configuration ─────────────────────────────────────────────────
     [Header("Movement Speeds")]
-    [Tooltip("Run speed (WASD): the jog of the motion matching mocap (P33).")]
-    public float BaseSpeed   = 3.4f;
-    [Tooltip("Sprint = BaseSpeed × this value. GDD §5.2: ~+40 % (4.8 m/s, the mocap's sprint, P33).")]
+    [Tooltip("Run speed (WASD): the mocap's jog played ×1.25 (P39; P33 was 3.4).")]
+    public float BaseSpeed   = 4.25f;
+    [Tooltip("Sprint = BaseSpeed × this value. GDD §5.2: ~+40 % (6.0 m/s: the mocap's sprint played ×1.25, P39).")]
     public float SprintMultiplier = 1.41f;
     [Tooltip("Slide entry speed cap (m/s). The slide keeps the current speed (up to this) and loses it with friction.")]
     public float SlideSpeed  = 7.5f;
     [Tooltip("Vertical take-off speed. 4.5 m/s ≈ 1 m of rise: a human jump, not a superhero one.")]
     public float JumpSpeed   = 4.5f;
-    [Tooltip("Running backward speed (S without sprint, facing the camera): the top of the 100STYLE backward takes (P34).")]
-    public float BackpedalSpeed = 2.0f;
-    [Tooltip("Walking speed (Left Ctrl held), in every direction: the mocap's walk (P33).")]
-    public float WalkSpeed = 1.3f;
+    [Tooltip("Running backward speed (S without sprint, facing the camera): the top of the 100STYLE backward takes played ×1.25 (P34, P39).")]
+    public float BackpedalSpeed = 2.5f;
+    [Tooltip("Walking speed (Left Ctrl held), in every direction: the mocap's walk played ×1.25 (P39).")]
+    public float WalkSpeed = 1.6f;
     [Tooltip("Crouched walking speed.")]
-    public float CrouchSpeed = 1.0f;
+    public float CrouchSpeed = 1.25f;
     [Tooltip("Collider height while crouched, as a fraction of the standing height.")]
     public float CrouchHeightFactor = 0.62f;
 
@@ -47,11 +47,11 @@ public class PlayerMovement : MonoBehaviour, IDamageModifier
 
     [Header("Acceleration")]
     [Tooltip("m/s² used to speed up on the ground. The locomotion blend passes Idle → Walk → Jog → Run while accelerating.")]
-    public float Acceleration = 10f;
+    public float Acceleration = 14f;
     [Tooltip("m/s² used to slow down on the ground (releasing input, or a lower target speed).")]
-    public float Deceleration = 13f;
+    public float Deceleration = 18f;
     [Tooltip("m/s² of steering in the air. Momentum is kept: without input the horizontal speed barely changes.")]
-    public float AirAcceleration = 4f;
+    public float AirAcceleration = 5f;
     [Tooltip("m/s² of horizontal drag in the air when there is no input.")]
     public float AirDrag = 0.5f;
 
@@ -92,13 +92,13 @@ public class PlayerMovement : MonoBehaviour, IDamageModifier
     [Tooltip("Horizontal speed kept right after the heaviest landing (fraction).")]
     public float HardLandingSpeedKept = 0.3f;
     [Tooltip("Seconds the heaviest landing takes to recover full speed. Control is never blocked.")]
-    public float HardLandingRecovery = 0.7f;
+    public float HardLandingRecovery = 0.5f;
     [Tooltip("A landing at least this heavy, at RollMinSpeed or more with input, is absorbed with a roll.")]
     public float RollMinSeverity = 0.6f;
     [Tooltip("Horizontal speed (m/s) needed to roll out of a heavy landing.")]
     public float RollMinSpeed = 2f;
     [Tooltip("Horizontal speed kept by the roll (fraction) and seconds it takes to recover the rest.")]
-    public float RollSpeedKept = 0.7f, RollRecovery = 0.45f;
+    public float RollSpeedKept = 0.7f, RollRecovery = 0.35f;
 
     [Header("Ledge")]
     [Tooltip("Seconds after letting go of a ledge before another can be grabbed.")]
@@ -114,13 +114,13 @@ public class PlayerMovement : MonoBehaviour, IDamageModifier
     [Header("Facing")]
     [SerializeField] private bool faceMovementDirection = true;
     [Tooltip("Turn smoothing time (s) at walking/running speed. Lower = snappier, higher = heavier.")]
-    [SerializeField] private float turnSmoothTime = 0.12f;
+    [SerializeField] private float turnSmoothTime = 0.09f;
     [Tooltip("Turn smoothing time (s) at sprint speed: a fast body turns wider.")]
-    [SerializeField] private float sprintTurnSmoothTime = 0.2f;
+    [SerializeField] private float sprintTurnSmoothTime = 0.15f;
     [Tooltip("Fastest turn (°/s) at low speed.")]
-    [SerializeField] private float maxTurnRateStill = 720f;
+    [SerializeField] private float maxTurnRateStill = 900f;
     [Tooltip("Largest sideways acceleration (m/s²) a running body can take in a turn (~0.9 g). It limits the turn rate at speed (rate = this / speed), so a sharp turn at a sprint has to brake first.")]
-    [SerializeField] private float maxLateralAcceleration = 9f;
+    [SerializeField] private float maxLateralAcceleration = 11f;
     [Tooltip("Input this far (°) behind the facing is a reversal: the runner brakes and turns before accelerating again.")]
     [SerializeField] private float pivotAngle = 135f;
 
@@ -413,16 +413,35 @@ public class PlayerMovement : MonoBehaviour, IDamageModifier
         Vector3 displacement = new Vector3(v.x, 0f, v.z) * ((1f - w) * dt);
         // An attack owns the motion from its first frame: while motion matching fades out under it, its
         // root motion (the Animator's whole delta: the idle's drift moved the body ±10 cm) is left out,
-        // and once it is gone the attack's own step moves the body
-        if (w > 0f && !_actionMotion) displacement += new Vector3(_rootDelta.x, 0f, _rootDelta.z);
+        // and once it is gone the attack's own step moves the body. Motion matching's root motion is not
+        // weighted by its output's weight (measured 2026-10-10: the same speed at w = 0.36 and 0.76), so it
+        // counts w of it: unweighted, a run out of a vault moved the body at the clip's speed plus the
+        // states' (twice the speed for a moment: 13–15 m/s out of a sprint)
+        if (w > 0f && !_actionMotion) displacement += new Vector3(_rootDelta.x, 0f, _rootDelta.z) * w;
         else if (w <= 0f) displacement += new Vector3(_actionDelta.x, 0f, _actionDelta.z) * ActionRootMotionScale;
+        // Stopping (no input) under motion matching: the body never speeds up again. Out of a backpedal
+        // MxM jumped to another take mid-stride (1.9 → 3.0 m/s after the release) and later picked a run
+        // again; the root motion is capped at the speed the body had, which only goes down (P39)
+        if (w > 0f && !HasMoveInput)
+        {
+            if (float.IsPositiveInfinity(_stopSpeedCap)) _stopSpeedCap = HorizontalSpeed;
+            Vector3 h = new Vector3(displacement.x, 0f, displacement.z);
+            float cap = (_stopSpeedCap + StopCapMargin) * dt;
+            if (h.magnitude > cap)
+            {
+                h = h.normalized * cap;
+                displacement.x = h.x;
+                displacement.z = h.z;
+            }
+        }
+        else _stopSpeedCap = float.PositiveInfinity;
         Vector3 edgeSlide = EdgeSlide();
         displacement += edgeSlide * (EdgeSlideSpeed * dt);
         v.y += Physics.gravity.y * dt;
         if (IsGrounded && v.y < 0f) v.y = Mathf.Max(v.y, -GroundStickSpeed);
         displacement.y = v.y * dt;
 
-        float yaw = transform.eulerAngles.y + (w > 0f && !_actionMotion ? _rootRotation.eulerAngles.y : 0f);
+        float yaw = transform.eulerAngles.y + (w > 0f && !_actionMotion ? Mathf.DeltaAngle(0f, _rootRotation.eulerAngles.y) * w : 0f);
         if (_hasTurnTarget && w < 1f)
         {
             float turned = Mathf.SmoothDampAngle(yaw, _turnTargetYaw, ref _turnSmoothVelocity, CurrentTurnSmoothTime(), MaxTurnRate(HorizontalSpeed), dt);
@@ -463,11 +482,16 @@ public class PlayerMovement : MonoBehaviour, IDamageModifier
         // included; carried by motion matching (w = 1), its motion smoothed over a few frames (one
         // frame of a blend of poses is noisy, and a jump or a vault takes its momentum from here);
         // while blending, the states' command stays (measuring there would feed the root motion back
-        // into the (1 − w) part and multiply it by 1/w)
+        // into the (1 − w) part and multiply it by 1/w). The smoothing keeps its own value: smoothing
+        // from Velocity, which the states overwrite with their command every physics tick, reported the
+        // gait asked for instead of the real one (measured 2026-10-10: 1.56 m/s for a 1.40 m/s walk)
         Vector3 actual = (transform.position - before) / dt;
         Vector3 horizontal = new Vector3(actual.x, 0f, actual.z);
         Vector3 commanded = new Vector3(v.x, 0f, v.z);
-        if (w >= 1f) horizontal = Vector3.Lerp(commanded, horizontal, 1f - Mathf.Exp(-dt / MeasuredVelocitySmoothing));
+        _measuredVelocity = w >= 1f ? Vector3.Lerp(_measuredVelocity, horizontal, 1f - Mathf.Exp(-dt / MeasuredVelocitySmoothing)) : horizontal;
+        // (smoothed: one frame of a blend of poses can move less and would brake the stop at once)
+        if (!float.IsPositiveInfinity(_stopSpeedCap)) _stopSpeedCap = Mathf.Min(_stopSpeedCap, _measuredVelocity.magnitude);
+        if (w >= 1f) horizontal = _measuredVelocity;
         else if (w > 0f || horizontal.sqrMagnitude > commanded.sqrMagnitude) horizontal = commanded;
         // A collision only takes speed away: a step climbed or the controller pushing itself out of
         // geometry (standing up next to a bar) moves the body, but it is not speed to keep
@@ -513,8 +537,20 @@ public class PlayerMovement : MonoBehaviour, IDamageModifier
     /// <summary>Time constant (s) of the smoothing of the velocity measured under motion matching.</summary>
     private const float MeasuredVelocitySmoothing = 0.05f;
 
+    /// <summary>The body's real horizontal velocity, smoothed (what motion matching moved it).</summary>
+    private Vector3 _measuredVelocity;
+
+    /// <summary>Highest speed (m/s) motion matching may move the body while it stops (infinite with input).</summary>
+    private float _stopSpeedCap = float.PositiveInfinity;
+
+    /// <summary>Slack (m/s) over the stopping cap: the frame-to-frame noise of a blend of poses.</summary>
+    private const float StopCapMargin = 0.05f;
+
     /// <summary>Fraction per second of the facing error removed in oriented locomotion (1/s).</summary>
     private const float OrientedFacingGain = 10f;
+
+    /// <summary>Speed (m/s) toward the new direction at which an oriented gait hands the body over to the free gaits.</summary>
+    private const float OrientedHandoverSpeed = 1f;
 
     /// <summary>Largest heading error (°) of free locomotion that the motor closes, and how fast (1/s).</summary>
     private const float ResidualHeadingAngle = 30f, ResidualHeadingGain = 5f;
@@ -591,9 +627,14 @@ public class PlayerMovement : MonoBehaviour, IDamageModifier
         if (!moving) IsAgainstWall = false;
         float speed = IsWalking ? WalkSpeed : IsBackpedaling ? BackpedalSpeed : IsSprint ? SprintSpeed : BaseSpeed;
         // Oriented movement stays oriented until the body stops: the strafe takes brake facing the
-        // same way (switching to the free set mid-stop would turn the body)
-        bool oriented = moving ? IsOriented : active && Locomotion.IsOriented && HorizontalSpeed > 0.3f;
+        // same way (switching to the free set mid-stop would turn the body). Leaving a backpedal for a
+        // free gait, the oriented takes also turn the motion around, facing the same way, until the body
+        // moves toward the new direction at OrientedHandoverSpeed: the free set has no backward takes, and
+        // from a backward run (or from standing still with a fast future) it pivoted or surged (P39)
         Vector3 direction = moving ? AlongWalls(MoveDirection) : Vector3.zero;
+        bool handingOver = moving && Locomotion.IsOriented && !IsOriented &&
+                           Vector3.Dot(Velocity, direction.normalized) < OrientedHandoverSpeed;
+        bool oriented = moving ? IsOriented || handingOver : active && Locomotion.IsOriented && HorizontalSpeed > 0.3f;
         Locomotion.Drive(active, direction, speed * RecoverySpeedScale, oriented, CameraForwardFlat());
     }
 

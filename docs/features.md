@@ -131,6 +131,11 @@ Dependencias · Consideraciones técnicas · Falta**.
   adelante al acelerar y atrás al frenar. Probado: en un giro de 90° a la carrera la velocidad nunca
   se separa del cuerpo (0°, antes patinaba de lado) y el torso se inclina 10°; al frenar desde el
   sprint pasa de 7.0 a 5.7 m/s en 0.1 s y el torso se echa 6° atrás.
+- **Velocidad y respuesta (P39, 2026-10-10):** el mocap se reproduce ×1.25: caminar 1.6, correr 4.25,
+  sprint 6.0, hacia atrás 2.5 y agachado 1.25 m/s, con la pisada, los giros y las frenadas del actor 1.25
+  veces más cortos; fuera de MxM, aceleración 14 / frenado 18 m/s², giro en 0.09 s (0.15 s esprintando) y
+  recuperaciones más breves tras un aterrizaje duro (0.5 s) y un roll (0.35 s). Detalle en
+  `arquitectura.md` §7.3.
 - **Hacia atrás (P16, P28):** con input hacia atrás (S o diagonales) y sin sprint, el cuerpo mira
   al frente de la cámara y **corre hacia atrás a 3.5 m/s** (el ritmo medido de *RunBackward*); con
   Ctrl camina hacia atrás a 1.7 m/s (el walk invertido). Las diagonales hacia atrás usan sus propios
@@ -268,6 +273,12 @@ Dependencias · Consideraciones técnicas · Falta**.
 - **Cómo se implementó:** el 2026-09-30 colgaba con un offset fijo bajo una "esquina" medida 0.6 m
   por delante de la cabeza, y subía con una trayectoria lineal. El 2026-10-01 se reescribió con
   detección real del borde, root motion, `MatchTarget` e IK (P22). Ver el detalle en §5.
+- **Manos en el borde (2026-10-10, `arquitectura.md` §7.3):** al agarrarse se fijan dos agarres sobre
+  el borde, donde cada mano animada lo cruza, a 0.35–0.75 m uno del otro y lejos de los extremos; no se
+  recalculan (las manos no se deslizan) y una cornisa más angosta que los dos agarres no se agarra. Sobre
+  la pose final la palma mira al borde y los dedos lo abrazan. Probado en 2.0, 2.2 (de frente, a un lado,
+  girada 30°), 2.6 y 3.0 m: manos a ≤ 3.4 cm de su agarre, 55–56 cm entre ellas, dedos a ±1 cm de la cima,
+  0.6 cm de deslizamiento como máximo; la de 0.5 m de ancho se rechaza. Imagen: `Logs/PlayModeLedges/agarre.png`.
 - **Nota:** el GDD §28 limita el parkour a salto, sprint y vault, pero el equipo decidió
   **conservarlo activo** (P2). Solo hay braced hang: sin muro bajo el borde, los pies cuelgan (T17).
 
@@ -315,10 +326,10 @@ Dependencias · Consideraciones técnicas · Falta**.
 - **Cómo funciona:** Q desde `Idle` o `Run` (solo en el suelo y si `CanDodge`: pasó 1 s desde la
   última esquiva), o desde la recuperación de un ataque. La dirección es el input de movimiento relativo
   a la cámara en ese momento (sin input, hacia el frente) y no cambia durante la esquiva. Desde el
-  2026-10-09 (P37) es un roll de ~2.6 m que empieza rápido y frena hasta detenerse en 0.5 s
+  2026-10-09 (P37) es un roll (3 m desde el 2026-10-10, P39) que empieza rápido y frena hasta detenerse en 0.5 s
   (`v = v0 · (1 − (t/T)²)`), en lugar de un dash de 6 m a 12 m/s constantes; los muros lo detienen.
   `ActivateIFrames(0.2)`. El cuerpo no gira, así que `LocalDirection` elige el roll (adelante, atrás,
-  izquierda, derecha) en el blend tree 2D `Dodge`. Pasada la invulnerabilidad (0.3 s), J o K responden
+  izquierda, derecha) en el blend tree 2D `Dodge`. Pasada la invulnerabilidad (desde 0.25 s), J o K responden
   con un ataque ("evitar un ataque y responder inmediatamente", GDD §5.5). Luego va a `Run` o `Idle`.
 - **Probado:** Q + S retrocede 2.1 m (dirección local (0, −1)); después de la esquiva, J entra al ataque.
 - **Consideraciones:** no se puede esquivar durante el golpe de un ataque ni durante una reacción al
@@ -655,16 +666,20 @@ Dependencias · Consideraciones técnicas · Falta**.
 - **Archivos:** `PlayerMovement.cs` (`WalkSpeed`, `BackpedalSpeed`, `CrouchSpeed`, `IsWalking`,
   `IsOriented`), `PlayerGroundedStates.cs` (`Run`, `PlayerCrouchState`), `PlayerInputHandler.cs`
   (Ctrl), `PlayerAnimator.cs` (`MoveX`/`MoveZ`), `Editor/ClipMeasurement.cs`.
-- **Cómo funciona:** tres marchas: caminar (Ctrl mantenido, 1.3 m/s), correr (3.4 m/s) y sprint
-  (Shift, 4.8 m/s) (P33; antes 1.7 / 5 / 7). Caminando, el cuerpo mira a la cámara y se mueve en
+- **Cómo funciona:** tres marchas: caminar (Ctrl mantenido, 1.6 m/s), correr (4.25 m/s) y sprint
+  (Shift, 6.0 m/s) (P39 desde el 2026-10-10; P33: 1.3 / 3.4 / 4.8; antes 1.7 / 5 / 7). Caminando, el cuerpo mira a la cámara y se mueve en
   cualquier dirección (strafe, diagonales, hacia atrás). Corriendo gira hacia donde va, salvo hacia
-  atrás, donde corre hacia atrás mirando a la cámara a ~2 m/s (antes 3.5). Desde el 2026-10-08 la
+  atrás, donde corre hacia atrás mirando a la cámara a 2.5 m/s (P39; antes ~2 y 3.5). Desde el 2026-10-08 la
   locomoción orientada es motion matching con las tomas de 100STYLE (tag `Strafe`); el motor corrige
-  su deriva de orientación (±10°) y sigue orientada hasta detenerse.
+  su deriva de orientación (±10°) y sigue orientada hasta detenerse. Corriendo orientado se favorecen
+  las tomas de carrera (`BR`/`SR`, P39) y al pasar de una marcha orientada a la libre la orientada da la
+  vuelta al movimiento hasta 1 m/s en la nueva dirección (sin pivotes ni tirones).
  C sin momentum agacha el cuerpo (collider al 62 %, 1 m/s, gira hacia donde va);
   C, Shift o Espacio lo levantan si no hay techo. El blend direccional coloca cada clip en su
   velocidad medida.
-- **Probado:** caminar a 1.7 m/s; strafe a la derecha a 1.7 m/s sin girar (blend en +X); caminar hacia
+- **Probado (2026-10-10, P39):** caminar a 1.58 m/s, strafe a la derecha 1.60 y hacia atrás caminando 1.59
+  (de 1.6), diagonal hacia atrás corriendo 2.20–2.46 m/s (de 2.5) sin girar (≤ 3°), de atrás a adelante con
+  ≤ 7° de giro. Antes (P28): caminar a 1.7 m/s; strafe a la derecha a 1.7 m/s sin girar (blend en +X); caminar hacia
   atrás a 1.7 m/s; diagonal hacia atrás a 3.5 m/s sin girar; de atrás a adelante sin girar y con la
   velocidad cambiando de sentido gradualmente; el sprint reproduce la carrera más rápido (sin
   patinar); agacharse baja el collider, camina a 1 m/s y C lo levanta; la pose siempre mira hacia
@@ -937,6 +952,8 @@ problema, la causa, la solución y el estado (formato del GDD §29 para bugs).
 | 2026-10-08/09 | (ver `git log`) | Axel | Fase 3, vault y combate (P36, P37): el vault es un clip de mocap de Kinematica elegido de un catálogo medido (`VaultCatalogBuilder`, `VaultPlanner`) y warpeado por código propio (`arquitectura.md` §5.17); el slide espera a la barra; el combate desarmado sigue fases medidas (`CombatTimings`): jab → cross → gancho y patada de mocap CMU, objetivo, golpe por contacto, hit stop, reacción al daño y esquiva más corta, probado sobre el muñeco de entrenamiento (§5.4). Correcciones encontradas al probar: las acciones ya no reciben el root motion de MxM mientras se desvanece, la palma del mantle se fija al apoyarse, salvaguardas de rodillas, dedos y manos contra muros, step offset 0 solo en el aire o sobre una arista sin apoyo. Detalle en F04, F09–F12, F23 y F32. `ParkourPlayModeTest`: 531 comprobaciones, 529/531 con el código final (fallos intermitentes distintos en cada corrida, F32). |
 | 2026-10-09 | (ver `git log`) | Axel | Motion matching, fase 3 (P31): **Animation Rigging** 6.6.0 con dos constraints propios sobre la pose final (`GroundContactConstraint`: terreno bajo talón y punta, pelvis, pie de apoyo bloqueado y asentado; `HeadLookConstraint`: cabeza, cuello y pecho), armados por `PlayerRigSetup` y gobernados por `PlayerRig`; el IK de suelo sale de `PlayerContactIK`. Los pies trabajan sobre las metas de IK Humanoid porque el Foot IK del mocap se aplica después de todo (detalle abajo). `MxMLocomotionProbe`: suelas resueltas en todos los escenarios y patinaje menor en todos menos el strafe a la izquierda; `ParkourPlayModeTest` **538/538** con la sección `Rig` nueva. |
 | 2026-10-09/10 | (ver `git log`) | Axel | Motion matching, fase 4 (P30): el root motion del parkour (vault, agarre, subida, mantle, drop) se aplica con `CharacterController.Move` en lugar de apagar el controller; solo el obstáculo de la acción se deja atravesar (`Physics.IgnoreCollision` con los colliders que mide `EnvironmentChecker`) y la cápsula se reduce a torso y cabeza mientras dura (detalle abajo). Sección `ActionMotor` nueva; `ParkourPlayModeTest` **540/541** (el slide anticipado, intermitente). Con esto el plan de §7.2 quedó completo. |
+| 2026-10-10 | `567f906` | Axel | Fase de desarrollo del 2026-10-10, fases 1–2 (P38): auditoría y obstáculos: fuera pilares, bordillos, el vault alto de S04 y el perímetro; cada obstáculo declara sus acciones; límite de caída y muerte con reaparición (`arquitectura.md` §7.3). |
+| 2026-10-10 | (ver `git log`) | Axel | Fase 3 (P39): mocap ×1.25 con el parche `PastScale` de MxM (T26 #5), favour tag de las carreras de 100STYLE, traspaso de marcha orientada a libre a 1 m/s, `Velocity` medida sin el sesgo de la velocidad pedida, regulador que también acelera (hasta ×1.3, nunca más de ×1.1 el sprint), frenadas libres ×1.15 y un tope que impide volver a acelerar al detenerse, respuesta fuera de MxM y **agarres fijos de las dos manos en la cornisa**. Medido: caminar 1.54, correr 4.3, sprint 6.0, atrás 2.4 m/s, se detiene en ~1 s (`arquitectura.md` §7.3). |
 | 2026-10-07 | (ver `git log`) | Axel | Motion matching, fase 1 (P29): MxM 2.3.3 embebido con un parche para Unity 6.6 (T26), base de datos horneada desde código (`MxMLocomotionBuilder`: 24 118 poses de Kinematica y 100STYLE, el estilo de strafe separado por tag) y prueba en Play Mode (`MxMLocomotionProbe`). 50/57: velocidades, respuesta, giros de 180°, retroceso y patinaje cumplen; quedan suelas hundidas en giros de 90° y strafe, frenado lento y strafe derecho lento (T27). La base va por Git LFS. El jugador todavía no la usa (detalle abajo). |
 | 2026-10-02 | (sin commit) | Axel | Reconstrucción del movimiento (P28), fases 2–10: animaciones CC0 de Quaternius, herramienta de medición de clips, locomoción direccional con marchas (caminar, strafe, retroceso a 3.5 m/s, agacharse), slide con bucle real, mantle, drop y salto de cornisa, roll de aterrizaje, laboratorio S11 y limpieza (detalle abajo). 341/341 en Play Mode. |
 | 2026-10-02 | (sin commit) | Axel | Reconstrucción del movimiento (P28): auditoría, investigación de repositorios y licencias, arquitectura D aprobada; fase 1: cámara orbital con ratón (P5) y giro limitado por la aceleración lateral (media vuelta que frena y pivota). 304/304 en Play Mode. |

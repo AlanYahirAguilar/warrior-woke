@@ -250,7 +250,11 @@ public class EnvironmentChecker : MonoBehaviour
             return false;
         Vector3 edge = new Vector3(edgeFace.point.x, top.point.y, edgeFace.point.z);
 
-        // 4. Room to stand on top where the action ends
+        // 4. A grab needs the edge under both hands (P39): an edge narrower than the grips is not forced
+        //    with IK, it is not a ledge
+        if (action == ParkourActions.LedgeGrab && !EdgeUnderBothHands(edge, normal, top.point.y, action)) return false;
+
+        // 5. Room to stand on top where the action ends
         Vector3 stand = edge - normal * standInset;
         if (!Physics.Raycast(stand + Vector3.up * 0.3f, Vector3.down, out RaycastHit standTop, 0.5f, obstacleLayer, QueryTriggerInteraction.Ignore))
             return false;
@@ -263,6 +267,24 @@ public class EnvironmentChecker : MonoBehaviour
         ledge.StandPoint = stand;
         ledge.Face       = edgeFace.collider;
         ledge.Top        = top.collider;
+        return true;
+    }
+
+    /// <summary>
+    /// True if the top continues at both hands' places along the edge (HandLateral to each side of the
+    /// body's line), at the same height, and allows <paramref name="action"/>.
+    /// </summary>
+    private bool EdgeUnderBothHands(Vector3 edge, Vector3 normal, float topY, ParkourActions action)
+    {
+        Vector3 tangent = Vector3.Cross(Vector3.up, -normal).normalized;
+        for (int side = -1; side <= 1; side += 2)
+        {
+            Vector3 probe = edge + tangent * (side * (ParkourTimings.HandLateral + PlayerContactIK.GripEndMargin)) - normal * 0.1f;
+            probe.y = topY + 0.3f;
+            if (!Physics.Raycast(probe, Vector3.down, out RaycastHit hit, 0.4f, obstacleLayer, QueryTriggerInteraction.Ignore) ||
+                Mathf.Abs(hit.point.y - topY) > 0.05f || !ParkourObstacle.Allows(hit.collider, action))
+                return false;
+        }
         return true;
     }
 

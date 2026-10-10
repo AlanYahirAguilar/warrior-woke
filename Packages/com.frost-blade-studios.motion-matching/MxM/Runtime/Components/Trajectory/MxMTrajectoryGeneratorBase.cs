@@ -124,6 +124,12 @@ namespace MxM
         *  @brief Records the past trajectory if the time passed meets the recording frequency requirements
         *         
         *********************************************************************************************/
+        /// <summary>
+        /// Warrior Woke patch: scale of the recorded past in the goal (1 = as recorded). With the mocap played
+        /// N times faster, 1/N brings the body's history back to the mocap's units.
+        /// </summary>
+        public float PastScale { get; set; } = 1f;
+
         protected void RecordPastTrajectory()
         {
             if (Time.time - p_recordingTimer >= p_recordingFrequency)
@@ -276,7 +282,9 @@ namespace MxM
                             position.y = transformPosition.y;
 
                         //p_goal[i] = new TrajectoryPoint(position - transformPosition, p_recordedPastFacingAngles[curIndex]);
-                        p_goal[i] = new TrajectoryPoint(position - transformPosition, facingAngle);
+                        // Warrior Woke patch: the recorded history scaled by PastScale (the mocap plays faster
+                        // than captured, P39: the body's real past is TimeScale times longer than any take's)
+                        p_goal[i] = new TrajectoryPoint((position - transformPosition) * PastScale, facingAngle);
                     }
                     else
                     {

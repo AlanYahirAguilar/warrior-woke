@@ -217,17 +217,17 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 0e6a4d691d69cdb4dad8b3c9a237f303, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::PlayerMovement
-  BaseSpeed: 3.4
+  BaseSpeed: 4.25
   SprintMultiplier: 1.41
   SlideSpeed: 7.5
   JumpSpeed: 4.5
-  BackpedalSpeed: 2
-  WalkSpeed: 1.3
-  CrouchSpeed: 1
+  BackpedalSpeed: 2.5
+  WalkSpeed: 1.6
+  CrouchSpeed: 1.25
   CrouchHeightFactor: 0.62
-  Acceleration: 10
-  Deceleration: 13
-  AirAcceleration: 4
+  Acceleration: 14
+  Deceleration: 18
+  AirAcceleration: 5
   AirDrag: 0.5
   SlideFriction: 2.5
   SlideBrakeFriction: 9
@@ -244,18 +244,18 @@ MonoBehaviour:
   SoftLandingHeight: 0.6
   HardLandingHeight: 3.2
   HardLandingSpeedKept: 0.3
-  HardLandingRecovery: 0.7
+  HardLandingRecovery: 0.5
   RollMinSeverity: 0.6
   RollMinSpeed: 2
   RollSpeedKept: 0.7
-  RollRecovery: 0.45
+  RollRecovery: 0.35
   LedgeRegrabDelay: 0.4
   vaultCatalog: {fileID: 11400000, guid: cee5355c573b7d946a15deb32a0db8e2, type: 2}
   faceMovementDirection: 1
-  turnSmoothTime: 0.12
-  sprintTurnSmoothTime: 0.2
-  maxTurnRateStill: 720
-  maxLateralAcceleration: 9
+  turnSmoothTime: 0.09
+  sprintTurnSmoothTime: 0.15
+  maxTurnRateStill: 900
+  maxLateralAcceleration: 11
   pivotAngle: 135
   moveInputDeadzone: 0.1
 --- !u!114 &5207809015301318550
@@ -348,6 +348,9 @@ MonoBehaviour:
     m_Bits: 512
   damage: 10
   ownerCollider: {fileID: 0}
+  blockingLayers:
+    serializedVersion: 2
+    m_Bits: 0
   showGizmos: 1
 --- !u!114 &4417385296650123456
 MonoBehaviour:
@@ -447,6 +450,7 @@ MonoBehaviour:
   trajectory: {fileID: 1652818663798260575}
   blendInTime: 0.25
   blendOutTime: 0.06
+  timeScale: 1.25
 --- !u!114 &8369596441514749379
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -816,7 +820,7 @@ MonoBehaviour:
   p_sampleRate: 20
   p_flattenTrajectory: 0
   m_simulationSpeedScale: 1
-  m_maxSpeed: 3.4
+  m_maxSpeed: 4.25
   m_posBias: 15
   m_dirBias: 10
   m_trajectoryMode: 0

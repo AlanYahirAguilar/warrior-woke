@@ -570,11 +570,14 @@ public class PlayerAnimator : MonoBehaviour, IParkourAnimationProgress, ICombatA
         TorsoJointInWall(_head, HandWallGap, float.MinValue, ref push, ref deepest);
         TorsoJointInWall(_armL, HandWallGap, float.MinValue, ref push, ref deepest);
         TorsoJointInWall(_armR, HandWallGap, float.MinValue, ref push, ref deepest);
+        // On the ground a curb the auto step climbs is left alone; in the air (a jump against a block) any
+        // face whose top is above the joint pushes it out (the toes went 3.8 cm into a 1 m block at 5.5 m/s)
+        bool air = !(_movement.IsGrounded || _movement.AirTime < _movement.FallGraceTime);
         float wallTop = _movement.FeetY + ParkourStandard.StepMaxHeight + 0.05f;
-        TorsoJointInWall(_toeL, LegFaceGap, wallTop, ref push, ref deepest);
-        TorsoJointInWall(_toeR, LegFaceGap, wallTop, ref push, ref deepest);
-        TorsoJointInWall(_kneeL, LegFaceGap, wallTop, ref push, ref deepest);
-        TorsoJointInWall(_kneeR, LegFaceGap, wallTop, ref push, ref deepest);
+        TorsoJointInWall(_toeL, LegFaceGap, air && _toeL != null ? _toeL.position.y : wallTop, ref push, ref deepest);
+        TorsoJointInWall(_toeR, LegFaceGap, air && _toeR != null ? _toeR.position.y : wallTop, ref push, ref deepest);
+        TorsoJointInWall(_kneeL, LegFaceGap, air && _kneeL != null ? _kneeL.position.y : wallTop, ref push, ref deepest);
+        TorsoJointInWall(_kneeR, LegFaceGap, air && _kneeR != null ? _kneeR.position.y : wallTop, ref push, ref deepest);
         if (deepest > 0f)
             _model.position += push * Mathf.Min(deepest, MaxTorsoGuard);
     }

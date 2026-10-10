@@ -14,6 +14,12 @@ using UnityEngine.Playables;
 /// fades out and the controller's clip shows, with MatchTarget and the IK pass working as before
 /// (P22). While faded out MxM is paused, so it neither searches nor moves.
 /// PlayerMovement feeds the intention every physics tick (Drive) and reads <see cref="Weight"/>.
+/// Since P39 (2026-10-10) the mocap plays <see cref="TimeScale"/> times faster than captured (×1.25): its
+/// root motion moves the body that much faster at the same pace per step, so starts, stops and turns are
+/// shorter too. The trajectory still asks MxM for speeds in the mocap's own units: its future at
+/// ScaleAdjustment 1/TimeScale (and its response SimulationSpeedScale = TimeScale), and the body's real
+/// history scaled by PastScale 1/TimeScale (a patch of the embedded MxM, T26), or it would pull the search to
+/// faster takes.
 /// </summary>
 [RequireComponent(typeof(PlayerMovement))]
 public class PlayerMxMLocomotion : MonoBehaviour
@@ -30,8 +36,26 @@ public class PlayerMxMLocomotion : MonoBehaviour
     [Tooltip("Seconds motion matching takes to give way to an action. Short: parkour actions start their contact matching right away.")]
     [SerializeField] private float blendOutTime = 0.06f;
 
+    [Tooltip("How much faster than captured the mocap plays (P39): the body moves this much faster, with the mocap's own root motion.")]
+    [SerializeField] private float timeScale = 1.25f;
+
+    /// <summary>How much faster than captured the mocap plays (P39).</summary>
+    public float TimeScale => timeScale;
+
     /// <summary>MxM tag of the oriented (strafe and backward) takes: MxMLocomotionBuilder.StrafeTag.</summary>
     public const ETags StrafeTag = ETags.Tag1;
+
+    /// <summary>MxM favour tag of the oriented runs (100STYLE BR and SR): MxMLocomotionBuilder.RunFavourTag.</summary>
+    public const ETags RunFavourTag = ETags.Tag1;
+
+    /// <summary>
+    /// Cost multiplier of the oriented runs while the oriented gait is a run (P39): from the real history
+    /// of a start, the backward walk matched the past best and kept itself under a 2.5 m/s request.
+    /// </summary>
+    private const float RunFavour = 0.6f;
+
+    /// <summary>Oriented gaits from this speed (m/s) are runs (the walk is 1.6, the backpedal 2.5).</summary>
+    private const float OrientedRunSpeed = 2f;
 
     /// <summary>Slowest speed (m/s) carried into the trajectory's past when motion matching takes over again.</summary>
     private const float MinCarriedSpeed = 0.5f;
@@ -56,15 +80,39 @@ public class PlayerMxMLocomotion : MonoBehaviour
     private float _targetSpeed;
     private Vector3 _direction;
     private float _playbackScale = 1f;
+    private bool _favourRun;
 
-    /// <summary>Slowest the speed governor plays the mocap (fraction of its own speed).</summary>
-    private const float MinPlaybackScale = 0.88f;
+    /// <summary>Slowest and fastest the speed governor plays the mocap (fraction of TimeScale).</summary>
+    private const float MinPlaybackScale = 0.88f, MaxPlaybackScale = 1.3f;
+
+    /// <summary>Share of the gait's speed from which the body counts as holding it (the governor stays out of starts).</summary>
+    private const float CruiseShare = 0.7f;
+
+    /// <summary>
+    /// Gaits from this speed (m/s) are played at most SprintHurry faster: the sprint takes are the mocap's
+    /// fastest, and speeding them up 30 % in the troughs of each stride (a sprint swings ±1.2 m/s) ran it
+    /// 10 % over the gait; not at all, a slow sprint take stayed 11 % under it.
+    /// </summary>
+    private const float NoHurrySpeed = 5f, SprintHurry = 1.1f;
+
+    /// <summary>
+    /// How much faster the mocap plays while the body stops from a free gait (no input, still moving): the
+    /// actor's stops take 1.3–1.6 s (T27); played faster they keep their footwork and end sooner (P39).
+    /// </summary>
+    private const float StopHurry = 1.15f;
 
     private void Awake()
     {
         _movement = GetComponent<PlayerMovement>();
         if (mxm == null) mxm = GetComponentInChildren<MxMAnimator>();
         if (trajectory == null && mxm != null) trajectory = mxm.GetComponent<MxMTrajectoryGenerator>();
+        if (trajectory != null)
+        {
+            // The trajectory in the mocap's units and at its pace: the body's speed is the mocap's × TimeScale
+            trajectory.ScaleAdjustment = 1f / Mathf.Max(0.1f, timeScale);
+            trajectory.SimulationSpeedScale = timeScale;
+            trajectory.PastScale = 1f / Mathf.Max(0.1f, timeScale);
+        }
     }
 
     /// <summary>
@@ -92,6 +140,29 @@ public class PlayerMxMLocomotion : MonoBehaviour
         }
         if (oriented && facing.sqrMagnitude > 0.0001f)
             trajectory.StrafeDirection = facing;
+        // Only straight back, to a side or forward (forward is oriented only while a backpedal turns
+        // around, PlayerMovement): the runs are those, and favoured under a diagonal request they ran
+        // straight back (100STYLE has no diagonal runs; the diagonals come from the other takes)
+        bool favourRun = oriented && speed >= OrientedRunSpeed && OnRunAxis(direction, facing);
+        if (favourRun != _favourRun)
+        {
+            _favourRun = favourRun;
+            if (favourRun) mxm.SetFavourTags(RunFavourTag, RunFavour);
+            else mxm.ClearFavourTags();
+        }
+    }
+
+    /// <summary>Maximum angle (°) between a request and straight back or a side for the runs to be favoured.</summary>
+    private const float RunAxisAngle = 25f;
+
+    /// <summary>The direction is (nearly) straight back, forward or to one side of <paramref name="facing"/>.</summary>
+    private static bool OnRunAxis(Vector3 direction, Vector3 facing)
+    {
+        direction.y = 0f;
+        facing.y = 0f;
+        if (direction.sqrMagnitude < 0.0001f || facing.sqrMagnitude < 0.0001f) return false;
+        float angle = Vector3.Angle(facing, direction); // 0 = forward, 90 = a side, 180 = back
+        return angle > 180f - RunAxisAngle || angle < RunAxisAngle || Mathf.Abs(angle - 90f) < RunAxisAngle;
     }
 
     /// <summary>
@@ -146,9 +217,11 @@ public class PlayerMxMLocomotion : MonoBehaviour
             v.y = 0f;
             if (v.sqrMagnitude > MinCarriedSpeed * MinCarriedSpeed)
             {
+                // The past is recorded in world units (PastScale brings it to the mocap's); the future is
+                // the mocap's units already
                 trajectory.ForcePastTrajectoryByVelocity(v);
                 float facing = IsOriented ? trajectory.transform.eulerAngles.y : Vector3.SignedAngle(Vector3.forward, v, Vector3.up);
-                trajectory.ForceFutureTrajectoryByVelocity(v, facing);
+                trajectory.ForceFutureTrajectoryByVelocity(v / Mathf.Max(0.1f, timeScale), facing);
             }
         }
         else if (Weight <= 0f && !mxm.IsPaused)
@@ -161,24 +234,41 @@ public class PlayerMxMLocomotion : MonoBehaviour
 
     /// <summary>
     /// Speed governor: some takes run faster than the gait asked for (the mocap's sprint peaks at
-    /// ~5.1–5.5 m/s for a 4.8 m/s sprint, P33). Running straight, the mocap plays up to 12 % slower
-    /// until the body holds the gait; it never speeds a take up and stays out of turns, stops and
-    /// oriented movement, where the mocap's own timing is the motion (MxM's speed warping, which
-    /// does both ways everywhere, broke the pivots).
+    /// ~5.1–5.5 m/s for a 4.8 m/s sprint, P33; ×TimeScale since P39) and others slower (the walks at
+    /// ~1.1 m/s of mocap for a 1.28 request, the Rushed backward run at ~1.6 for 2.0: measured 2026-10-10,
+    /// 12–20 % under the gait). Moving straight and holding the gait (from CruiseShare of it), the mocap
+    /// plays between 12 % slower and 30 % faster (never faster in a sprint) until the body moves at the gait's speed: faster steps,
+    /// never sliding feet (the root motion scales with the playback). It stays out of starts, turns and
+    /// stops, where the mocap's own timing is the motion (MxM's speed warping, which does both ways
+    /// everywhere, broke the pivots).
     /// </summary>
     private void UpdatePlaybackScale()
     {
         float target = 1f;
-        if (IsActive && !IsOriented && _direction.sqrMagnitude > 0.0001f && _movement != null)
+        if (IsActive && _direction.sqrMagnitude > 0.0001f && _movement != null)
         {
             Vector3 v = _movement.Velocity;
             v.y = 0f;
             float speed = v.magnitude;
             bool straight = speed > 0.5f && Vector3.Angle(v, _direction) < 25f;
-            if (straight && speed > _targetSpeed * 1.03f)
-                target = Mathf.Clamp(_targetSpeed / speed * _playbackScale, MinPlaybackScale, 1f);
+            bool cruising = speed > _targetSpeed * CruiseShare;
+            float fastest = _targetSpeed < NoHurrySpeed ? MaxPlaybackScale : SprintHurry;
+            if (straight && cruising && (speed > _targetSpeed * 1.03f || speed < _targetSpeed * 0.97f))
+                target = Mathf.Clamp(_targetSpeed / speed * _playbackScale, MinPlaybackScale, fastest);
+            else if (straight && cruising)
+                target = _playbackScale; // holding the gait: keep the scale that holds it
         }
-        _playbackScale = Mathf.MoveTowards(_playbackScale, target, Time.deltaTime);
-        mxm.UserPlaybackSpeedMultiplier = _playbackScale;
+        else if (IsActive && !IsOriented && _targetSpeed < NoHurrySpeed && _movement != null && _movement.HorizontalSpeed > 0.3f)
+        {
+            // Stopping: the stop take, sooner (not the oriented stops: played faster, the 100STYLE
+            // backpedal stop surged to 3.2 m/s before braking; nor the sprint's: 23 m/s² of braking)
+            target = StopHurry;
+        }
+        // Released, a speed-up still running carried into the stop take (a surge to 3 m/s out of a
+        // backpedal): back to the stop's own scale at once
+        bool released = _direction.sqrMagnitude <= 0.0001f;
+        float rate = released && target < _playbackScale ? 5f : 1f;
+        _playbackScale = Mathf.MoveTowards(_playbackScale, target, Time.deltaTime * rate);
+        mxm.UserPlaybackSpeedMultiplier = timeScale * _playbackScale;
     }
 }
