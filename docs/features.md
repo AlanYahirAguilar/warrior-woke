@@ -56,11 +56,11 @@
 | F12 | Bloqueo | §5.8 | ✅ |
 | F13 | Vida, daño e i-frames | §5.11 | 🟡 |
 | F14 | Regeneración de vida | §5.11 | ⬜ |
-| F15 | Caída mortal | §5.11–5.12 | ⬜ |
+| F15 | Caída mortal | §5.11–5.12 | 🟡 límite de caída (barranco); sin muerte por altura |
 | F16 | Sistema de armas | §5.10, §18 | 🟡 `WeaponHolder` conectado, sin armas ni pickup |
 | F17 | IA de enemigos | §5.14, §12, §21 | 🟡 2.5D, sin conectar |
 | F18 | Jefes | §5.15, §13 | ⬜ |
-| F19 | Checkpoints, muerte y reaparición | §5.13, §6 | ⬜ |
+| F19 | Checkpoints, muerte y reaparición | §5.13, §6 | 🟡 muerte y reaparición en la entrada; sin checkpoints |
 | F20 | Guardado | §26 | ⬜ |
 | F21 | Cámara al hombro | §15 | 🟡 orbital con ratón; sin shake ni encuadre de combate |
 | F22 | Input | §14 | 🟡 lectura directa, sin gamepad |
@@ -409,11 +409,13 @@ Dependencias · Consideraciones técnicas · Falta**.
 - **Plan:** componente `HealthRegen` (ver `arquitectura.md` §7). El GDD no define el tiempo ni la
   tasa; hay que acordarlos en equipo.
 
-### F15 — Caída mortal ⬜
+### F15 — Caída mortal 🟡
 - **Objetivo:** muerte instantánea al caer desde gran altura o en un barranco (GDD §5.11, §5.12).
-- **Plan:** medir la altura de la caída + trigger `KillZone` que llama `HealthSystem.InstantKill()`
-  (el método ya existe). El GDD no define la altura; hay que acordarla. Para medir caídas sin
-  salto ya existe `PlayerFallState` (F03): la comprobación va en su aterrizaje.
+- **Hecho (2026-10-10, P38):** `Game/KillZone.cs`, un trigger que llama `HealthSystem.InstantKill()` a lo
+  que entra; el área de pruebas tiene uno 6 m bajo el suelo (`LimiteDeCaida`), que reemplaza al perímetro.
+  Probado: caminar por el borde mata y el jugador reaparece en la entrada con la vida completa.
+- **Falta:** la muerte por altura de caída sin barranco (el GDD no define la altura; la comprobación iría
+  en el aterrizaje de `PlayerFallState`, F03).
 
 ### F16 — Sistema de armas 🟡
 - **Objetivo:** recoger con E katana (20/35), yari (18/30, más alcance) o kanabo (30/50, más
@@ -453,9 +455,14 @@ Dependencias · Consideraciones técnicas · Falta**.
 - Líder del clan rival (300 HP, katana, 15–25) y el Comandante (450 HP, katana, 20–30). Sin fases.
   La arena bloquea la salida (GDD §5.15, §13). Plan: `Boss : Enemy` + `BossArena`.
 
-### F19 — Checkpoints, muerte y reaparición ⬜
+### F19 — Checkpoints, muerte y reaparición 🟡
 - Checkpoint automático al cruzarlo (una activación). Al morir, reaparecer en el último con la vida
-  completa (GDD §5.13, §6). Plan: `Checkpoint` + `CheckpointManager` que escucha `OnDeath`.
+  completa (GDD §5.13, §6).
+- **Hecho (2026-10-10):** muerte del jugador (`PlayerDeadState`: el clip `Death01` de Quaternius, sin
+  control, la gravedad sigue) y reaparición a los 3 s en `PlayerMovement.RespawnPoint` con la vida
+  completa (`HealthSystem.Revive`). El punto de reaparición es donde el jugador apareció
+  (`SetRespawnPoint` es el gancho para los checkpoints).
+- **Falta:** `Checkpoint` + `CheckpointManager` (una activación por checkpoint, autoguardado F20).
 
 ### F20 — Guardado ⬜
 - Una partida: nivel alcanzado + último checkpoint. Autoguardado al activar un checkpoint y al
@@ -556,18 +563,19 @@ Dependencias · Consideraciones técnicas · Falta**.
   automáticamente.
 - **Archivos:** `Editor/ParkourTestCircuitBuilder.cs`, `Editor/ParkourPlayModeTest.cs`,
   `Assets/Tests/ParkourTestArea/Materials/Losa.mat`, objeto `ParkourTestArea` de `Level-1`.
-- **Área** (P24, P25): `Level-1` completo. Suelo plano (top en y = 0) de 66 × 80 m rodeado por
-  barreras estándar de 1.5 m. El `Spawner` está en la entrada (0, 1.2, 8), mirando hacia las
-  secciones. Nueve carriles paralelos que empiezan en z = 0 y avanzan hacia −Z, **sin textos**.
-  Todos los obstáculos son instancias de los prefabs estándar (F33); las escaleras, las plataformas
-  de caída y los pilares son fixtures simples:
+- **Área** (P24, P25, P38): `Level-1` completo. Suelo plano (top en y = 0) de 78 × 80 m **sin
+  perímetro** desde el 2026-10-10 (P38): 6 m más abajo, un límite de caída (`KillZone`) mata lo que cae
+  por el borde y el jugador reaparece en la entrada. El `Spawner` está en la entrada (0, 1.2, 8), mirando
+  hacia las secciones. Carriles paralelos que empiezan en z = 0 y avanzan hacia −Z, **sin textos**. Todos
+  los obstáculos son instancias de los prefabs estándar (F33), cada uno con sus acciones declaradas; las
+  escaleras y las plataformas de caída son fixtures simples:
 
   | Sección | x | Contenido (z de la cara frontal) | Qué se prueba |
   |---|---|---|---|
-  | 01 Locomoción | −25 (8 m de ancho) | `Step` de 0.15 / 0.25 / 0.35 m (−8, −11, −14) · 4 pilares en zigzag (−20…−35) · escalera a una plataforma de 1 m y escalera de bajada (−40…−49) | Arranque, frenado, giros, caminar hacia atrás, auto step y step down. El pasillo libre en x = −31 sirve para correr en recto. |
+  | 01 Locomoción | −25 (8 m de ancho) | Escalera a una plataforma de 1 m y escalera de bajada (−40…−49). Los bordillos y los pilares se quitaron (P38) | Arranque, frenado, giros, caminar hacia atrás, auto step y step down. El pasillo libre en x = −31 sirve para correr en recto. |
   | 02 Vault bajo | −16 | `LowVault` 0.6 m (−8) | Corriendo, a un lado, en ángulo, esprintando, desde parado |
   | 03 Vault medio | −10 | `MediumVault` 1.0 m (−8) · `MediumVault` de 1.4 m de fondo (−20) | Igual, más el fondo máximo |
-  | 04 Vault alto | −4 | `HighVault` 1.2 m (−8) | Igual, más el caso sin espacio para el despegue (y un obstáculo de 1.6 m que la prueba crea y borra) |
+  | ~~04 Vault alto~~ | −4 | Eliminado el 2026-10-10 (P38): el carril queda libre y la prueba coloca ahí un `HighVault` de 1.1 m temporal | Vault alto corriendo y sin vault caminando |
   | 05 Slide | 2 | `Slide` (−9.5) · `Slide` de 4 m de fondo como túnel (−20…−24) | C esprintando |
   | 06 Cornisa | 8 | `Ledge` 2.2 m (−8) · `Ledge` girado 30° (−20) | Agarre desde parado, corriendo, a un lado y en ángulo; colgarse, soltarse y subir |
   | 07 Muro de escalada | 14 | `ClimbWall` 3.0 m (−8) · `Ledge` de 11 m de fondo (terraza, −20) con otro `Ledge` encima (hasta 4.4 m, −24) · escalera de bajada (−31) | Salto + agarre en el aire, escalada encadenada, caída a la terraza y bajada |

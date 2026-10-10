@@ -236,6 +236,7 @@ namespace WarriorWoke.EditorTools
                 EditorGUILayout.LabelField("Estándar", $"{spec.Height:F2} m de alto · {spec.Depth:F2} m de fondo · layer {spec.Layer}");
                 EditorGUILayout.LabelField("Rango válido", $"alto {spec.MinHeight:F2}–{spec.MaxHeight:F2} m · ancho ≥ {spec.MinWidth:F2} m");
                 EditorGUILayout.LabelField("Medido", $"{height:F2} m de alto · {depth:F2} m de fondo · {width:F2} m de ancho");
+                EditorGUILayout.LabelField("Acciones (P38)", ParkourStandard.ActionsLabel(obstacle.Actions));
             }
 
             var issues = new List<string>();

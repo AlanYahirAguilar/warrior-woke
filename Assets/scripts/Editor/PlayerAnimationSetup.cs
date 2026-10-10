@@ -356,6 +356,8 @@ namespace WarriorWoke.EditorTools
             new QuaterniusClip(Ual1, "Rig|Punch_Cross", CombatTimings.CrossClip, RootMode.InPlace, false),
             new QuaterniusClip(Ual1, "Rig|Hit_Chest", CombatTimings.HitChestClip, RootMode.InPlace, false),
             new QuaterniusClip(Ual1, "Rig|Hit_Head", CombatTimings.HitHeadClip, RootMode.InPlace, false),
+            // Death (the player's and the enemies'): the body falls in place
+            new QuaterniusClip(Ual1, "Rig|Death01", PlayerAnimatorIds.DeathClip, RootMode.InPlace, false),
         };
 
         /// <summary>
@@ -647,6 +649,7 @@ namespace WarriorWoke.EditorTools
             AddState(sm, PlayerAnimatorIds.HeavyAttackName, c.Kick, CombatTimings.Kick.Rate, new Vector2(-300, 120)).iKOnFeet = true;
             AddState(sm, PlayerAnimatorIds.HurtName, c.HitChest, CombatTimings.HitRate, new Vector2(-550, 120));
             AddState(sm, PlayerAnimatorIds.HurtHeadName, c.HitHead, CombatTimings.HitRate, new Vector2(-550, 180));
+            AddState(sm, PlayerAnimatorIds.DeathName, c.Death, 1f, new Vector2(-550, 240));
 
             // Guard: Ch45 enter transition → LowPoly blocking loop; exit transition → Locomotion
             AnimatorState blockEnter = AddState(sm, PlayerAnimatorIds.BlockEnterName, c.GuardEnter, Fit(c.GuardEnter, GuardTransitionTime), new Vector2(-300, 200));
@@ -1171,7 +1174,7 @@ namespace WarriorWoke.EditorTools
             /// <summary>Clips of the directional locomotion blend (placed at their measured velocity).</summary>
             public AnimationClip[] Locomotion => new[] { Idle, Walk, Jog, Run, WalkBackward, RunBackward, RunBackLeft, RunBackRight, RunDiagA, RunDiagB, StrafeLeft, StrafeRight };
             public AnimationClip RollForward, RollBackward, RollLeft, RollRight;
-            public AnimationClip Jab, Cross, Hook, Kick, HitChest, HitHead, Blocking, GuardEnter, GuardExit;
+            public AnimationClip Jab, Cross, Hook, Kick, HitChest, HitHead, Death, Blocking, GuardEnter, GuardExit;
 
             public bool Load()
             {
@@ -1212,6 +1215,7 @@ namespace WarriorWoke.EditorTools
                 Kick         = LoadClip(CmuKickPath, CombatTimings.KickClip);
                 HitChest     = LoadClip(Ual1, CombatTimings.HitChestClip);
                 HitHead      = LoadClip(Ual1, CombatTimings.HitHeadClip);
+                Death        = LoadClip(Ual1, PlayerAnimatorIds.DeathClip);
                 Blocking     = LoadClip(LowPolyCombat + "BlockingLoop.fbx", "BlockingLoop");
                 GuardEnter   = LoadClip(GuardEnterPath, PlayerAnimatorIds.BlockEnterName);
                 GuardExit    = LoadClip(GuardExitPath, PlayerAnimatorIds.BlockExitName);
@@ -1220,7 +1224,7 @@ namespace WarriorWoke.EditorTools
                                                        StrafeLeft, StrafeRight, CrouchIdle, CrouchFwd, Roll, Mantle, LedgeDrop, JumpUp, FallLoop, Land,
                                                        LandRun, SlideEnter, SlideLoop, SlideExit, LedgeEnter, LedgeHang, LedgeClimb,
                                                        RollForward, RollBackward, RollLeft, RollRight, Jab, Cross, Hook,
-                                                       Kick, HitChest, HitHead, Blocking, GuardEnter, GuardExit })
+                                                       Kick, HitChest, HitHead, Death, Blocking, GuardEnter, GuardExit })
                 {
                     if (clip == null) return false;
                 }

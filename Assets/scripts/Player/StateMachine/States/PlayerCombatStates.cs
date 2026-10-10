@@ -343,6 +343,45 @@ public class PlayerHeavyAttackState : PlayerAttackState
 /// away from it; it cannot move, attack or dodge until the reaction ends (GDD §5.5: no dodge during a
 /// damage animation). A hit blocked from the front does not interrupt the guard.
 /// </summary>
+// ────────────────────────────────────────────────────────────────────────────────
+// PlayerDeadState
+// ────────────────────────────────────────────────────────────────────────────────
+
+/// <summary>
+/// Dead (GDD §5.11: health 0 or a fatal fall): the body falls with the death clip and takes no input
+/// (GDD §5.1: it does not move while dead); after RespawnDelay the player reappears at the respawn point
+/// with full health (GDD §17).
+/// </summary>
+public class PlayerDeadState : PlayerState
+{
+    /// <summary>Seconds from the death to the respawn.</summary>
+    public const float RespawnDelay = 3f;
+
+    public PlayerDeadState(PlayerMovement player, PlayerStateMachine stateMachine) : base(player, stateMachine) { }
+
+    /// <summary>Seconds since the death.</summary>
+    public float Elapsed => Time.time - startTime;
+
+    public override void Enter()
+    {
+        base.Enter();
+        player.CancelSprint();
+        player.StopTurning();
+        player.StopHorizontal(player.Velocity.y);
+    }
+
+    public override void PhysicsUpdate()
+    {
+        // The body only falls: no steering, no momentum (gravity keeps acting)
+        player.StopHorizontal(player.Velocity.y);
+    }
+
+    public override void LogicUpdate()
+    {
+        if (Elapsed >= RespawnDelay) player.Respawn();
+    }
+}
+
 public class PlayerHurtState : PlayerState
 {
     /// <summary>Damage from which the reaction is the heavy one (a hit to the head).</summary>

@@ -6,13 +6,15 @@ using UnityEngine.SceneManagement;
 namespace WarriorWoke.EditorTools
 {
     /// <summary>
-    /// Builds Level-1 as the Parkour Test Area (decisions P24, P25): a flat floor, a perimeter and nine
-    /// lanes that run toward −Z from the spawn point, one per standard obstacle. Every obstacle is an
-    /// instance of a standard prefab (ParkourObstaclePrefabs, Parkour Obstacle Standard); only the
-    /// floor, the stairs, the platforms and the pillars are plain test fixtures. No signs or text:
-    /// each family has a color and the layout is documented in docs/features.md (F32).
-    ///   Locomotion (x = −25) · LowVault (−16) · MediumVault (−10) · HighVault (−4) · Slide (2)
-    ///   Ledge (8) · ClimbWall (14) · Jump (20) · Combined (26) · Flow lab (32)
+    /// Builds Level-1 as the Parkour Test Area (decisions P24, P25): a flat floor and lanes that run toward
+    /// −Z from the spawn point, one per standard obstacle. Every obstacle is an instance of a standard
+    /// prefab (ParkourObstaclePrefabs, Parkour Obstacle Standard); only the floor, the stairs and the
+    /// platforms are plain test fixtures. No signs or text: each family has a color and the layout is
+    /// documented in docs/features.md (F32). Since 2026-10-10 (P38) the area has no perimeter, pillars,
+    /// curbs or high-vault lane: under the floor a fall limit (KillZone) kills a body that walks off the edge
+    /// (GDD §5.12) and the player reappears at the entrance.
+    ///   Locomotion (x = −25) · LowVault (−16) · MediumVault (−10) · Slide (2) · Ledge (8) · ClimbWall (14)
+    ///   Jump (20) · Combined (26) · Flow lab (32) · Mantle (38)
     /// Menu: Tools → Warrior Woke → Construir Parkour Test Area.
     /// </summary>
     internal static class ParkourTestCircuitBuilder
@@ -23,13 +25,14 @@ namespace WarriorWoke.EditorTools
         private const string FixtureMaterial = ParkourObstaclePrefabs.Folder + "/Materials/Step.mat";
         private const float  LaneWidth      = ParkourStandard.PrefabWidth;
         public  const float  FloorTop       = 0f;
-        private const int    LaneCount      = 12;
+        private const int    LaneCount      = 11;
         private const string DummyMaterial  = "Assets/material/enemy.mat";
 
-        // Floor and perimeter (x and z limits of the walkable area)
+        // Floor (x and z limits of the walkable area)
         private const float MinX = -34f, MaxX = 44f, MinZ = -65f, MaxZ = 15f;
 
-        // Lane centers (x). Every lane starts at z = 0 and runs toward −Z.
+        // Lane centers (x). Every lane starts at z = 0 and runs toward −Z. HighVaultX is the free lane where
+        // the Play Mode test places its own high vault (the S04 obstacle was removed, P38).
         public const float LocomotionX = -25f, LowVaultX = -16f, MediumVaultX = -10f, HighVaultX = -4f, SlideX = 2f,
                            LedgeX = 8f, ClimbX = 14f, JumpX = 20f, ComboX = 26f, FlowX = 32f, MantleX = 38f;
 
@@ -80,12 +83,11 @@ namespace WarriorWoke.EditorTools
             Material fixture = AssetDatabase.LoadAssetAtPath<Material>(FixtureMaterial);
 
             Box(root, "Suelo", new Vector3((MinX + MaxX) * 0.5f, FloorTop - 0.25f, (MinZ + MaxZ) * 0.5f), new Vector3(MaxX - MinX, 0.5f, MaxZ - MinZ), floor);
-            BuildPerimeter(root);
+            BuildFallLimit(root);
 
             BuildLocomotion(Lane(root, "S01_Locomocion", LocomotionX), fixture);
             BuildVault(Lane(root, "S02_LowVault", LowVaultX), ParkourObstacleType.LowVault);
             BuildVault(Lane(root, "S03_MediumVault", MediumVaultX), ParkourObstacleType.MediumVault);
-            BuildVault(Lane(root, "S04_HighVault", HighVaultX), ParkourObstacleType.HighVault);
             BuildSlide(Lane(root, "S05_Slide", SlideX));
             BuildLedge(Lane(root, "S06_Ledge", LedgeX));
             BuildClimb(Lane(root, "S07_ClimbWall", ClimbX), fixture);
@@ -99,7 +101,7 @@ namespace WarriorWoke.EditorTools
 
             EditorSceneManager.MarkSceneDirty(scene);
             EditorSceneManager.SaveScene(scene);
-            Debug.Log($"[ParkourTestArea] Área construida en {ScenePath} (suelo, perímetro y {LaneCount} secciones).");
+            Debug.Log($"[ParkourTestArea] Área construida en {ScenePath} (suelo, límite de caída y {LaneCount} secciones).");
             return true;
         }
 
@@ -109,7 +111,7 @@ namespace WarriorWoke.EditorTools
             foreach (GameObject go in scene.GetRootGameObjects())
                 if (go.name == RootName) area = go;
             bool ok = PlayerAnimationSetup.Check(area != null && area.transform.childCount == LaneCount + 2,
-                                                 $"Parkour Test Area en Level-1 (suelo, perímetro y {LaneCount} secciones)");
+                                                 $"Parkour Test Area en Level-1 (suelo, límite de caída y {LaneCount} secciones)");
 
             // Nothing else in the scene has colliders: the area is the whole level
             foreach (GameObject go in scene.GetRootGameObjects())
@@ -156,49 +158,38 @@ namespace WarriorWoke.EditorTools
             Debug.LogWarning("[ParkourTestArea] No se encontró el Spawner en la escena.");
         }
 
-        /// <summary>Standard barriers (1.5 m, layer Ground) around the floor, facing inward.</summary>
-        private static void BuildPerimeter(Transform root)
-        {
-            var perimeter = new GameObject("Perimetro").transform;
-            perimeter.SetParent(root, false);
-            float depth = ParkourStandard.Spec(ParkourObstacleType.Barrier).Depth;
-            float height = ParkourStandard.Spec(ParkourObstacleType.Barrier).Height;
-            float lengthX = MaxX - MinX + 2f * depth, lengthZ = MaxZ - MinZ;
-            Barrier(perimeter, "Norte", new Vector3((MinX + MaxX) * 0.5f, 0f, MaxZ), 0f, lengthX, height, depth);
-            Barrier(perimeter, "Sur", new Vector3((MinX + MaxX) * 0.5f, 0f, MinZ), 180f, lengthX, height, depth);
-            Barrier(perimeter, "Oeste", new Vector3(MinX, 0f, (MinZ + MaxZ) * 0.5f), -90f, lengthZ, height, depth);
-            Barrier(perimeter, "Este", new Vector3(MaxX, 0f, (MinZ + MaxZ) * 0.5f), 90f, lengthZ, height, depth);
-        }
+        /// <summary>Depth (m below the floor) of the fall limit, and its margin around the floor (m).</summary>
+        public const float FallLimitDepth = 6f, FallLimitMargin = 30f;
 
-        private static void Barrier(Transform parent, string name, Vector3 pivot, float yaw, float width, float height, float depth)
+        /// <summary>
+        /// The area has no walls around it (P38): a trigger well below the floor kills whatever walks off the
+        /// edge (GDD §5.12, fatal fall), and the player reappears at the entrance (PlayerDeadState).
+        /// </summary>
+        private static void BuildFallLimit(Transform root)
         {
-            GameObject go = Instantiate(ParkourObstacleType.Barrier, parent, pivot, Quaternion.Euler(0f, yaw, 0f));
-            go.name = name;
-            ParkourObstaclePrefabs.SetBoxSize(go, width, height, depth);
+            var go = new GameObject("LimiteDeCaida");
+            go.transform.SetParent(root, false);
+            go.layer = LayerMask.NameToLayer("Ignore Raycast"); // never seen by the parkour's rays
+            go.transform.localPosition = new Vector3((MinX + MaxX) * 0.5f, FloorTop - FallLimitDepth - 2f, (MinZ + MaxZ) * 0.5f);
+            var box = go.AddComponent<BoxCollider>();
+            box.isTrigger = true;
+            box.size = new Vector3(MaxX - MinX + 2f * FallLimitMargin, 4f, MaxZ - MinZ + 2f * FallLimitMargin);
+            go.AddComponent<KillZone>();
         }
 
         // ─── Sections ────────────────────────────────────────────────────────────────
 
-        // S01: acceleration, braking, turns and backpedal in the open; steps across the standard range
-        // (auto step) and stairs for the feet IK. The pillars are plain fixtures to run around.
+        // S01: acceleration, braking, turns and backpedal in the open, and stairs up to a 1 m platform and
+        // down again (auto step, step down and the feet rig). The curbs and pillars were removed (P38).
         private static void BuildLocomotion(Transform lane, Material fixture)
         {
             const float width = 8f;
-            float[] heights = { 0.15f, 0.25f, 0.35f };
-            for (int i = 0; i < heights.Length; i++)
-            {
-                GameObject step = Place(lane, ParkourObstacleType.Step, -8f - i * 3f);
-                step.name = $"Escalon_{heights[i]:0.00}";
-                ParkourObstaclePrefabs.SetBoxSize(step, width, heights[i], ParkourStandard.Spec(ParkourObstacleType.Step).Depth);
-            }
-            for (int i = 0; i < 4; i++)
-                Box(lane, $"Pilar_{i + 1}", new Vector3(i % 2 == 0 ? -1.6f : 1.6f, 1.25f, -20f - i * 5f), new Vector3(0.6f, 2.5f, 0.6f), fixture);
             Stairs(lane, "Escalera", -40f, 0f, 1.0f, 4, 0.6f, width, fixture, true);
             Box(lane, "Plataforma_1m", new Vector3(0f, 0.5f, -44.4f), new Vector3(width, 1.0f, 4f), fixture);
             Stairs(lane, "Escalera_Bajada", -46.4f, 1.0f, 0f, 4, 0.6f, width, fixture, false);
         }
 
-        // S02–S04 (GDD §5.4): one standard vault each; the medium lane adds a deep one (still in range).
+        // S02–S03 (GDD §5.4): one standard vault each; the medium lane adds a deep one (still in range).
         private static void BuildVault(Transform lane, ParkourObstacleType type)
         {
             Place(lane, type, VaultFront);

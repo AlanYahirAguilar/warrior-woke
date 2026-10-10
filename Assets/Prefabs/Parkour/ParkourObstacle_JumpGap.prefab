@@ -271,3 +271,4 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::ParkourObstacle
   type: 9
+  actions: 0

@@ -78,7 +78,8 @@ public class EnvironmentChecker : MonoBehaviour
 
         // 1. Front face at knee height, roughly facing the player
         Vector3 knee = feet + Vector3.up * ParkourStandard.VaultKneeRay;
-        if (!Physics.Raycast(knee, direction, out RaycastHit front, reach, obstacleLayer, QueryTriggerInteraction.Ignore))
+        if (!Physics.Raycast(knee, direction, out RaycastHit front, reach, obstacleLayer, QueryTriggerInteraction.Ignore) ||
+            !ParkourObstacle.Allows(front.collider, ParkourActions.Vault))
             return false;
         Vector3 faceNormal = new Vector3(front.normal.x, 0f, front.normal.z);
         if (faceNormal.sqrMagnitude < 0.25f || Vector3.Dot(-faceNormal.normalized, direction) < 0.6f) return false;
@@ -92,7 +93,7 @@ public class EnvironmentChecker : MonoBehaviour
         float height = top.point.y - feetY;
         // (with a tolerance: the standard high vault is exactly VaultMaxHeight, and the feet of a
         // CharacterController resting on the ground read a fraction of a millimetre below it)
-        if (top.distance < 0.01f || top.normal.y < 0.7f ||
+        if (top.distance < 0.01f || top.normal.y < 0.7f || !ParkourObstacle.Allows(top.collider, ParkourActions.Vault) ||
             height < ParkourStandard.VaultMinHeight - HeightTolerance || height > ParkourStandard.VaultMaxHeight + HeightTolerance) return false;
 
         // 3. Depth: cast back toward the player from beyond the deepest vaultable obstacle.
@@ -143,7 +144,7 @@ public class EnvironmentChecker : MonoBehaviour
     {
         float reach = fromGround ? ParkourStandard.LedgeReachGround : ParkourStandard.LedgeReachAir;
         return TryFindTop(direction, feetY, ParkourStandard.LedgeChestRay, ParkourStandard.LedgeHeadRay, reach,
-                          minRise, maxRise, ParkourStandard.LedgeStandInset, out ledge);
+                          minRise, maxRise, ParkourStandard.LedgeStandInset, ParkourActions.LedgeGrab, out ledge);
     }
 
     /// <summary>
@@ -153,7 +154,7 @@ public class EnvironmentChecker : MonoBehaviour
     public bool TryFindMantle(Vector3 direction, float feetY, float reach, out LedgeInfo top)
     {
         return TryFindTop(direction, feetY, ParkourStandard.MantleLowRay, ParkourStandard.MantleHighRay, reach,
-                          ParkourStandard.MantleMinRise, ParkourStandard.MantleMaxRise, ParkourStandard.MantleStandInset, out top);
+                          ParkourStandard.MantleMinRise, ParkourStandard.MantleMaxRise, ParkourStandard.MantleStandInset, ParkourActions.Mantle, out top);
     }
 
     /// <summary>
@@ -183,7 +184,8 @@ public class EnvironmentChecker : MonoBehaviour
 
         // 2. The block's face below the edge, seen from the open side
         Vector3 faceProbe = basePos + direction * (d + 0.4f) + Vector3.down * 0.15f;
-        if (!Physics.Raycast(faceProbe, -direction, out RaycastHit face, 0.8f, obstacleLayer, QueryTriggerInteraction.Ignore))
+        if (!Physics.Raycast(faceProbe, -direction, out RaycastHit face, 0.8f, obstacleLayer, QueryTriggerInteraction.Ignore) ||
+            !ParkourObstacle.Allows(face.collider, ParkourActions.LedgeDrop))
             return false;
         Vector3 normal = new Vector3(face.normal.x, 0f, face.normal.z);
         if (normal.sqrMagnitude < 0.25f || Vector3.Dot(normal.normalized, direction) < 0.5f) return false;
@@ -213,7 +215,7 @@ public class EnvironmentChecker : MonoBehaviour
     /// at <paramref name="standInset"/> past the edge. Allocation-free.
     /// </summary>
     private bool TryFindTop(Vector3 direction, float feetY, float lowRay, float highRay, float reach,
-                            float minRise, float maxRise, float standInset, out LedgeInfo ledge)
+                            float minRise, float maxRise, float standInset, ParkourActions action, out LedgeInfo ledge)
     {
         ledge = default;
         direction.y = 0f;
@@ -238,11 +240,13 @@ public class EnvironmentChecker : MonoBehaviour
         if (!Physics.Raycast(topOrigin, Vector3.down, out RaycastHit top, maxRise - minRise + 0.6f, obstacleLayer, QueryTriggerInteraction.Ignore))
             return false;
         float rise = top.point.y - feetY;
-        if (top.distance < 0.01f || top.normal.y < 0.7f || rise < minRise - HeightTolerance || rise > maxRise + HeightTolerance) return false;
+        if (top.distance < 0.01f || top.normal.y < 0.7f || rise < minRise - HeightTolerance || rise > maxRise + HeightTolerance ||
+            !ParkourObstacle.Allows(top.collider, action)) return false;
 
         // 3. The face right below the edge (exact plane where the hands go)
         Vector3 edgeProbe = new Vector3(face.point.x, top.point.y - 0.1f, face.point.z) + normal * 0.6f;
-        if (!Physics.Raycast(edgeProbe, -normal, out RaycastHit edgeFace, 1.0f, obstacleLayer, QueryTriggerInteraction.Ignore))
+        if (!Physics.Raycast(edgeProbe, -normal, out RaycastHit edgeFace, 1.0f, obstacleLayer, QueryTriggerInteraction.Ignore) ||
+            !ParkourObstacle.Allows(edgeFace.collider, action))
             return false;
         Vector3 edge = new Vector3(edgeFace.point.x, top.point.y, edgeFace.point.z);
 

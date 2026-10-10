@@ -46,6 +46,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::ParkourObstacle
   type: 7
+  actions: 56
 --- !u!1 &8216687531088828421
 GameObject:
   m_ObjectHideFlags: 0

@@ -79,7 +79,8 @@ Assets/
       StateMachine/           PlayerState, PlayerStateMachine,
                               States/{PlayerGroundedStates, PlayerAirStates,
                                       PlayerParkourStates, PlayerCombatStates}.cs
-    Parkour/                  ParkourStandard (estándar de obstáculos + ParkourObstacleType),
+    Game/                     KillZone (caída mortal, P38)
+    Parkour/                  ParkourStandard (estándar de obstáculos, ParkourObstacleType, ParkourActions),
                               ParkourObstacle (componente de los obstáculos estándar),
                               VaultCatalog (SO de los vaults medidos), VaultPlanner (elige el vault)
     Editor/                   SceneAutoLoader, PlayerCharacterSetup, PlayerAnimationSetup, PlayerRigSetup,
@@ -149,7 +150,7 @@ Desde el 2026-10-01 (decisión P24) la escena es el área de pruebas del parkour
 2026-10-02 (P25) **todos sus obstáculos son instancias de los prefabs estándar** (§5.13). La construye
 `ParkourTestCircuitBuilder` (**Tools → Warrior Woke → Construir Parkour Test Area**) y contiene:
 instancias de `GameManager`, `Spawner`, `Main Camera` y `Directional Light`, y el objeto
-`ParkourTestArea` (suelo, perímetro y doce secciones). **El Player no está colocado en la escena:**
+`ParkourTestArea` (suelo, límite de caída y once secciones; desde el 2026-10-10, P38, sin perímetro, pilares, bordillos ni el carril S04). **El Player no está colocado en la escena:**
 lo crea el `Spawner` al iniciar (ver §5.6). La escena no referencia datos de iluminación horneada
 (`m_LightingDataAsset` vacío); la luz direccional es Mixed y alumbra en tiempo real. No hay textos,
 UI de depuración ni objetos fuera del área; la validación comprueba que no queda ningún collider
@@ -158,13 +159,13 @@ fuera de ella y que cada obstáculo cumple el estándar.
 | Objeto | Qué es |
 |---|---|
 | `Suelo` | Caja de 78 × 80 m con la cara superior en y = 0 (layer Ground), x −34…44, z 15…−65. Material `Tests/ParkourTestArea/Materials/Losa.mat`. |
-| `Perimetro` | Cuatro `ParkourObstacle_Barrier` (1.5 m, layer Ground) estirados a lo largo del borde y mirando hacia dentro: no se saltan ni se agarran. |
-| `S01_Locomocion` … `S11_Mantle` | Carriles paralelos que empiezan en z = 0 y avanzan hacia −Z. Contenido en `features.md` F32. |
+| `LimiteDeCaida` | Desde el 2026-10-10 (P38) el área no tiene perímetro: un trigger 6 m bajo el suelo, 30 m más ancho que él por cada lado (layer Ignore Raycast), con `KillZone`. Lo que cae por el borde muere (caída mortal, GDD §5.12) y el jugador reaparece en la entrada (`PlayerDeadState`). |
+| `S01_Locomocion` … `S11_Mantle` | Carriles paralelos que empiezan en z = 0 y avanzan hacia −Z (S04 ya no existe). Contenido en `features.md` F32. |
 | `S12_Combate` | El muñeco de entrenamiento (`TrainingDummy`, P37) en la franja libre de la entrada, en (38, 0, 10): un cuerpo de cápsula (0.25 × 1.8 m, layer Enemy, lo que golpean los ataques) que se inclina con los golpes, y dentro un poste delgado (radio 0.12, layer Ground) que detiene el cuerpo del jugador, porque las layers Player y Enemy no colisionan entre sí. Rigidbody kinemático (se mueve al retroceder), `HealthSystem` de 1000 HP con i-frames de 0.1 s. |
 | `Spawner` | (0, 1.2, 8), mirando a −Z, en la entrada del área. |
 
-Layers del área: los obstáculos estándar llevan la layer de su tipo (§5.13). Las escaleras, las
-plataformas de aterrizaje y los pilares de la locomoción son **fixtures** de prueba (cubos simples en
+Layers del área: los obstáculos estándar llevan la layer de su tipo (§5.13). Las escaleras y las
+plataformas de aterrizaje son **fixtures** de prueba (cubos simples en
 Ground, sin `ParkourObstacle`): no son parkour y el auto step puede subir los peldaños. El muñeco de
 entrenamiento también es un fixture.
 
@@ -963,7 +964,7 @@ El molde con el que se construyen todos los obstáculos del juego. Tiene tres pi
 | Pieza | Archivo | Qué hace |
 |---|---|---|
 | Estándar | `scripts/Parkour/ParkourStandard.cs` | **Único lugar** con las medidas del catálogo y los límites de detección del parkour (clase estática, como `ParkourTimings`). Lo leen `EnvironmentChecker`, `PlayerLedgeGrabState`, el auto step de `PlayerMovement`, `ParkourObstacle`, el generador de prefabs, el área de pruebas y la prueba de Play Mode. |
-| Componente | `scripts/Parkour/ParkourObstacle.cs` | Marca un obstáculo con su tipo, mide su geometría (colliders relativos al pivote), lo **valida** contra el estándar y dibuja sus puntos de contacto como gizmos. No tiene lógica en runtime. |
+| Componente | `scripts/Parkour/ParkourObstacle.cs` | Marca un obstáculo con su tipo y **las acciones que admite** (P38, `ParkourActions`), mide su geometría (colliders relativos al pivote), lo **valida** contra el estándar y dibuja sus puntos de contacto como gizmos. En runtime solo responde `ParkourObstacle.Allows(collider, acción)`, que consulta la detección. |
 | Prefabs | `Assets/Prefabs/Parkour/ParkourObstacle_*.prefab` | Generados desde el estándar por `ParkourObstaclePrefabs` (**Tools → Warrior Woke → Generar Prefabs de Obstáculos**). No se editan a mano: se cambia `ParkourStandard` y se regeneran (conservan su GUID, así que las escenas no pierden la referencia). |
 
 **De dónde salen las medidas.** Del personaje y de los clips, no de gusto: la cápsula del Player
@@ -973,19 +974,46 @@ queda **dentro** del rango de detección con margen a los dos lados, así que un
 en un límite. Entre 1.5 m (mantle más alto) y 1.9 m (agarre más bajo) no hay ninguna acción: esa banda
 es la **barrera**, que bloquea a propósito.
 
-| Tipo (prefab) | Altura estándar | Rango válido | Fondo | Ancho mín. | Layer | Acción |
+| Tipo (prefab) | Altura estándar | Rango válido | Fondo | Ancho mín. | Layer | Acciones declaradas (P38) |
 |---|---|---|---|---|---|---|
-| `Step` | 0.25 | 0.05–0.35 | 0.6 (≥ 0.3) | 1.0 | Ground | Auto step / step down (≤ 0.4) |
+| `Step` | 0.25 | 0.05–0.35 | 0.6 (≥ 0.3) | 1.0 | Ground | Escalón: auto step / step down (≤ 0.4) |
 | `LowVault` | 0.60 | 0.45–0.80 | 0.4 (0.2–1.4) | 1.0 | Obstacle | Vault a cualquier marcha |
-| `MediumVault` | 1.00 | 0.80–1.05 | 0.3 (0.2–1.4) | 1.0 | Obstacle | Vault a cualquier marcha (fondo 0.3: caminando no hay clip para más; corriendo hasta 1.4) |
-| `HighVault` | 1.10 | 1.05–1.10 | 0.4 (0.2–0.6) | 1.0 | Obstacle | Vault corriendo o esprintando (P36: 1.2 m quedó fuera) |
-| `Mantle` | 1.30 | 0.80–1.50 | 1.5 (≥ 1.25) | 1.0 | Obstacle | Subirse encima (lento, o si es demasiado alto para el vault); P28 |
-| `Barrier` | 1.70 | 1.55–1.85 | 0.5 | 0.2 | **Ground** | Ninguna: ni vault, ni mantle, ni agarre (perímetro del área) |
-| `Ledge` | 2.20 | 1.90–2.70 | 1.5 (≥ 0.8) | 1.0 | Obstacle | Agarre desde el suelo → colgarse → subir |
-| `ClimbWall` | 3.00 | 2.70–3.30 | 1.5 (≥ 0.8) | 1.0 | Obstacle | Salto → agarre en el aire → subir |
-| `Slide` | paso libre 1.20 | 1.10–1.50 | barra de 1.0 (0.3–6), 0.3 de grosor | 1.5 | Obstacle | Slide (C corriendo con momentum) |
-| `JumpGap` | plataformas de 1.0 | 0.5–3.0 | hueco 2.0 (1.0–3.0) | 1.5 | Ground | Salto con impulso |
-| `Combined` | — | — | — | — | — | Recorrido de prefabs estándar: Step → MediumVault → Slide → Ledge (fondo 3) → LowVault → Mantle, con ≥ 5 m de suelo libre entre acciones |
+| `MediumVault` | 1.00 | 0.80–1.05 | 0.3 (0.2–1.4) | 1.0 | Obstacle | Vault a cualquier marcha (fondo 0.3: caminando no hay clip para más; corriendo hasta 1.4) y mantle si su cima tiene sitio para quedar de pie |
+| `HighVault` | 1.10 | 1.05–1.10 | 0.4 (0.2–0.6) | 1.0 | Obstacle | Vault corriendo o esprintando (P36: 1.2 m quedó fuera). Ya no está en el área de pruebas (P38): la prueba coloca uno temporal |
+| `Mantle` | 1.30 | 0.80–1.50 | 1.5 (≥ 1.25) | 1.0 | Obstacle | Mantle: subirse encima (los "muros morados", superficies escalables; P28) |
+| `Barrier` | 1.70 | 1.55–1.85 | 0.5 | 0.2 | **Ground** | Ninguna: bloquea el paso (ni vault, ni mantle, ni agarre). Era el perímetro del área, eliminado en P38 |
+| `Ledge` | 2.20 | 1.90–2.70 | 1.5 (≥ 0.8) | 1.0 | Obstacle | Agarre desde el suelo → colgarse → subir; drop desde la cima |
+| `ClimbWall` | 3.00 | 2.70–3.30 | 1.5 (≥ 0.8) | 1.0 | Obstacle | Salto → agarre en el aire → subir; drop desde la cima |
+| `Slide` | paso libre 1.20 | 1.10–1.50 | barra de 1.0 (0.3–6), 0.3 de grosor | 1.5 | Obstacle | Slide (las "mesas azules": C corriendo con momentum) |
+| `JumpGap` | plataformas de 1.0 | 0.5–3.0 | hueco 2.0 (1.0–3.0) | 1.5 | Ground | Ninguna declarada: se cruza con el salto normal |
+| `Combined` | — | — | — | — | — | Ninguna propia: cada parte declara las suyas. Recorrido de prefabs estándar: Step → MediumVault → Slide → Ledge (fondo 3) → LowVault → Mantle, con ≥ 5 m de suelo libre entre acciones |
+
+**Acciones declaradas (P38, 2026-10-10).** Cada obstáculo estándar declara qué acciones admite
+(`ParkourActions`: escalón, vault, mantle, agarre, subida, drop, slide); el generador de prefabs escribe las
+de su tipo (`ParkourStandard.Actions`) y un nivel puede quitar alguna, nunca agregar una que el tipo no
+admite (la validación lo rechaza). La detección (`EnvironmentChecker.TryFindVault`, `TryFindLedge`,
+`TryFindMantle`, `TryFindDrop` y `PlayerMovement.TryFindSlideObstacle`) solo empieza una acción sobre un
+collider cuyo obstáculo la declara; la geometría sin `ParkourObstacle` (fixtures: escaleras, plataformas)
+se juzga solo por sus medidas. Así un obstáculo que no tiene interacción justificada bloquea o se cruza con
+la locomoción normal en lugar de disparar una animación especial.
+
+**Parámetros estandarizados (todos en `ParkourStandard`, en metros; los de los clips en `ParkourTimings`):**
+
+| Qué | Parámetro | Valor |
+|---|---|---|
+| Slide: paso libre bajo la barra | `Spec(SlideBar)` | 1.10–1.50 (estándar 1.20); C a ≤ `SlideEntryDistance` 1.0 de la barra |
+| Vault bajo: alto / fondo | `Spec(LowVault)` | 0.45–0.80 / 0.2–1.4 (estándar 0.6 × 0.4) |
+| Vault medio: alto / fondo | `Spec(MediumVault)` | 0.80–1.05 / 0.2–1.4 (estándar 1.0 × 0.3) |
+| Vault: banda de detección | `VaultMinHeight`, `VaultMaxHeight`, `VaultMaxDepth` | 0.45–1.10, fondo hasta 1.4 |
+| Superficies escalables (mantle) | `MantleMinRise`, `MantleMaxRise`, `MantleMinDepth` | 0.8–1.5 de alto, ≥ 1.25 de fondo (sitio para quedar de pie) |
+| Cornisa desde el suelo / en el aire | `LedgeGroundMinRise`–`MaxRise`, `LedgeAirMinRise`–`MaxRise` | 1.9–2.7 / 1.5–2.6 sobre los pies; fondo ≥ `LedgeMinDepth` 0.8 |
+| Muro de escalada | `Spec(ClimbWall)`, `ClimbWallMaxHeight` | 2.7–3.3 |
+| Distancias de aproximación | `VaultSpotReach(v)`, `VaultStandReach`, `MantleReach`, `LedgeReachGround` / `Air`, `DropReach` | 1.2 + 0.7 s × velocidad (≥ 1.8) · 1.0 · 1.0 / 0.8 · 0.9 |
+| Rayos de detección | `VaultKneeRay`, `LedgeChestRay`, `LedgeHeadRay`, `MantleLowRay` / `HighRay`, `ProximityRadius` | 0.27 · 1.2 · 1.75 · 0.5 / 1.0 · 1.4 |
+| Tolerancias | `EnvironmentChecker.HeightTolerance`, `Tolerance` (validación) | 0.01 / 0.01 |
+| Separación del cuerpo | `StandCheckRadius`, `StandCheckHeight`, `LedgeStandInset`, `MantleStandInset` | 0.3 · 1.8 · 0.45 · 0.9 |
+| Manos en la cornisa | `ParkourTimings.HandLateral`, `WristAboveSurface` (medidos en los clips) | ±0.3 a cada lado del cuerpo, muñeca 6 cm sobre el borde |
+| Pasar, escalar o bloquear | `ParkourActions` declaradas + la banda muerta 1.5–1.9 (`Barrier`) | lo que no declara una acción no la recibe |
 
 Los prefabs miden 4 m de ancho (el ancho es libre en un nivel, por encima del mínimo). El fondo
 mínimo de `Ledge`/`ClimbWall` (0.8 m) es el espacio para quedar de pie arriba: 0.45 m de inset +
@@ -995,7 +1023,7 @@ mínimo de `Ledge`/`ClimbWall` (0.8 m) es el espacio para quedar de pie arriba: 
 **Convención del prefab.** Pivote en el suelo, en el centro de la cara por la que se llega; el
 obstáculo se extiende hacia +Z local (la dirección de la aproximación) y el ancho es X local. Solo
 gira sobre el eje vertical. Cada prefab es una raíz con `ParkourObstacle` y cubos hijos con
-`BoxCollider` en la layer del tipo (`Geometry`; `Barra` + 2 postes; `Despegue` + `Aterrizaje`).
+`BoxCollider` en la layer del tipo (`Geometry`; `Barra` + 2 postes; `Despegue` + `Aterrizaje`). El componente guarda el tipo y las acciones declaradas.
 Nada más: ni scripts de runtime, ni triggers, ni transforms de marcadores.
 
 **Puntos de contacto (decisión P25: derivados, no marcadores).** La detección sigue midiendo la
@@ -1407,6 +1435,7 @@ sobre el motor nuevo y las velocidades de P33 (detalle en `features.md` §5):
 | P35 | Versionado del mocap | **Git LFS solo para el mocap** (`Assets/ThirdParty/Kinematica/**/*.fbx` y `Assets/ThirdParty/100STYLE/**/*.fbx` en `.gitattributes`): sin reescribir el historial; cada máquina instala Git LFS. | 2026-10-05 | ✅ Configurado en `.gitattributes`. Ampliada el 2026-10-07 a la base horneada de MxM (`Assets/Data/MxM/*_AnimData.asset`, ~30 MB de YAML por versión) |
 | P32 | FBX de Mixamo en un repo público | La licencia de Mixamo prohíbe redistribuir los archivos sueltos y el repo es público. El equipo decidió **hacer privado el repo** (lo hace su dueño; no es un cambio de código). Mientras siga público no se agregan FBX nuevos de Mixamo. | 2026-10-05 | ✔ Aprobada; pendiente del dueño del repo |
 | P36 | Vault con catálogo de mocap y warper propio | Auditoría de la Fase 3 (2026-10-08): el vault del DPS volaba en cámara lenta (~4.2 m/s²), aterrizaba lejos (~2.6 m) y era uno solo de carrera para todo. Se reemplaza por **vaults anotados del Kinematica Demo** medidos sobre Ch45 (`VaultCatalogBuilder`): un catálogo con la trayectoria, los apoyos y la envolvente de obstáculos de cada clip; `VaultPlanner` elige por obstáculo, velocidad, distancia y pie; `PlayerVaultState` lo warpea con perfiles validados (§5.17). Aprobado con el usuario: `MediumVault` de 0.3 m de fondo; el vault de 1.2 m queda fuera (`VaultMaxHeight` 1.1). Traverser (MIT) se evaluó como referencia y no se reutilizó (depende de Kinematica 0.8). | 2026-10-08 | ✅ Implementada el 2026-10-09 (§5.17) |
+| P38 | Limpieza y acciones declaradas de los obstáculos | Pedido del 2026-10-10 (elegido con el usuario): se quitan del área de pruebas los 4 pilares verdes y los bordillos de S01, el vault alto naranja de S04 y las barreras del perímetro; se conservan las barras de slide ("mesas azules") y los bloques de mantle ("muros morados"). Cada obstáculo estándar **declara sus acciones** (`ParkourActions`) y la detección solo actúa sobre lo declarado. La configuración central sigue siendo `ParkourStandard` (clase estática, D11: la leen la detección, el generador de prefabs y las pruebas en edición y en runtime; un ScriptableObject no aportaba nada y obligaba a cargarlo en el Editor). Sin perímetro, un límite de caída (`KillZone`) mata lo que cae por el borde y el jugador reaparece en la entrada | 2026-10-10 | ✅ Implementada (§3, §5.13) |
 | P37 | Combate desarmado con fases medidas | Cadena ligera jab → cross → gancho (Quaternius CC0 y mocap CMU), patada frontal de mocap CMU como ataque fuerte (aprobado con el usuario), fases de cada clip medidas sobre Ch45 (`CombatTimings`), objetivo y acercamiento, golpe por contacto del miembro (`Hitbox.Sweep`), hit stop, cadena con cola de pulsaciones, ventanas de cancelación, patada fallada que deja expuesto, reacción al daño y esquiva de ~2.6 m que frena. Muñeco de entrenamiento como fixture (aprobado) mientras no hay enemigos (P4). Sin cuarto golpe ligero (GDD §5.6: hasta 3). `Melee_Hook` y `Hit_Knockback` de Quaternius se descartaron tras revisarlos. | 2026-10-08 / 09 | ✅ Implementada el 2026-10-09 (§5.4) |
 
 ## 9. Deuda técnica y bugs conocidos

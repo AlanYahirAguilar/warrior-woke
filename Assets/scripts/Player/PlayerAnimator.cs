@@ -347,6 +347,7 @@ public class PlayerAnimator : MonoBehaviour, IParkourAnimationProgress, ICombatA
         if (state == m.MantleState)      { fade = 0.05f; return PlayerAnimatorIds.Mantle; } // short: the hand match starts right away
         if (state == m.LedgeDropState)   { fade = 0.15f; return PlayerAnimatorIds.LedgeDrop; }
         if (state == m.BlockState)       return PlayerAnimatorIds.BlockEnter;
+        if (state == m.DeadState)        { fade = 0.15f; return PlayerAnimatorIds.Death; }
 
         if (state == m.DodgeState)
         {

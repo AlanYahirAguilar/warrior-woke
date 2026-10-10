@@ -20,11 +20,33 @@ public class ParkourObstacle : MonoBehaviour
 {
     [SerializeField] private ParkourObstacleType type;
 
+    [Tooltip("Parkour actions this obstacle allows (P38). The generator writes the type's own (ParkourStandard.Actions); a level may remove some, never add one the type does not support.")]
+    [SerializeField] private ParkourActions actions;
+
     public ParkourObstacleType Type => type;
+
+    /// <summary>The actions this obstacle declares.</summary>
+    public ParkourActions Actions => actions;
+
+    /// <summary>
+    /// Whether <paramref name="part"/> may take part in <paramref name="action"/>: a collider of a standard
+    /// obstacle only in the actions its obstacle declares; any other geometry (fixtures) by its
+    /// measurements alone. No allocations.
+    /// </summary>
+    public static bool Allows(Collider part, ParkourActions action)
+    {
+        if (part == null) return false;
+        ParkourObstacle obstacle = part.GetComponentInParent<ParkourObstacle>();
+        return obstacle == null || (obstacle.actions & action) != 0;
+    }
 
 #if UNITY_EDITOR
     /// <summary>Used by the prefab generator.</summary>
-    public void EditorSetType(ParkourObstacleType value) => type = value;
+    public void EditorSetType(ParkourObstacleType value)
+    {
+        type = value;
+        actions = ParkourStandard.Actions(value);
+    }
 #endif
 
     // ─── Measurement ─────────────────────────────────────────────────────────────
@@ -128,6 +150,11 @@ public class ParkourObstacle : MonoBehaviour
 
         if (Vector3.Angle(transform.up, Vector3.up) > 1f)
             issues.Add($"{name}: está inclinado; solo puede girar sobre el eje vertical.");
+
+        // Declared actions (P38): only what the type supports
+        ParkourActions extra = actions & ~ParkourStandard.Actions(type);
+        if (extra != ParkourActions.None)
+            issues.Add($"{name}: declara acciones que su tipo no admite ({ParkourStandard.ActionsLabel(extra)}).");
 
         if (type == ParkourObstacleType.Combined)
         {

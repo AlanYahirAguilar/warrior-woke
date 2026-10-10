@@ -299,6 +299,12 @@ public class PlayerMovement : MonoBehaviour, IDamageModifier
     public PlayerBlockState       BlockState        { get; private set; }
     public PlayerDodgeState       DodgeState        { get; private set; }
     public PlayerHurtState        HurtState         { get; private set; }
+    public PlayerDeadState        DeadState         { get; private set; }
+
+    /// <summary>Where the player reappears after dying (where it first appeared; a checkpoint moves it, GDD §5.13).</summary>
+    public Vector3    RespawnPoint    { get; private set; }
+    public Quaternion RespawnRotation { get; private set; } = Quaternion.identity;
+    private bool _hasRespawnPoint;
 
     // ─── Collider Snapshots ───────────────────────────────────────────────────────
     private float   _originalColliderHeight;
@@ -327,18 +333,52 @@ public class PlayerMovement : MonoBehaviour, IDamageModifier
     private void OnEnable()
     {
         if (_healthSystem != null)
+        {
             _healthSystem.OnDamageReceived += HandleDamageReceived;
+            _healthSystem.OnDeath += HandleDeath;
+        }
     }
 
     private void OnDisable()
     {
         if (_healthSystem != null)
+        {
             _healthSystem.OnDamageReceived -= HandleDamageReceived;
+            _healthSystem.OnDeath -= HandleDeath;
+        }
     }
 
     private void Start()
     {
         StateMachine.Initialize(IdleState);
+        if (!_hasRespawnPoint) SetRespawnPoint(transform.position, transform.rotation);
+    }
+
+    /// <summary>Moves the respawn point (a checkpoint, GDD §5.13).</summary>
+    public void SetRespawnPoint(Vector3 position, Quaternion rotation)
+    {
+        RespawnPoint = position;
+        RespawnRotation = rotation;
+        _hasRespawnPoint = true;
+    }
+
+    /// <summary>Health reached zero (a blow, a fatal fall): the body dies, whatever it was doing.</summary>
+    private void HandleDeath()
+    {
+        if (StateMachine?.CurrentState == null || StateMachine.CurrentState == DeadState) return;
+        if (IsRootMotionDriven) EndRootMotion();
+        StateMachine.ChangeState(DeadState);
+    }
+
+    /// <summary>
+    /// Back at the respawn point with full health (GDD §5.13, §17: after a death the player reappears at
+    /// the last checkpoint with full health; with no checkpoints yet, where the player first appeared).
+    /// </summary>
+    public void Respawn()
+    {
+        if (_healthSystem != null) _healthSystem.Revive();
+        Teleport(RespawnPoint, RespawnRotation);
+        StateMachine.ChangeState(IdleState);
     }
 
     private void FixedUpdate()
@@ -898,7 +938,7 @@ public class PlayerMovement : MonoBehaviour, IDamageModifier
         direction.Normalize();
         Vector3 origin = new Vector3(transform.position.x, FeetY + OverheadProbeHeight, transform.position.z);
         if (!Physics.SphereCast(origin, OverheadProbeRadius, direction, out RaycastHit hit, maxDistance, ceilingLayer, QueryTriggerInteraction.Ignore) ||
-            hit.normal.y < -0.5f)
+            hit.normal.y < -0.5f || !ParkourObstacle.Allows(hit.collider, ParkourActions.Slide))
             return false;
         distance = hit.distance + OverheadProbeRadius;
         // Under it there must be room to slide: at least through its front part
@@ -1169,6 +1209,7 @@ public class PlayerMovement : MonoBehaviour, IDamageModifier
         BlockState        = new PlayerBlockState(this, StateMachine);
         DodgeState        = new PlayerDodgeState(this, StateMachine);
         HurtState         = new PlayerHurtState(this, StateMachine);
+        DeadState         = new PlayerDeadState(this, StateMachine);
     }
 
     /// <summary>

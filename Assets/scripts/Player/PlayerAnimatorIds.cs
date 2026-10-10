@@ -42,6 +42,8 @@ public static class PlayerAnimatorIds
     public const string HeavyAttackName      = "HeavyAttack";   // front kick (CMU)
     public const string HurtName             = "Hurt";          // hit to the body
     public const string HurtHeadName         = "HurtHead";      // hit to the head (a heavy hit)
+    public const string DeathName            = "Death";         // dies (Quaternius Death01)
+    public const string DeathClip            = "Death01";
     public const string BlockEnterName       = "BlockEnter";
     public const string BlockLoopName        = "BlockLoop";
     public const string BlockExitName        = "BlockExit";
@@ -77,6 +79,7 @@ public static class PlayerAnimatorIds
     public static readonly int HeavyAttack      = Animator.StringToHash(HeavyAttackName);
     public static readonly int Hurt             = Animator.StringToHash(HurtName);
     public static readonly int HurtHead         = Animator.StringToHash(HurtHeadName);
+    public static readonly int Death            = Animator.StringToHash(DeathName);
     public static readonly int BlockEnter       = Animator.StringToHash(BlockEnterName);
     public static readonly int BlockExit        = Animator.StringToHash(BlockExitName);
     public static readonly int Dodge            = Animator.StringToHash(DodgeName);

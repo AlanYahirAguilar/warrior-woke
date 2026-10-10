@@ -87,6 +87,14 @@ public class HealthSystem : MonoBehaviour, IDamageable
         OnHealthChanged?.Invoke(CurrentHealth, maxHealth);
     }
 
+    /// <summary>Back to full health after a death (a respawn): no invulnerability left over.</summary>
+    public void Revive()
+    {
+        CurrentHealth   = maxHealth;
+        _lastDamageTime = -999f;
+        OnHealthChanged?.Invoke(CurrentHealth, maxHealth);
+    }
+
     /// <summary>Kills the entity immediately regardless of current health.</summary>
     public void InstantKill()
     {

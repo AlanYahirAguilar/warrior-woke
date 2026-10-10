@@ -17,6 +17,32 @@ public enum ParkourObstacleType
 }
 
 /// <summary>
+/// The parkour actions an obstacle takes part in (decision P38). Every standard obstacle declares them
+/// (ParkourObstacle, from <see cref="ParkourStandard.Actions"/>) and the detection only starts an action
+/// on an obstacle that declares it; geometry without a ParkourObstacle (test fixtures, level dressing) is
+/// judged by its measurements alone.
+/// </summary>
+[System.Flags]
+public enum ParkourActions
+{
+    None      = 0,
+    /// <summary>Stepped onto by the auto step while running.</summary>
+    Step      = 1 << 0,
+    /// <summary>Crossed with a vault.</summary>
+    Vault     = 1 << 1,
+    /// <summary>Climbed onto with a mantle (a block deep enough to stand on).</summary>
+    Mantle    = 1 << 2,
+    /// <summary>Grabbed by its edge (from the ground or in the air) to hang from it.</summary>
+    LedgeGrab = 1 << 3,
+    /// <summary>Climbed from the hang onto its top.</summary>
+    Climb     = 1 << 4,
+    /// <summary>Lowered onto a hang from its top.</summary>
+    LedgeDrop = 1 << 5,
+    /// <summary>Slid under.</summary>
+    Slide     = 1 << 6,
+}
+
+/// <summary>
 /// Measurements of one obstacle type (m). For a SlideBar, Height is the clearance under the bar and
 /// Depth the bar's depth; for a JumpGap, Height is the platforms' height and Depth the gap.
 /// </summary>
@@ -223,6 +249,42 @@ public static class ParkourStandard
             case ParkourObstacleType.Combined:    return "Combinado";
             default:                              return type.ToString();
         }
+    }
+
+    /// <summary>
+    /// What each type allows (P38). A type never allows what its measurements cannot give: the medium
+    /// vault is climbed onto (mantle) only if it is deep enough to stand on, which the detection measures;
+    /// the barrier and the jump platforms allow nothing (they block the way, or are only jumped across).
+    /// </summary>
+    public static ParkourActions Actions(ParkourObstacleType type)
+    {
+        switch (type)
+        {
+            case ParkourObstacleType.Step:        return ParkourActions.Step;
+            case ParkourObstacleType.LowVault:    return ParkourActions.Vault;
+            case ParkourObstacleType.MediumVault: return ParkourActions.Vault | ParkourActions.Mantle;
+            case ParkourObstacleType.HighVault:   return ParkourActions.Vault;
+            case ParkourObstacleType.Mantle:      return ParkourActions.Mantle;
+            case ParkourObstacleType.Ledge:
+            case ParkourObstacleType.ClimbWall:   return ParkourActions.LedgeGrab | ParkourActions.Climb | ParkourActions.LedgeDrop;
+            case ParkourObstacleType.SlideBar:    return ParkourActions.Slide;
+            default:                              return ParkourActions.None; // Barrier, JumpGap, Combined (its parts declare their own)
+        }
+    }
+
+    /// <summary>Spanish names of the actions (validation, inspector).</summary>
+    public static string ActionsLabel(ParkourActions actions)
+    {
+        if (actions == ParkourActions.None) return "ninguna (bloquea el paso)";
+        var parts = new System.Collections.Generic.List<string>(7);
+        if ((actions & ParkourActions.Step) != 0)      parts.Add("escalón");
+        if ((actions & ParkourActions.Vault) != 0)     parts.Add("vault");
+        if ((actions & ParkourActions.Mantle) != 0)    parts.Add("mantle");
+        if ((actions & ParkourActions.LedgeGrab) != 0) parts.Add("agarre");
+        if ((actions & ParkourActions.Climb) != 0)     parts.Add("subida");
+        if ((actions & ParkourActions.LedgeDrop) != 0) parts.Add("drop");
+        if ((actions & ParkourActions.Slide) != 0)     parts.Add("slide");
+        return string.Join(", ", parts);
     }
 
     /// <summary>True for the types crossed with a vault.</summary>

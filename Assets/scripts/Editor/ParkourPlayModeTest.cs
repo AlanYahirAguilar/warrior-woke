@@ -188,6 +188,7 @@ namespace WarriorWoke.EditorTools
             _movement.StateChanged += s => Visited.Add(s);
 
             yield return Spawn();
+            if (Runs("Obstacles"))      yield return Obstacles();
             if (Runs("Locomotion"))     yield return Locomotion();
             if (Runs("JumpAndLandings")) yield return JumpAndLandings();
             if (Runs("Vaults"))         yield return Vaults();
@@ -229,6 +230,88 @@ namespace WarriorWoke.EditorTools
                   $"El jugador aparece en la entrada del área ({spawn})");
             Check(Mathf.Abs(Sole - Floor) < SoleOnGround, $"De pie, las suelas tocan el suelo (a {(Sole - Floor) * 100f:F1} cm)");
             yield return null;
+        }
+
+        // ── The area's obstacles (P38): what was removed, what each obstacle declares, the fall limit ─────
+        private static IEnumerator Obstacles()
+        {
+            // Removed on 2026-10-10: the S01 pillars and curbs, the S04 high vault and the perimeter. Nothing
+            // (no invisible collider either) is left where they stood
+            Transform area = GameObject.Find(ParkourTestCircuitBuilder.RootName)?.transform;
+            bool named = area != null;
+            if (area != null)
+                foreach (Transform t in area.GetComponentsInChildren<Transform>(true))
+                    if (t.name.StartsWith("Pilar_") || t.name.StartsWith("Escalon_") || t.name == "Perimetro" || t.name.StartsWith("S04_"))
+                        named = false;
+            float lx = ParkourTestCircuitBuilder.LocomotionX;
+            int leftovers = 0;
+            for (int i = 0; i < 4; i++)
+                leftovers += Physics.OverlapBox(new Vector3(lx + (i % 2 == 0 ? -1.6f : 1.6f), 1.25f, -20f - i * 5f), new Vector3(0.35f, 1.2f, 0.35f)).Length;
+            leftovers += Physics.OverlapBox(new Vector3(lx, 0.3f, -11f), new Vector3(3.5f, 0.2f, 3.5f)).Length;                                // curbs
+            leftovers += Physics.OverlapBox(new Vector3(ParkourTestCircuitBuilder.HighVaultX, 0.6f, -8.2f), new Vector3(1.5f, 0.4f, 0.15f)).Length; // S04
+            leftovers += Physics.OverlapBox(new Vector3(-34f, 0.8f, -25f), new Vector3(0.3f, 0.6f, 30f)).Length;                                 // west wall
+            Check(named && leftovers == 0, $"Pilares, bordillos, vault alto de S04 y perímetro eliminados, sin colliders donde estaban ({leftovers})");
+
+            // Every standard obstacle declares the actions of its type; the blue tables slide, the purple blocks are climbed
+            ParkourObstacle[] obstacles = Object.FindObjectsByType<ParkourObstacle>(FindObjectsSortMode.None);
+            int declared = 0, slides = 0, mantles = 0;
+            foreach (ParkourObstacle o in obstacles)
+            {
+                if (o.Actions == ParkourStandard.Actions(o.Type)) declared++;
+                if (o.Type == ParkourObstacleType.SlideBar && (o.Actions & ParkourActions.Slide) != 0) slides++;
+                if (o.Type == ParkourObstacleType.Mantle && (o.Actions & ParkourActions.Mantle) != 0) mantles++;
+            }
+            Check(obstacles.Length > 0 && declared == obstacles.Length && slides >= 2 && mantles >= 3,
+                  $"Cada obstáculo declara las acciones de su tipo ({declared}/{obstacles.Length}); barras de slide: {slides}, bloques de mantle: {mantles}");
+
+            // An obstacle that does not declare the vault is not vaulted: the S02 low vault without its actions
+            ParkourObstacle lowVault = null;
+            foreach (ParkourObstacle o in obstacles)
+                if (o.Type == ParkourObstacleType.LowVault && Mathf.Abs(o.transform.position.x - ParkourTestCircuitBuilder.LowVaultX) < 0.1f &&
+                    Mathf.Abs(o.transform.position.z - ParkourTestCircuitBuilder.VaultFront) < 0.1f) lowVault = o;
+            if (Check(lowVault != null, "Está el vault bajo de S02"))
+            {
+                var so = new SerializedObject(lowVault);
+                so.FindProperty("actions").intValue = (int)ParkourActions.None;
+                so.ApplyModifiedPropertiesWithoutUndo();
+                yield return Teleport(new Vector3(ParkourTestCircuitBuilder.LowVaultX, Floor + OriginAboveFeet, ParkourTestCircuitBuilder.VaultFront + 4.5f));
+                Visited.Clear();
+                Keys(Key.W);
+                for (float t = 0f; t < 3f && _movement.transform.position.z - ParkourTestCircuitBuilder.VaultFront > 2.2f; t += 0.02f) yield return 0.02f;
+                yield return Tap(Key.Space, Key.W);
+                yield return 1.2f;
+                Keys();
+                bool vaulted = Visited.Contains(_movement.VaultState);
+                so.Update();
+                so.FindProperty("actions").intValue = (int)ParkourStandard.Actions(ParkourObstacleType.LowVault);
+                so.ApplyModifiedPropertiesWithoutUndo();
+                Check(!vaulted, $"Un obstáculo que no declara el vault no se vaultea (estados: {VisitedNames()})");
+                yield return 1f;
+            }
+
+            // Walking off the edge of the floor (no perimeter): the fall limit kills, and the player reappears
+            // at the entrance with full health
+            HealthSystem health = _movement.GetComponent<HealthSystem>();
+            yield return Teleport(new Vector3(-32.5f, Floor + OriginAboveFeet, 5f), -90f);
+            Visited.Clear();
+            Keys(Key.W);
+            for (float t = 0f; t < 3f && !Visited.Contains(_movement.DeadState); t += 0.02f) yield return 0.02f;
+            Keys();
+            bool died = Visited.Contains(_movement.DeadState);
+            for (float t = 0f; t < PlayerDeadState.RespawnDelay + 2f && Current != _movement.IdleState; t += 0.1f) yield return 0.1f;
+            yield return 0.3f;
+            Vector3 spawn = _movement.RespawnPoint;
+            float fromSpawn = new Vector2(_movement.transform.position.x - spawn.x, _movement.transform.position.z - spawn.z).magnitude;
+            Check(died && Current == _movement.IdleState && fromSpawn < 0.5f && health != null && health.CurrentHealth == health.MaxHealth,
+                  $"Caer por el borde mata (límite de caída) y el jugador reaparece en la entrada con la vida completa (murió {died}, a {fromSpawn:F2} m de la entrada, vida {health?.CurrentHealth})");
+            yield return 0.5f;
+        }
+
+        private static string VisitedNames()
+        {
+            var sb = new StringBuilder();
+            foreach (PlayerState v in Visited) sb.Append(v.GetType().Name.Replace("Player", "").Replace("State", "")).Append(' ');
+            return sb.ToString().Trim();
         }
 
         // ── S01 / corridor: acceleration, cruise, braking, backpedal, turn, sprint, steps ──────────
@@ -315,21 +398,21 @@ namespace WarriorWoke.EditorTools
             Keys();
             yield return 1.2f;
 
-            // Curbs up (auto step) and stairs down (step down) without falling
-            yield return Teleport(new Vector3(ParkourTestCircuitBuilder.LocomotionX, Floor + OriginAboveFeet, -4f));
+            // Stairs up (auto step: 0.25 m per step) to the 1 m platform without stopping or falling (the
+            // S01 curbs were removed, P38)
+            yield return Teleport(new Vector3(ParkourTestCircuitBuilder.LocomotionX, Floor + OriginAboveFeet, -34f));
             Visited.Clear();
             Keys(Key.W);
-            // 12 m at the run of P33 (3.4 m/s) plus the start from standing
             string fallDiag = "";
-            for (float t = 0f; t < 5f && _movement.transform.position.z > -16f; t += 0.02f)
+            for (float t = 0f; t < 5f && _movement.transform.position.z > -43.5f; t += 0.02f)
             {
                 if (fallDiag.Length == 0 && Current == _movement.FallState)
                     fallDiag = $"; cae en z = {_movement.transform.position.z:F2}, pies {_movement.FeetY:F2}, suelo debajo {GroundUnder(_movement.transform.position):F2}, vy {_movement.Velocity.y:F2}";
                 yield return 0.02f;
             }
             Keys();
-            Check(_movement.transform.position.z < -15.5f && !Visited.Contains(_movement.FallState),
-                  $"Sube los bordillos de 0.15–0.35 m sin detenerse ni caer (z = {_movement.transform.position.z:F2}{fallDiag})");
+            Check(_movement.transform.position.z < -43f && Mathf.Abs(_movement.FeetY - (Floor + 1f)) < 0.06f && !Visited.Contains(_movement.FallState),
+                  $"Sube la escalera hasta la plataforma de 1 m sin detenerse ni caer (z = {_movement.transform.position.z:F2}, pies a {_movement.FeetY:F2} m{fallDiag})");
             yield return 0.6f;
 
             yield return Teleport(new Vector3(ParkourTestCircuitBuilder.LocomotionX, 1.0f + OriginAboveFeet, -44.5f));
@@ -489,7 +572,11 @@ namespace WarriorWoke.EditorTools
             CheckConsistency("bajo");
             sheet.Save();
 
-            // High vault: only a run's momentum carries the body over 1.1 m (no slow clip reaches it)
+            // High vault: only a run's momentum carries the body over 1.1 m (no slow clip reaches it). The S04
+            // obstacle was removed from the area (P38): the test places a standard one in the free lane
+            GameObject highObstacle = Object.Instantiate(ParkourObstaclePrefabs.Load(ParkourObstacleType.HighVault),
+                                                         new Vector3(highX, Floor, front), Quaternion.Euler(0f, 180f, 0f));
+            Physics.SyncTransforms();
             sheet = new VaultSheet("3_alto", 3);
             VaultResults.Clear();
             yield return VaultCase(sheet, high, Gait.Run, "alto corriendo", pressAt: 2.4f);
@@ -501,6 +588,8 @@ namespace WarriorWoke.EditorTools
             // Not vaulted: no clip fits, so the geometry's other action happens (or the jump), never a vault
             yield return NoVaultCase(high, Gait.Stand, "alto desde parado a 1.5 m (ningún clip lento llega a 1.1 m)", standAt: 1.5f, expect: _movement.JumpState);
             yield return NoVaultCase(high, Gait.Walk, "alto caminando", pressAt: 2.0f, expect: _movement.JumpState);
+            Object.Destroy(highObstacle);
+            yield return null;
             yield return NoVaultCase(mid, Gait.Stand, "medio pegado al obstáculo (0.5 m: sin espacio para la carrera del clip)", standAt: 0.5f, expect: _movement.JumpState);
             yield return NoVaultCase(mid, Gait.Stand, "medio desde parado lejos (3.0 m: más de dos pasos)", standAt: 3.0f, expect: _movement.JumpState);
             yield return NoVaultCase(deep, Gait.Walk, "medio de 1.4 m de fondo caminando: sube con mantle", pressAt: 0.9f, expect: _movement.MantleState);
@@ -1659,12 +1748,13 @@ namespace WarriorWoke.EditorTools
             Check(minClear > -0.02f, $"Corriendo, ni las suelas ni las puntas se hunden (mínimo {minClear * 100f:F1} cm)");
             yield return 1.0f;
 
-            // Up the curbs: each foot stands on the surface under it
-            yield return Teleport(new Vector3(ParkourTestCircuitBuilder.LocomotionX, Floor + OriginAboveFeet, -4f));
+            // Up the stairs: each foot stands on the surface under it (heel and toes: a stride's toes are over
+            // the next step while its heel is not)
+            yield return Teleport(new Vector3(ParkourTestCircuitBuilder.LocomotionX, Floor + OriginAboveFeet, -34f));
             Keys(Key.W);
             float curbMin = float.MaxValue;
             string curbDiag = "";
-            for (float t = 0f; t < 5f && _movement.transform.position.z > -16f; t += 0.02f)
+            for (float t = 0f; t < 5f && _movement.transform.position.z > -43.5f; t += 0.02f)
             {
                 float c = FootClearance;
                 if (c < curbMin)
@@ -1676,7 +1766,7 @@ namespace WarriorWoke.EditorTools
                 yield return 0.02f;
             }
             Keys();
-            Check(curbMin > -Penetration, $"Subiendo bordillos, cada pie pisa la superficie bajo él sin atravesarla (mínimo {curbMin * 100f:F1} cm: {curbDiag})");
+            Check(curbMin > -Penetration, $"Subiendo la escalera, cada pie pisa la superficie bajo él sin atravesarla (mínimo {curbMin * 100f:F1} cm: {curbDiag})");
             yield return 0.8f;
 
             // In the air the feet are the clip's (the rig fades out)

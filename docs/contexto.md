@@ -315,11 +315,12 @@ final · SFX y música básica · build para Windows.
 - Unity Hub → **Add** → selecciona la carpeta `warrior-woke/`. La primera importación tarda varios
   minutos.
 - **Escena del juego:** `Assets/Scenes/Level-1.unity` (la única en Build Settings). Desde el
-  2026-10-01 es el **Parkour Test Area** (P24): un suelo plano con perímetro y doce secciones hechas
-  con los prefabs estándar (P25), sin textos (01 locomoción · 02 vault bajo · 03 vault medio ·
-  04 vault alto · 05 slide · 06 cornisa · 07 muro de escalada · 08 salto y aterrizaje · 09 combinado ·
-  10 laboratorio de fluidez · 11 mantle · 12 combate, con un muñeco de entrenamiento a la derecha de la
-  entrada; ver `features.md` F32). Al dar Play apareces en su entrada,
+  2026-10-01 es el **Parkour Test Area** (P24): un suelo plano y once secciones hechas con los prefabs
+  estándar (P25), sin textos (01 locomoción · 02 vault bajo · 03 vault medio · 05 slide · 06 cornisa ·
+  07 muro de escalada · 08 salto y aterrizaje · 09 combinado · 10 laboratorio de fluidez · 11 mantle ·
+  12 combate, con un muñeco de entrenamiento a la derecha de la entrada; ver `features.md` F32). Desde el
+  2026-10-10 (P38) no tiene perímetro, pilares, bordillos ni la sección 04: caer por el borde mata y se
+  reaparece en la entrada. Al dar Play apareces en su entrada,
   mirando hacia las secciones. Los niveles reales del GDD (§10) todavía no existen.
   `Assets/LowPolyCity/Scenes/CartoonLowPolyCityLite_01.unity` es solo la demo del asset pack y no
   tiene lógica del juego.
