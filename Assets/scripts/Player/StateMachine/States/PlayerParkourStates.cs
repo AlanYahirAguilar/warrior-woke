@@ -16,8 +16,9 @@ using UnityEngine;
 ///    over the airborne window; the airborne window plays at the rate that keeps the clip's gravity;
 ///  - landing: the feet come down on the measured ground behind it, and the run continues from the
 ///    clip's escape moment with the speed the body really carries.
-/// The CharacterController is off during the vault (the body passes over the obstacle, which was
-/// validated before starting) and the hands and feet keep their contacts with IK (PlayerContactIK).
+/// The CharacterController moves the body and lets it through the obstacle being vaulted (which was
+/// validated before starting; anything else still stops it), and the hands and feet keep their contacts
+/// with IK (PlayerContactIK).
 /// Replaces the Dynamic Parkour System "Vault1" clip and its MatchTarget phases (P22).
 /// </summary>
 public class PlayerVaultState : PlayerState
@@ -120,7 +121,7 @@ public class PlayerVaultState : PlayerState
         // What the body's heading differs from the clip's at the entry (an approach at an angle), faded
         // out over the run-up
         _entryYawOffset = Mathf.DeltaAngle(_vaultYaw + _plan.Variant.HeadingAt(_plan.EntryTime), player.transform.eulerAngles.y);
-        player.BeginRootMotion();
+        player.BeginRootMotion(_plan.Front, _plan.Top);
     }
 
     /// <summary>Seconds over which the body's heading at the entry blends into the clip's.</summary>
@@ -295,7 +296,7 @@ public class PlayerLedgeGrabState : PlayerState
         _nextFromDrop = false;
         _climbQueued = false;
         player.IsSprint = false;
-        player.BeginRootMotion();
+        player.BeginRootMotion(player.CurrentLedge.Face, player.CurrentLedge.Top);
         if (player.ParkourAnimation == null)
         {
             // No animation drives the body: hang directly below the edge
@@ -358,7 +359,7 @@ public class PlayerLedgeClimbState : PlayerState
     public override void Enter()
     {
         base.Enter();
-        player.BeginRootMotion(); // already driven when coming from the hang
+        player.BeginRootMotion(player.CurrentLedge.Face, player.CurrentLedge.Top); // already driven when coming from the hang
     }
 
     public override void LogicUpdate()
@@ -457,7 +458,7 @@ public class PlayerMantleState : PlayerState
         base.Enter();
         StartFeetY = player.FeetY;
         player.IsSprint = false;
-        player.BeginRootMotion();
+        player.BeginRootMotion(player.CurrentLedge.Face, player.CurrentLedge.Top);
     }
 
     public override void LogicUpdate()
@@ -521,7 +522,7 @@ public class PlayerLedgeDropState : PlayerState
     {
         base.Enter();
         player.IsSprint = false;
-        player.BeginRootMotion();
+        player.BeginRootMotion(player.CurrentLedge.Face, player.CurrentLedge.Top);
     }
 
     public override void LogicUpdate()

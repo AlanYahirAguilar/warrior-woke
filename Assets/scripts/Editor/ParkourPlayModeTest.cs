@@ -200,6 +200,7 @@ namespace WarriorWoke.EditorTools
             if (Runs("Gaits"))          yield return Gaits();
             if (Runs("DropAndJumpOff")) yield return DropAndJumpOff();
             if (Runs("Rig"))            yield return Rig();
+            if (Runs("ActionMotor"))    yield return ActionMotor();
             if (Runs("Combat"))         yield return Combat();
         }
 
@@ -1697,6 +1698,56 @@ namespace WarriorWoke.EditorTools
                 Check(look.weight > 0.9f && head < body - 25f,
                       $"De pie junto al muñeco, la cabeza lo mira (el cuerpo a {body:F0}°, la cara a {head:F0}°; peso {look.weight:F2})");
             }
+        }
+
+        // ── Motor during actions (phase 4 of the motion matching plan): the controller moves the body ───────
+        private static IEnumerator ActionMotor()
+        {
+            CharacterController body = _movement.Controller;
+
+            // Running into the low vault: during it the controller stays on and lets only that obstacle through
+            float x = ParkourTestCircuitBuilder.LowVaultX, front = ParkourTestCircuitBuilder.VaultFront;
+            yield return Teleport(new Vector3(x, Floor + OriginAboveFeet, front + 5.9f));
+            Collider obstacle = Physics.Raycast(_movement.transform.position + Vector3.down * 0.6f, Vector3.back, out RaycastHit o, 8f, LayerMask.GetMask("Obstacle"), QueryTriggerInteraction.Ignore) ? o.collider : null;
+            Collider ground = Physics.Raycast(_movement.transform.position, Vector3.down, out RaycastHit g, 3f, LayerMask.GetMask("Ground"), QueryTriggerInteraction.Ignore) ? g.collider : null;
+            if (!Check(obstacle != null && ground != null, "Hay un vault bajo delante y suelo debajo")) yield break;
+            Keys(Key.W);
+            for (float t = 0f; t < 5f && _movement.transform.position.z - front > 2.4f; t += 0.02f) yield return 0.02f;
+            yield return Tap(Key.Space, Key.W);
+            bool vaulted = false, alwaysOn = true, passed = false, groundSolid = true;
+            for (float t = 0f; t < 3f && (!vaulted || Current == _movement.VaultState); t += 0.02f)
+            {
+                if (Current == _movement.VaultState)
+                {
+                    vaulted = true;
+                    alwaysOn &= body.enabled;
+                    passed |= Physics.GetIgnoreCollision(body, obstacle);
+                    groundSolid &= !Physics.GetIgnoreCollision(body, ground);
+                }
+                yield return 0.02f;
+            }
+            Keys();
+            Check(vaulted && alwaysOn && passed && groundSolid,
+                  $"Durante el vault el CharacterController sigue activo y solo deja pasar el obstáculo (vault {vaulted}, activo {alwaysOn}, obstáculo atravesable {passed}, suelo sólido {groundSolid})");
+            Check(!Physics.GetIgnoreCollision(body, obstacle) && Mathf.Abs(_movement.FeetY - Floor) < 0.05f,
+                  $"Al terminar el vault el obstáculo vuelve a ser sólido y la cápsula recupera su altura (pies a {(_movement.FeetY - Floor) * 100f:F1} cm del suelo)");
+            yield return 1f;
+
+            // Hanging from a ledge: the controller is on, the ledge lets the body through until it lets go
+            float lx = ParkourTestCircuitBuilder.LedgeX, lfront = ParkourTestCircuitBuilder.LedgeFront;
+            yield return Teleport(new Vector3(lx, Floor + OriginAboveFeet, lfront + 0.75f));
+            Collider ledge = Physics.Raycast(_movement.transform.position + Vector3.up * 0.3f, Vector3.back, out RaycastHit l, 3f, LayerMask.GetMask("Obstacle"), QueryTriggerInteraction.Ignore) ? l.collider : null;
+            yield return Tap(Key.Space);
+            for (float t = 0f; t < 3f && !(Current == _movement.LedgeGrabState && _movement.LedgeGrabState.IsAttached); t += 0.05f)
+                yield return 0.05f;
+            bool hanging = Current == _movement.LedgeGrabState;
+            bool hangOn = body.enabled, hangPass = ledge != null && Physics.GetIgnoreCollision(body, ledge);
+            Keys(Key.S);
+            yield return 0.6f;
+            Keys();
+            Check(hanging && hangOn && hangPass && !Physics.GetIgnoreCollision(body, ledge) && Current != _movement.LedgeGrabState,
+                  $"Colgado, el CharacterController sigue activo y atraviesa solo la cornisa; al soltarse vuelve a ser sólida (colgado {hanging}, activo {hangOn}, cornisa atravesable {hangPass}, estado {Current.GetType().Name})");
+            yield return 1.5f;
         }
 
         /// <summary>Horizontal angle (°) between <paramref name="direction"/> and the way from the head to the dummy.</summary>

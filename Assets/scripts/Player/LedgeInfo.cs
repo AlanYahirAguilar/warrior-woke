@@ -18,6 +18,9 @@ public struct LedgeInfo
     /// <summary>World Y of the top surface.</summary>
     public float TopY;
 
+    /// <summary>The colliders measured as the face under the edge and the top: the body passes through them while it climbs, hangs or lowers itself (PlayerMovement.BeginRootMotion).</summary>
+    public Collider Face, Top;
+
     /// <summary>Rotation that faces the wall.</summary>
     public Quaternion FacingRotation => Quaternion.LookRotation(-Normal, Vector3.up);
 

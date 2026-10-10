@@ -15,6 +15,8 @@ public sealed class VaultPlan
     public float ApproachRate, AirRate;
     /// <summary>Direction over the obstacle (into its front face), its front edge on the body's line and its top.</summary>
     public Vector3 Direction, FrontEdge;
+    /// <summary>The obstacle's colliders (front face and top) the body passes through.</summary>
+    public Collider Front, Top;
     public float TopY, Depth;
     /// <summary>Feet height at the start and at the landing.</summary>
     public float StartFeetY, LandFeetY;
@@ -217,6 +219,8 @@ public static class VaultPlanner
                      : Mathf.Clamp(Mathf.Sqrt(best.HipsRise / (best.HipsRise + bestLift)), MinAirRate, 1f);
         plan.Direction = f;
         plan.FrontEdge = info.FrontPoint;
+        plan.Front = info.Front;
+        plan.Top = info.Top;
         plan.TopY = info.TopY;
         plan.Depth = info.Depth;
         plan.StartFeetY = player.FeetY;

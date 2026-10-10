@@ -33,7 +33,9 @@
 >
 > **2026-10-09 (fase 3 del motion matching):** un rig de **Animation Rigging** (P31) pone los pies sobre
 > el terreno, bloquea el pie de apoyo y gira la cabeza hacia el objetivo. `ParkourPlayModeTest`:
-> **538/538** (las 531 anteriores más la sección `Rig`).
+> **538/538** (las 531 anteriores más la sección `Rig`). **Fase 4:** el parkour se mueve con el
+> `CharacterController` (ya no se apaga; solo el obstáculo de la acción es atravesable): **540/541** en la
+> corrida completa (falló el slide anticipado, intermitente; repetido dos veces pasa).
 
 ---
 
@@ -232,8 +234,9 @@ Dependencias · Consideraciones técnicas · Falta**.
   pasó a root motion con `MatchTarget` (P22); el 2026-10-02 se agregó la aproximación al punto de
   despegue (P27); el 2026-10-08/09 se reemplazó por el catálogo de mocap y el warper propio (P36): el clip
   del DPS volaba en cámara lenta (~4.2 m/s²), aterrizaba a ~2.6 m y era uno solo para todo (detalle en §5).
-- **Consideraciones:** durante el vault el `CharacterController` está apagado; la cara, la cima, el fondo
-  y el aterrizaje se comprueban antes de empezar. Cada vault conserva la gravedad de su clip: el lento
+- **Consideraciones:** durante el vault el `CharacterController` mueve el cuerpo y solo deja pasar el
+  obstáculo (desde la fase 4, `arquitectura.md` §5.1); la cara, la cima, el fondo y el aterrizaje se
+  comprueban antes de empezar. Cada vault conserva la gravedad de su clip: el lento
   desde parado "vuela" a ~3.6 m/s² porque la cadera se desliza sobre la cima (no es un salto), los de
   carrera a 6–10 m/s². Un obstáculo más alto o más profundo que lo que cubre el catálogo para esa marcha
   no se vaultea (`MediumVault` estándar de 0.3 m de fondo, aprobado el 2026-10-08).
@@ -601,11 +604,16 @@ Dependencias · Consideraciones técnicas · Falta**.
   MxM no es determinista entre escenarios, T27).
 - **Resultado de la fase 3 del motion matching (2026-10-09):** **538/538** (las 531 más 7 de la sección
   `Rig`). Con los pies del rig desaparecieron los fallos intermitentes de la Fase 3 (subir bordillos,
-  atrás → adelante).
+  atrás → adelante). **Fase 4** (parkour con el `CharacterController`, sección `ActionMotor`): **540/541**;
+  el que falló fue el slide anticipado corriendo (el slide se agotó a 0.4 m de la barra), un caso
+  intermitente que pasó en dos corridas más de la sección.
 - **Sección `Rig` (P31, 2026-10-09):** el rig de Animation Rigging está construido; corriendo, el pie de
   apoyo se bloquea, no patina (mediana ≤ 0.24 m/s, la métrica de `MocapRetargetProbe`) y ni suelas ni puntas
   se hunden; subiendo los bordillos ningún pie atraviesa la superficie bajo él; en el aire el rig suelta los
   pies; y de pie a 50° del muñeco, la cara lo mira.
+- **Sección `ActionMotor` (fase 4, 2026-10-09):** durante un vault bajo corriendo y colgado de la cornisa,
+  el `CharacterController` sigue activo, solo el obstáculo de la acción es atravesable (el suelo no) y al
+  terminar vuelve a ser sólido, con la cápsula y los pies en su altura.
 - **Consideraciones:** no prueba la cámara con ratón (no existe), enemigos ni la calidad visual de
   las poses; eso se revisa jugando (sección 10). El fallo intermitente de un pie hundido en escalones
   (T24) se resolvió en P27.
@@ -741,9 +749,9 @@ aplica en nuestro proyecto**.
   física. En el jugador, todo pasa por los helpers de `PlayerMovement`.
 - `Rb.MovePosition` / `Rb.MoveRotation` respetan la interpolación (la rotación del Player usa
   `MoveRotation`). Para **teletransportar** (reaparición en checkpoint), usa `Rb.position`, no
-  `MovePosition`. Excepción controlada: durante el parkour (`IsRootMotionDriven`) el cuerpo es
-  kinemático y sin interpolación, y la animación escribe su transform en `OnAnimatorMove`;
-  `EndRootMotion` devuelve el cuerpo a la física en esa pose.
+  `MovePosition`. (Desde P30 el jugador no tiene Rigidbody: es un `CharacterController` que mueve el motor
+  una vez por frame, y desde la fase 4 del motion matching también el root motion del parkour pasa por
+  `Move`, con el obstáculo de la acción atravesable; `arquitectura.md` §5.1.)
 - **Interpolación:** según Unity, activarla *"only if you see jitter"*. El Player la tiene activa
   desde el 2026-10-01 (la cámara en `LateUpdate` sigue un cuerpo que se mueve a 50 Hz, T7). Con
   interpolación activa, no escribas el transform de un cuerpo dinámico: usa la API del Rigidbody.
@@ -920,11 +928,20 @@ problema, la causa, la solución y el estado (formato del GDD §29 para bugs).
 | 2026-10-08 | (ver `git log`) | Axel | Motion matching, fase 2 (P29, P30, P33): el Player pasa de Rigidbody a **`CharacterController`** y camina, corre y esprinta con MxM mezclado sobre el Animator Controller (`PlayerMxMLocomotion`, motor en `PlayerMovement.LateUpdate`); velocidades del mocap; dos parches más en MxM (T26); parkour y prueba reajustados a las velocidades nuevas (detalle abajo). `ParkourPlayModeTest` 338–341/341 entre corridas (T27). |
 | 2026-10-08/09 | (ver `git log`) | Axel | Fase 3, vault y combate (P36, P37): el vault es un clip de mocap de Kinematica elegido de un catálogo medido (`VaultCatalogBuilder`, `VaultPlanner`) y warpeado por código propio (`arquitectura.md` §5.17); el slide espera a la barra; el combate desarmado sigue fases medidas (`CombatTimings`): jab → cross → gancho y patada de mocap CMU, objetivo, golpe por contacto, hit stop, reacción al daño y esquiva más corta, probado sobre el muñeco de entrenamiento (§5.4). Correcciones encontradas al probar: las acciones ya no reciben el root motion de MxM mientras se desvanece, la palma del mantle se fija al apoyarse, salvaguardas de rodillas, dedos y manos contra muros, step offset 0 solo en el aire o sobre una arista sin apoyo. Detalle en F04, F09–F12, F23 y F32. `ParkourPlayModeTest`: 531 comprobaciones, 529/531 con el código final (fallos intermitentes distintos en cada corrida, F32). |
 | 2026-10-09 | (ver `git log`) | Axel | Motion matching, fase 3 (P31): **Animation Rigging** 6.6.0 con dos constraints propios sobre la pose final (`GroundContactConstraint`: terreno bajo talón y punta, pelvis, pie de apoyo bloqueado y asentado; `HeadLookConstraint`: cabeza, cuello y pecho), armados por `PlayerRigSetup` y gobernados por `PlayerRig`; el IK de suelo sale de `PlayerContactIK`. Los pies trabajan sobre las metas de IK Humanoid porque el Foot IK del mocap se aplica después de todo (detalle abajo). `MxMLocomotionProbe`: suelas resueltas en todos los escenarios y patinaje menor en todos menos el strafe a la izquierda; `ParkourPlayModeTest` **538/538** con la sección `Rig` nueva. |
+| 2026-10-09/10 | (ver `git log`) | Axel | Motion matching, fase 4 (P30): el root motion del parkour (vault, agarre, subida, mantle, drop) se aplica con `CharacterController.Move` en lugar de apagar el controller; solo el obstáculo de la acción se deja atravesar (`Physics.IgnoreCollision` con los colliders que mide `EnvironmentChecker`) y la cápsula se reduce a torso y cabeza mientras dura (detalle abajo). Sección `ActionMotor` nueva; `ParkourPlayModeTest` **540/541** (el slide anticipado, intermitente). Con esto el plan de §7.2 quedó completo. |
 | 2026-10-07 | (ver `git log`) | Axel | Motion matching, fase 1 (P29): MxM 2.3.3 embebido con un parche para Unity 6.6 (T26), base de datos horneada desde código (`MxMLocomotionBuilder`: 24 118 poses de Kinematica y 100STYLE, el estilo de strafe separado por tag) y prueba en Play Mode (`MxMLocomotionProbe`). 50/57: velocidades, respuesta, giros de 180°, retroceso y patinaje cumplen; quedan suelas hundidas en giros de 90° y strafe, frenado lento y strafe derecho lento (T27). La base va por Git LFS. El jugador todavía no la usa (detalle abajo). |
 | 2026-10-02 | (sin commit) | Axel | Reconstrucción del movimiento (P28), fases 2–10: animaciones CC0 de Quaternius, herramienta de medición de clips, locomoción direccional con marchas (caminar, strafe, retroceso a 3.5 m/s, agacharse), slide con bucle real, mantle, drop y salto de cornisa, roll de aterrizaje, laboratorio S11 y limpieza (detalle abajo). 341/341 en Play Mode. |
 | 2026-10-02 | (sin commit) | Axel | Reconstrucción del movimiento (P28): auditoría, investigación de repositorios y licencias, arquitectura D aprobada; fase 1: cámara orbital con ratón (P5) y giro limitado por la aceleración lateral (media vuelta que frena y pivota). 304/304 en Play Mode. |
 | 2026-10-02 | (sin commit) | Axel | Calidad de movimiento, segunda fase (P27): momentum en la locomoción, inclinación del torso, slide contextual, aproximación del vault, transiciones sin cambios de velocidad, T24 resuelto y laboratorio de fluidez (detalle abajo). 301/301 en Play Mode, dos corridas. |
 | 2026-10-02 | (sin commit) | Axel | Parkour Obstacle Standard: estándar centralizado, 10 prefabs de obstáculos con validación y gizmos, Parkour Test Area reconstruida con ellos y pruebas de consistencia por posición (detalle abajo). 212/212 en Play Mode. |
+
+### Detalle — motion matching, fase 4: el parkour con el `CharacterController` (2026-10-09)
+
+| Problema | Causa | Solución | Estado |
+|---|---|---|---|
+| Durante vault, agarre, subida, mantle y drop el controller se apagaba y el root motion se escribía al transform: nada detenía el cuerpo (P30, fase 2) | `MatchTarget` y el warper necesitaban la posición exacta y el cuerpo debe atravesar el obstáculo que cruza | El controller sigue encendido y el root motion se aplica con `Move`; `EnvironmentChecker` guarda los colliders de la cara y la cima (`VaultInfo` / `LedgeInfo`) y `BeginRootMotion` los deja atravesar con `Physics.IgnoreCollision` hasta `EndRootMotion` (con un `ParkourObstacle`, todos los suyos). Sin choques, `Move` deja el cuerpo exacto | ✅ |
+| Los vaults bajos (0.6 m) dejaban la mano 20–33 cm sobre su apoyo | El warper baja el cuerpo hasta 0.39 m para una cima más baja que la del clip, y la cápsula entera se apoyaba en el suelo | Durante la acción la base de la cápsula sube 0.5 m (torso y cabeza siguen chocando) y `FeetY` lo descuenta | ✅ |
+| ¿Se cumple de verdad? | — | Sección `ActionMotor` de `ParkourPlayModeTest`: durante un vault y colgado de una cornisa el controller sigue activo, solo el obstáculo es atravesable, el suelo no, y al terminar vuelve a ser sólido con la cápsula completa | ✅ |
 
 ### Detalle — motion matching, fase 3: Animation Rigging (2026-10-09)
 

@@ -18,4 +18,7 @@ public struct VaultInfo
 
     /// <summary>Depth of the obstacle along Direction (m).</summary>
     public float Depth;
+
+    /// <summary>The colliders measured as the front face and the top: the body passes through them during the vault (PlayerMovement.BeginRootMotion).</summary>
+    public Collider Front, Top;
 }

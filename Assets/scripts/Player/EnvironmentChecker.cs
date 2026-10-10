@@ -106,6 +106,8 @@ public class EnvironmentChecker : MonoBehaviour
         info.TopY       = top.point.y;
         info.FrontPoint = new Vector3(front.point.x, top.point.y, front.point.z);
         info.Depth      = Vector3.Dot(back.point - front.point, dir);
+        info.Front      = front.collider;
+        info.Top        = top.collider;
         return true;
     }
 
@@ -197,6 +199,8 @@ public class EnvironmentChecker : MonoBehaviour
         ledge.Normal     = normal;
         ledge.TopY       = feetY;
         ledge.StandPoint = edge - normal * ParkourStandard.LedgeStandInset;
+        ledge.Face       = face.collider;
+        ledge.Top        = face.collider;
         return true;
     }
 
@@ -253,6 +257,8 @@ public class EnvironmentChecker : MonoBehaviour
         ledge.Normal     = normal;
         ledge.TopY       = top.point.y;
         ledge.StandPoint = stand;
+        ledge.Face       = edgeFace.collider;
+        ledge.Top        = top.collider;
         return true;
     }
 

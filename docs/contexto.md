@@ -12,7 +12,7 @@
 > Si este documento y el GDD no coinciden, manda el GDD, y hay que corregir este documento.
 >
 > Última revisión completa: 2026-10-02. Actualizado el 2026-10-09 (Fase 3: vault, slide y combate;
-> fase 3 del motion matching: Animation Rigging).
+> fases 3 y 4 del motion matching: Animation Rigging y parkour con el `CharacterController`).
 
 ---
 
@@ -302,7 +302,10 @@ final · SFX y música básica · build para Windows.
    muñeco de entrenamiento en el área de pruebas. **Fase 3 del motion matching (2026-10-09):** un rig de
    **Animation Rigging** (P31) pone los pies sobre el terreno (bordillos y escalones incluidos), bloquea el
    pie de apoyo para que no patine y gira la cabeza hacia el objetivo, hacia donde se corre o hacia la
-   cámara (`arquitectura.md` §5.10).
+   cámara (`arquitectura.md` §5.10). **Fase 4 (el mismo día):** el parkour también se mueve con el
+   `CharacterController`, que ya no se apaga: solo deja atravesar el obstáculo de la acción, así que un
+   muro o un techo detienen el cuerpo también durante un vault o una subida. Con eso el plan de motion
+   matching (`arquitectura.md` §7.2) quedó completo; lo pendiente de calidad está en T27.
 3. **No se implementa nada fuera del MVP** sin que antes funcione el MVP (GDD §25 y §28).
 
 ## 11. Cómo abrir el proyecto

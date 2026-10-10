@@ -14,9 +14,10 @@ using UnityEngine;
 /// (PlayerMxMLocomotion, P29) carries it with its root motion, blended with the states' velocity by
 /// the motion matching weight; everywhere else the velocity moves it, with gravity. An attack's own
 /// step (its clip's root motion) also goes through the motor, so a wall or a target's post stops it
-/// (P37). Parkour actions (vault, ledge grab, climb) are driven by the animation's root motion: while
-/// IsRootMotionDriven the controller is off and PlayerAnimator writes the clip's motion, warped
-/// onto the real contact points (P22), straight to the transform.
+/// (P37). Parkour actions (vault, ledge grab, climb, mantle, drop) are driven by the animation's root
+/// motion, warped onto the real contact points (P22, P36): while IsRootMotionDriven that motion goes
+/// through CharacterController.Move too (phase 4 of the motion matching plan), with the colliders of the
+/// obstacle the action crosses let through (Physics.IgnoreCollision) and everything else solid.
 /// Adheres to SRP: orchestrates state routing, never implements game logic directly.
 /// </summary>
 [RequireComponent(typeof(CharacterController))]
@@ -205,7 +206,7 @@ public class PlayerMovement : MonoBehaviour, IDamageModifier
     /// CharacterController rests its skin width above the ground).
     /// </summary>
     public float FeetY => Controller != null
-        ? transform.position.y + Controller.center.y - Controller.height * 0.5f - Controller.skinWidth
+        ? transform.position.y + Controller.center.y - Controller.height * 0.5f - Controller.skinWidth - _actionRaise
         : transform.position.y;
 
     /// <summary>Horizontal speed of the body (m/s).</summary>
@@ -948,31 +949,76 @@ public class PlayerMovement : MonoBehaviour, IDamageModifier
     // ─── Root Motion (parkour) ───────────────────────────────────────────────────
 
     /// <summary>
-    /// Hands the body to the animation: the controller is off and ApplyRootMotion writes the clip's
-    /// motion. Collisions are off for the duration; the action was validated against the geometry before.
+    /// How much (m) the capsule's bottom rises during a parkour action. The vault's warper lowers the body
+    /// up to 0.39 m for a top lower than the clip's (the catalog's lift) while the legs are off the ground:
+    /// a full capsule stopped on the floor and the hand landed 20–33 cm over its point. The torso and the
+    /// head still collide. FeetY discounts it.
     /// </summary>
-    public void BeginRootMotion()
+    private const float ActionColliderRaise = 0.5f;
+
+    private float _actionRaise;
+
+    /// <summary>The obstacle colliders the body passes through during the current action.</summary>
+    private readonly System.Collections.Generic.List<Collider> _passThrough = new System.Collections.Generic.List<Collider>(8);
+    private static readonly System.Collections.Generic.List<Collider> ObstacleParts = new System.Collections.Generic.List<Collider>(8);
+
+    /// <summary>
+    /// Hands the body to the animation: ApplyRootMotion / SetRootMotionPose move it with the clip's
+    /// (warped) motion through the controller. The action crosses <paramref name="face"/> and
+    /// <paramref name="top"/> (and the rest of their obstacle): the controller lets them through until
+    /// EndRootMotion; anything else (a wall behind the landing, a low ceiling) still stops the body.
+    /// The controller does not climb steps during an action (its root motion places the feet), and its
+    /// capsule covers the torso and the head (ActionColliderRaise).
+    /// Called again by a chained action (the climb after the hang), it adds that action's obstacle.
+    /// </summary>
+    public void BeginRootMotion(Collider face, Collider top)
     {
+        PassThrough(face);
+        PassThrough(top);
         if (IsRootMotionDriven) return;
         Vector3 v = Velocity;
         RootMotionVelocity = new Vector3(v.x, 0f, v.z); // until the clip reports its own
         StopHorizontal(0f);
-        Controller.enabled = false;
+        Controller.stepOffset = 0f;
+        _actionRaise = ActionColliderRaise;
+        Controller.height = _originalColliderHeight - _actionRaise;
+        Controller.center = _originalColliderCenter + Vector3.up * (_actionRaise * 0.5f);
         IsRootMotionDriven = true;
+        if ((transform.position - _lastMotorPosition).sqrMagnitude > 1e-8f) Physics.SyncTransforms();
+        _lastMotorPosition = transform.position;
+    }
+
+    /// <summary>
+    /// Lets the body through <paramref name="part"/> and the other colliders of its obstacle (a
+    /// standard obstacle can be made of several boxes).
+    /// </summary>
+    private void PassThrough(Collider part)
+    {
+        if (part == null || Controller == null) return;
+        ParkourObstacle obstacle = part.GetComponentInParent<ParkourObstacle>();
+        ObstacleParts.Clear();
+        if (obstacle != null) obstacle.GetComponentsInChildren(ObstacleParts);
+        else ObstacleParts.Add(part);
+        foreach (Collider c in ObstacleParts)
+        {
+            if (c == null || c.isTrigger || _passThrough.Contains(c)) continue;
+            Physics.IgnoreCollision(Controller, c, true);
+            _passThrough.Add(c);
+        }
     }
 
     /// <summary>
     /// Moves the body by an animation delta (called by PlayerAnimator from OnAnimatorMove, once per
-    /// frame). Writes the transform directly: the controller is off, so nothing fights it, and
-    /// MatchTarget reads the real position every frame.
+    /// frame) through the controller. MatchTarget reads the real position every frame, so a body that
+    /// something stopped is warped on from where it really is.
     /// </summary>
     public void ApplyRootMotion(Vector3 deltaPosition, Quaternion deltaRotation)
     {
         if (!IsRootMotionDriven) return;
-        transform.position += deltaPosition;
+        Vector3 moved = MoveBody(deltaPosition);
         if (Time.deltaTime > 0f)
         {
-            Vector3 frame = new Vector3(deltaPosition.x, 0f, deltaPosition.z) / Time.deltaTime;
+            Vector3 frame = new Vector3(moved.x, 0f, moved.z) / Time.deltaTime;
             RootMotionVelocity = Vector3.Lerp(RootMotionVelocity, frame, 0.3f);
         }
         float yaw = (deltaRotation * transform.rotation).eulerAngles.y;
@@ -980,27 +1026,40 @@ public class PlayerMovement : MonoBehaviour, IDamageModifier
     }
 
     /// <summary>
-    /// Places the body where an action's warper computed it for this frame (the vault, P36): like
-    /// ApplyRootMotion, the controller is off and the transform is written, and the motion feeds
-    /// RootMotionVelocity so the run continues at the speed the body really carried.
+    /// Moves the body to where an action's warper computed it for this frame (the vault, P36), through
+    /// the controller like ApplyRootMotion; the motion feeds RootMotionVelocity so the run continues at
+    /// the speed the body really carried.
     /// </summary>
     public void SetRootMotionPose(Vector3 position, Quaternion rotation)
     {
         if (!IsRootMotionDriven) return;
+        Vector3 moved = MoveBody(position - transform.position);
         if (Time.deltaTime > 0f)
-        {
-            Vector3 d = position - transform.position;
-            RootMotionVelocity = Vector3.Lerp(RootMotionVelocity, new Vector3(d.x, 0f, d.z) / Time.deltaTime, 0.3f);
-        }
-        transform.SetPositionAndRotation(position, rotation);
+            RootMotionVelocity = Vector3.Lerp(RootMotionVelocity, new Vector3(moved.x, 0f, moved.z) / Time.deltaTime, 0.3f);
+        transform.rotation = rotation;
     }
 
-    /// <summary>Gives the body back to the controller at its current pose.</summary>
+    /// <summary>One move of the controller during an action; returns what the body really moved.</summary>
+    private Vector3 MoveBody(Vector3 delta)
+    {
+        // Placed from outside since the last move (an action's fallback, a test): the physics scene must see it
+        if ((transform.position - _lastMotorPosition).sqrMagnitude > 1e-8f) Physics.SyncTransforms();
+        Vector3 before = transform.position;
+        if (delta.sqrMagnitude > 0f) Controller.Move(delta);
+        _lastMotorPosition = transform.position;
+        return transform.position - before;
+    }
+
+    /// <summary>Gives the body back to the motor at its current pose, with the obstacle solid again.</summary>
     public void EndRootMotion()
     {
         if (!IsRootMotionDriven) return;
         IsRootMotionDriven = false;
-        Controller.enabled = true;
+        foreach (Collider c in _passThrough)
+            if (c != null) Physics.IgnoreCollision(Controller, c, false);
+        _passThrough.Clear();
+        _actionRaise = 0f;
+        ResetCollider();
         Physics.SyncTransforms();
         _lastMotorPosition = transform.position;
         _turnSmoothVelocity = 0f;
@@ -1014,7 +1073,7 @@ public class PlayerMovement : MonoBehaviour, IDamageModifier
     /// </summary>
     public void TryStepDown()
     {
-        if (Controller == null || !Controller.enabled || IsGrounded || Velocity.y > 0.1f) return;
+        if (Controller == null || !Controller.enabled || IsRootMotionDriven || IsGrounded || Velocity.y > 0.1f) return;
 
         float feet = FeetY;
         Vector3 origin = new Vector3(transform.position.x, feet + 0.05f, transform.position.z);

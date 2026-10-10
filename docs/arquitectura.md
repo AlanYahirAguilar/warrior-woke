@@ -17,7 +17,8 @@
 > código propio (P36, §5.17) y el **combate desarmado** sigue fases medidas de sus clips, busca el
 > objetivo, golpea por contacto real y tiene reacciones al daño (P37, §5.4). También desde el 2026-10-09
 > (fase 3 de §7.2) un rig de **Animation Rigging** pone los pies sobre el terreno, bloquea el pie de apoyo
-> y gira la cabeza (P31, §5.10).
+> y gira la cabeza (P31, §5.10), y (fase 4) **el root motion del parkour también pasa por
+> `CharacterController.Move`**: el controller ya no se apaga y solo deja pasar el obstáculo de la acción.
 
 ---
 
@@ -261,9 +262,9 @@ PlayerRig                       pesos del rig de Animation Rigging (pies, bloque
   en `BlockState` (ver §5.4). Escucha `HealthSystem.OnDamageReceived` para cancelar el sprint y, en el
   suelo, pasar a la reacción al daño (`HurtState`, §5.4).
   **Regla:** los estados escriben `Velocity` con estos helpers y el motor mueve el cuerpo (ver
-  "Motor" abajo). Mientras `IsRootMotionDriven` (vault, cornisa, subida, mantle, drop) el
-  `CharacterController` está apagado y la animación escribe el transform a través de
-  `ApplyRootMotion` (ver §5.10); `Teleport` es la única forma de colocar el cuerpo desde fuera.
+  "Motor" abajo). Mientras `IsRootMotionDriven` (vault, cornisa, subida, mantle, drop) la animación mueve
+  el cuerpo a través de `ApplyRootMotion` / `SetRootMotionPose`, también con `CharacterController.Move`
+  ("Acciones" abajo, §5.10); `Teleport` es la única forma de colocar el cuerpo desde fuera.
 - **Motor (P30, 2026-10-08):** `LateUpdate` de `PlayerMovement` (`[DefaultExecutionOrder(-100)]`, antes
   del trabajo de `PlayerAnimator` y de la cámara) hace **un `CharacterController.Move` por frame**.
   Con el peso `w` de motion matching (0 = Animator Controller, 1 = MxM): desplazamiento horizontal =
@@ -291,6 +292,16 @@ PlayerRig                       pesos del rig de Animation Rigging (pies, bloque
   MxM se desvanece bajo un ataque no se aplica su root motion (es el delta completo del Animator y llevaba
   la deriva del idle). `TurnToward` gira el cuerpo a una velocidad fija hacia el objetivo de un ataque o
   hacia un golpe recibido.
+  **Acciones de parkour (fase 4 de §7.2, 2026-10-09):** el controller ya no se apaga. `BeginRootMotion(cara,
+  cima)` recibe los colliders del obstáculo que la acción cruza (medidos por `EnvironmentChecker` en
+  `VaultInfo` / `LedgeInfo`; con un `ParkourObstacle`, todos los suyos) y el controller los deja pasar con
+  `Physics.IgnoreCollision` hasta `EndRootMotion`; todo lo demás (el suelo, un muro detrás, un techo) sigue
+  deteniendo el cuerpo. El root motion del clip (`ApplyRootMotion`) y la pose del warper del vault
+  (`SetRootMotionPose`) se aplican con `Move`, y `RootMotionVelocity` mide lo que el cuerpo se movió de
+  verdad. Durante la acción la cápsula cubre torso y cabeza: su base sube 0.5 m, porque el warper del vault
+  baja el cuerpo hasta 0.39 m para una cima más baja que la del clip y una cápsula entera se apoyaba en el
+  suelo (la mano quedaba 20–33 cm sobre su punto); `FeetY` descuenta esa subida. El step offset es 0
+  mientras dura.
 - **Locomoción por motion matching (P29, `PlayerMxMLocomotion`):** el `MxMAnimator` reproduce su propio
   PlayableGraph sobre el Animator de `Model`, y **el peso de la salida de ese grafo mezcla MxM sobre el
   Animator Controller, que sigue corriendo debajo** (medido el 2026-10-08: con peso 0 se ve el
@@ -338,8 +349,8 @@ PlayerRig                       pesos del rig de Animation Rigging (pies, bloque
 - **Convención de pivote:** el origen del Player es el **centro del torso**
   (`CharacterController.center = (0,0,0)`), `CenterPoint` está en el origen y `HeadPoint` en `height/2`.
   `FeetY` = base de la cápsula − piel (un `CharacterController` descansa su piel por encima del suelo);
-  `GroundChecker` calcula el pie desde la forma (centro y altura), no desde los bounds, porque el
-  controller está apagado durante el parkour. Si cambias el modelo, usa
+  `GroundChecker` calcula el pie desde la forma (centro y altura), no desde los bounds (con el
+  controller apagado, como estaba el parkour hasta la fase 4, los bounds no valen). Si cambias el modelo, usa
   **Tools → Warrior Woke → Configurar Modelo del Jugador** (respeta la convención).
 
 **Estados** (archivos en `Player/StateMachine/States/`):
@@ -455,7 +466,8 @@ No hay ningún asset `.inputactions` en el proyecto (la plantilla por defecto se
     (`Dot ≥ 0.6`); **la dirección del vault es perpendicular a la cara**, no la del input; (2) cima
     entre `VaultMinHeight` (0.45 m) y `VaultMaxHeight` (1.1 m) sobre los pies; (3) profundidad ≤
     `VaultMaxDepth` (1.4 m), con un rayo de regreso desde detrás. Devuelve un `VaultInfo`: dirección,
-    altura de la cima, borde frontal y profundidad. El aterrizaje lo comprueba el planificador en el
+    altura de la cima, borde frontal, profundidad y los colliders de la cara y la cima (los que el cuerpo
+    atraviesa durante el vault, §5.1). El aterrizaje lo comprueba el planificador en el
     punto del clip elegido con `TryFindLanding` (suelo plano no más alto que la cima − 0.2 m, a lo sumo
     0.6 m bajo los pies y con sitio para estar de pie).
   - **Medición común de una cima (`TryFindTop`, P28):** cornisa y mantle comparten la misma medición:
@@ -472,8 +484,8 @@ No hay ningún asset `.inputactions` en el proyecto (la plantilla por defecto se
     altura mínima y máxima sobre los pies (1.9–2.7 m desde el suelo, 1.5–2.6 m en el aire); el
     **borde exacto** con un rayo horizontal justo bajo la cima; y espacio para estar de pie en el
     punto donde termina la subida (0.45 m tras el borde). Devuelve un `LedgeInfo`: borde, normal,
-    cima, punto de pie, rotación de frente al muro y `EdgeAt(punto)` (el borde a la altura lateral
-    de cualquier mano).
+    cima, punto de pie, los colliders de la cara y la cima (atravesables durante la acción, §5.1), rotación
+    de frente al muro y `EdgeAt(punto)` (el borde a la altura lateral de cualquier mano).
 - **Auto step (`PlayerMovement.TryAutoStep`, adaptado del DPS):** en `Run`, si un rayo a 5 cm del
   suelo choca en la dirección de movimiento y otro a `ParkourStandard.StepMaxHeight` (0.4 m) no, busca la cima con un
   rayo hacia abajo y sube el cuerpo hasta ella (`stepLayer` = Ground + Obstacle). Los obstáculos de
@@ -745,7 +757,7 @@ aplica el root motion por su cuenta: lo decide `PlayerAnimator`.
 | Modo | Clips | Qué pasa |
 |---|---|---|
 | En el sitio (el avance horizontal no queda en la pose; la altura sí) | Walk, Jog Forward, Run, WalkBackward (generado), clips direccionales LowPoly, Crouch_Fwd, Fall A Loop, Falling To Landing, Fall A Land To Run Forward, Slide_Start, Slide_Loop, Slide_Exit, Roll | El Rigidbody mueve el cuerpo. Antes Walk y Jog tenían horneado en la pose un avance de 1.6–2.2 m por ciclo: la pose patinaba y regresaba en cada ciclo. |
-| Root motion (horizontal según el centro de masa) | ClimbUp_1m (mantle), Idle To Braced Hang, Braced Hang To Crouch, CrouchToBracedHang (generado: la subida invertida, el drop), Jump_Up | Agarre, subida, mantle y drop: `PlayerAnimator` aplica el movimiento del clip al cuerpo (controller apagado) y lo warpea con `MatchTarget`. Jump_Up: su subida no se aplica (la hace la física), así la pose ya no flota 0.58 m sobre el collider. |
+| Root motion (horizontal según el centro de masa) | ClimbUp_1m (mantle), Idle To Braced Hang, Braced Hang To Crouch, CrouchToBracedHang (generado: la subida invertida, el drop), Jump_Up | Agarre, subida, mantle y drop: `PlayerAnimator` aplica el movimiento del clip al cuerpo (con `CharacterController.Move` desde la fase 4, el obstáculo atravesable) y lo warpea con `MatchTarget`. Jump_Up: su subida no se aplica (la hace la física), así la pose ya no flota 0.58 m sobre el collider. |
 | Root motion del vault (P36) | Sub-clips `Vault_*` de las tomas de Kinematica | El cuerpo no sigue el `deltaPosition` del Animator: el warper de `PlayerVaultState` lo coloca sobre la trayectoria medida del clip en el catálogo (§5.17). |
 | Paso de un ataque (P37) | Punch_Jab, Punch_Cross (en el sitio, ~5 cm), Punch_Hook y Kick_Front (CMU: 0.29 y 0.37 m hasta el impacto) | `PlayerAnimator` manda el root motion al motor, que lo aplica con `Move` (colisiones incluidas), escalado si el objetivo está cerca (§5.4). |
 | Todo en la pose | Hanging Idle, transiciones de guardia Ch45, clips LowPoly en el sitio | Bucles y clips sin desplazamiento. |
@@ -930,7 +942,7 @@ lógica a nuestra FSM y se usan 11 de sus FBX (13 clips):
 | Del DPS | En el proyecto |
 |---|---|
 | `VaultObstacle`: rayo de rodilla → aterrizaje detrás → cuerpo movido durante el clip, IK de mano izquierda con la curva `LHandCurve` | `EnvironmentChecker.TryFindVault`: mide la cara, la altura y la profundidad con rayos (el original usa `localScale` y tags). Desde el 2026-10-09 el vault en sí ya no es el del DPS: es un clip de mocap del catálogo con warper propio (P36, §5.17) y *VaultFence* se eliminó. |
-| `AnimationCharacterController`: root motion activo en estados con tag "Root" y `MatchTarget` | `PlayerAnimator`: root motion solo en Vault, LedgeGrab y LedgeClimb, aplicado por `OnAnimatorMove` al cuerpo kinemático, y `MatchTarget` por fases (§5.10). |
+| `AnimationCharacterController`: root motion activo en estados con tag "Root" y `MatchTarget` | `PlayerAnimator`: root motion solo en Vault, LedgeGrab y LedgeClimb, aplicado por `OnAnimatorMove` al cuerpo con `CharacterController.Move` (fase 4), y `MatchTarget` por fases (§5.10). |
 | `ClimbController` (braced hang): `MatchTarget` de la mano al agarrar y del pie al subir; IK de manos en el borde y de pies en el muro | `PlayerLedgeGrabState` / `PlayerLedgeClimbState` + `TryFindLedge` + `PlayerContactIK`. Agarre desde el suelo (como el original) o en el aire; la subida warpea la raíz hacia el punto de pie medido. Animaciones *Idle To Braced Hang*, *Hanging Idle* y *Braced Hang To Crouch*. |
 | `MovementCharacterController`: `AutoStep`, IK de pies con ajuste de pelvis | `PlayerMovement.TryAutoStep` (sube hasta la cima medida, no 0.2 m por tick) y `TryStepDown`; IK de pies en el suelo, con la regla extra de no penetración: en `PlayerContactIK` hasta el 2026-10-09 y desde entonces en el rig de Animation Rigging (`GroundContactConstraint`, P31). |
 | `VaultSlide` (slide bajo obstáculos) | Se conservó nuestro `PlayerSlideState` (contextual, §5.15). Sus clips se reemplazaron por los de Quaternius (P28) y `Slide.fbx` se eliminó. |
@@ -1157,7 +1169,8 @@ Espacio → EnvironmentChecker.TryFindVault (cara, cima y fondo medidos, a Vault
            → la de menor warp y con el mismo pie adelantado que el cuerpo (la carrera fluye en el vault)
            → Ready (empieza ya) · Approaching (Run guarda la intención hasta su punto de entrada, 0.8 s)
              · None (no se vaultea: mantle, cornisa o salto; nunca un clip que no encaja)
-        → PlayerVaultState: CharacterController apagado, el warper coloca el cuerpo cada frame
+        → PlayerVaultState: el warper calcula la pose de cada frame y el CharacterController lleva el cuerpo
+          (el obstáculo se deja atravesar; el resto del mundo no)
         → PlayerAnimator: cross-fade al estado del clip en su tiempo de entrada; ParkourSpeed = ritmo del warper
         → PlayerContactIK: palmas sobre sus puntos (cada una se suelta cuando el brazo de Ch45 ya no alcanza),
           pies que pasan sobre la cima nunca bajan de ella
@@ -1271,7 +1284,7 @@ una mano, el agarre desde parado) y la física hace el pivot y la frenada.
 | **Flujo de juego** | Escenas `MainMenu`, `World1_Level1`, `World1_Level2`, `World2_Level3`, cargadas con `SceneManager.LoadSceneAsync`. Pausa con `Time.timeScale = 0` y un panel de UI (uGUI). | GDD §17. |
 | **Audio** | `AudioManager` con fuentes de audio pooleadas para SFX, que se suscribe a los eventos de combate. | GDD §23, D6, D7. |
 
-### 7.2 Motion matching de la locomoción (P29) — 🔧 En desarrollo
+### 7.2 Motion matching de la locomoción (P29) — ✅ Implementado (fases 0–4, 2026-10-05 → 2026-10-09)
 
 Fases de la segunda reconstrucción (P29–P35). Desde la fase 2 (2026-10-08) el Player.prefab usa el motor
 `CharacterController` y la locomoción MxM.
@@ -1282,7 +1295,7 @@ Fases de la segunda reconstrucción (P29–P35). Desde la fase 2 (2026-10-08) el
 | 1 Datos de MxM + prueba | ✅ 2026-10-07 | MxM embebido y parcheado, base horneada, prueba en Play Mode (abajo) |
 | 2 Motor `CharacterController` (P30) | ✅ 2026-10-08 | El Player se mueve con un `CharacterController` y camina, corre y esprinta con MxM mezclado sobre el Animator Controller; velocidades de P33; parkour y combate sin cambios de arquitectura (§5.1 "Motor" y "Locomoción por motion matching"). `ParkourPlayModeTest` 338–341/341 entre corridas (abajo) |
 | 3 Animation Rigging (P31) | ✅ 2026-10-09 | Rig `ContactRig` sobre la pose final: pies sobre el terreno (talón y punta), pelvis, bloqueo del pie de apoyo y mirada de cabeza, cuello y pecho (§5.10). Resultados abajo |
-| 4 Warper y acciones | 🔧 Fase 3 (2026-10-09) | Hechos: el vault como clip elegido de un catálogo con warper propio (P36, §5.17) y el combate como acciones con clip por fases medidas (P37, §5.4). Falta: mover el root motion del parkour con `CharacterController.Move` en lugar de apagar el controller |
+| 4 Warper y acciones | ✅ 2026-10-09 | El vault como clip elegido de un catálogo con warper propio (P36, §5.17), el combate como acciones con clip por fases medidas (P37, §5.4) y el root motion del parkour por `CharacterController.Move`: el controller ya no se apaga y solo deja pasar el obstáculo de la acción (§5.1 "Acciones de parkour") |
 
 **Base de datos** (`MxMLocomotionBuilder`, `Assets/Data/MxM/`):
 
@@ -1386,8 +1399,8 @@ sobre el motor nuevo y las velocidades de P33 (detalle en `features.md` §5):
 | P27 | Calidad de movimiento (segunda fase) | Sin cambiar la arquitectura ni agregar dependencias (P26): velocidad que sigue la orientación y giro limitado por la rapidez, inclinación procedural del torso, slide contextual con pose mantenida (C con momentum, ya no solo esprintando), aproximación del vault al punto de despegue, reproducción del vault a la velocidad de carrera del clip y salidas del parkour con la velocidad del root motion. Sección de laboratorio S10 en el área. §5.15–§5.16. | 2026-10-02 | ✅ Implementada |
 | P28 | Reconstrucción del movimiento y del parkour | Auditoría del 2026-10-02 (§7.1): arquitectura **D, híbrido propio** (un único motor de locomoción + percepción + selector de acciones + warping + IK; código MIT de Traverser adaptable con atribución). Clips nuevos de **Mixamo** que el equipo descarga (lista en §7.1). Alcance ampliado sobre el GDD §28: caminar/agacharse, strafe y retroceso rápido, mantle y step over, drop y salto de cornisa. Cámara orbital primero. Se ejecuta por fases con revisión jugando en cada una. | 2026-10-02 | ✅ Fases 1–10 hechas (§7.1). Clips nuevos de Quaternius (CC0, descargables) en lugar de esperar a Mixamo; los de Mixamo quedan para lo que Quaternius gratuito no cubre |
 | P26 | Active ragdoll y plugins de animación | Evaluados contra la referencia de calidad (Tricking 0, Uncharted, TLOU, AC Unity): **no se agregan** PuppetMaster, Final IK, Animancer, Animation Rigging ni un active ragdoll. Lo que falta para el realismo no es física sino clips (vault de una mano, solo braced hang, sin patada; T17). La arquitectura queda preparada: el cuerpo ya alterna dinámico/kinemático por estado y el IK está aislado en `PlayerContactIK`. | 2026-10-02 | ⏸️ En lo que toca a Animation Rigging, reemplazada por P31 (2026-10-05). Active ragdoll, PuppetMaster, Final IK y Animancer siguen fuera. |
-| P29 | Locomoción con motion matching | Auditoría del 2026-10-05: la rigidez venía de mezclar clips de tres orígenes en un blend sin fase común, de no tener intención filtrada ni clips de giro, de `MatchTarget` (un objetivo, nada durante un cross-fade) y de dos dueños del movimiento. La locomoción pasa a **motion matching con MxM** (fork de Frost-Blade, MIT, probado en Unity 6) alimentado con el **mocap del Kinematica Demo** (Unity Companion License). El parkour y el combate quedan como acciones con clip, warper propio por segmentos e inercialización. | 2026-10-05 | ✔ Aprobada; 🔧 fase 0 (retarget) y fase 1 (base de MxM y prueba en Play Mode, 2026-10-07) hechas (§7.2). El jugador todavía no la usa |
-| P30 | Motor del personaje | **`CharacterController`** como único dueño del movimiento: el root motion de las acciones se aplica con `Move`; desaparece el cambio dinámico/kinemático del Rigidbody. Reemplaza a D1 cuando se implemente. | 2026-10-05 | ✅ Implementada el 2026-10-08 (§5.1 "Motor"). Diferencia: durante las acciones de parkour el controller se apaga y el root motion se escribe al transform (como hacía el modo kinemático), porque `MatchTarget` necesita la posición exacta; se moverá con `Move` cuando llegue el warper propio (fase 4) |
+| P29 | Locomoción con motion matching | Auditoría del 2026-10-05: la rigidez venía de mezclar clips de tres orígenes en un blend sin fase común, de no tener intención filtrada ni clips de giro, de `MatchTarget` (un objetivo, nada durante un cross-fade) y de dos dueños del movimiento. La locomoción pasa a **motion matching con MxM** (fork de Frost-Blade, MIT, probado en Unity 6) alimentado con el **mocap del Kinematica Demo** (Unity Companion License). El parkour y el combate quedan como acciones con clip, warper propio por segmentos e inercialización. | 2026-10-05 | ✅ Implementada: fases 0–4 de §7.2 (retarget, base de MxM, motor y locomoción del jugador el 2026-10-08, Animation Rigging y acciones con `Move` el 2026-10-09). Pendientes de calidad en T27 |
+| P30 | Motor del personaje | **`CharacterController`** como único dueño del movimiento: el root motion de las acciones se aplica con `Move`; desaparece el cambio dinámico/kinemático del Rigidbody. Reemplaza a D1 cuando se implemente. | 2026-10-05 | ✅ Implementada el 2026-10-08 (§5.1 "Motor"); desde el 2026-10-09 (fase 4) también el root motion del parkour pasa por `Move`, con el obstáculo de la acción atravesable (`Physics.IgnoreCollision`) y la cápsula reducida a torso y cabeza mientras dura |
 | P31 | IK y ajustes procedurales | **Animation Rigging** (paquete core en Unity 6.6, 6.6.0) para el contacto de manos y pies, stride/orientation warping y la mirada de cabeza y torso. Corre sobre la pose final, también durante las mezclas (T25). Reemplaza al IK Pass Humanoid de `PlayerContactIK`. | 2026-10-05 | ✅ Implementada el 2026-10-09 (§5.10, §7.2): pies sobre el terreno, pelvis, bloqueo del pie de apoyo y mirada, con dos constraints propios sobre las metas de IK Humanoid. Las manos y los pies del parkour siguen en `PlayerContactIK` (IK Pass), igual que el stride/orientation warping, que no hizo falta (MxM ya elige la toma por velocidad y giro) |
 | P33 | Velocidades del personaje | El juego se ajusta al mocap en lugar de acelerarlo: caminar ~1.3, correr ~3.4 y sprint ~4.8 m/s (sprint +41 %, GDD §5.2). Medido: el mocap camina a ~1.1–1.6, trota a ~3.2 y esprinta con punta de ~4.5–5.1 m/s. Reemplaza `BaseSpeed` 5 / sprint 7 de P12 cuando se implemente el motor (P30). | 2026-10-05 | ✅ Implementada el 2026-10-08 (y retroceso 2.0 m/s, P34). El parkour se reajustó a estas velocidades (§7.2) |
 | P34 | Retroceso y strafe | Kinematica no los tiene: se toman de **100STYLE** (estilo Neutral, CC BY 4.0, con atribución), convertidos de BVH con Blender. | 2026-10-05 | ✔ Aprobada; 🔧 importadas y probadas sobre Ch45 (retarget limpio con Foot IK) las 8 tomas **Neutral** (lentas: atrás y de lado hasta ~1.3–1.6 m/s) y, tras buscar otra fuente, las 8 **Rushed** (atrás ~2.0 y de lado ~2.2 m/s). Ninguna fuente libre compatible llega a ~3.4 m/s (LaFAN1 y Bandai Namco son NC-ND, MotionPersona NC, CMU solo camina; Mixamo bloqueado por P32): el retroceso y el strafe tendrán tope de ~2 m/s (2026-10-05) |
@@ -1415,7 +1428,7 @@ más rápido).
 | T22 | `ModelImporter.clipAnimations` falla en Unity 6000.6 | API de Editor | El getter registra `Cannot unmarshal intptr objects in structs` y devuelve los clips sin curvas; reescribirlos borra las curvas (así se perdió `LHandCurve`). **Regla:** editar los clips con `SerializedObject` sobre `m_ClipAnimations`, como `PlayerAnimationSetup`. |
 | T23 | Las constantes del parkour dependen de los clips | `ParkourTimings.cs`, `CombatTimings.cs`, `VaultCatalog.asset` | Los tiempos de contacto y los offsets se miden muestreando los clips (**Medir Clips**, `ClipMeasurement`; los vaults con **Construir Catálogo de Vaults**, los golpes con **Revisar Clips de Combate**). Si se cambia un clip de agarre, subida o mantle hay que volver a medir; si se cambia un vault, reconstruir el catálogo; si se cambia un golpe, actualizar `CombatTimings`. La prueba de Play Mode detecta el desajuste (manos lejos del borde, pies dentro de la geometría, golpes que no conectan). |
 | T26 | MxM necesita parches para este proyecto | `Packages/com.frost-blade-studios.motion-matching/` (buscar "Warrior Woke patch") | Por eso el paquete va **embebido**. Cuatro parches: (1) `MxMAssetHandler.cs`: el cast de `int` a `EntityId` es un error desde Unity 6.3 (firma `OpenAsset(EntityId, int)` bajo `UNITY_6000_3_OR_NEWER`); (2) `MxMAnimator.OnDisable`: un objeto desactivado antes de `Start` (el Player del pool) lanzaba `ArgumentNullException` en `Pause()`; (3) `MxMTrajectoryGeneratorBase.ForcePastTrajectoryByVelocity`: ponía la capacidad de las listas por debajo de su tamaño (`ArgumentOutOfRangeException`); (4) `MxMTrajectoryGeneratorBase.ForceFutureTrajectoryByVelocity` (nuevo, Fase 3): fuerza también la trayectoria futura con la velocidad del cuerpo, para que la carrera siga al salir de un vault (con solo el pasado MxM bajaba a ~2 m/s). Si se actualiza MxM hay que volver a aplicarlos. |
-| T27 | Pendientes de la locomoción MxM (§7.2) | `MxMLocomotionProbe`, `ParkourPlayModeTest` | (Las suelas hundidas hasta 5.5 cm en el giro de 90° y 5–11 cm en strafe se resolvieron con el rig de pies, P31, el 2026-10-09; el strafe a la izquierda, con la toma `Neutral_SR`, todavía patina 0.2 m/s.) Frenado de 1.3–1.6 s (el actor del mocap frena así; el warping de velocidad de MxM lo acortaba pero rompía las medias vueltas); strafe a la derecha a 1.36 m/s (las tomas de lado de 100STYLE promedian ~1.5 m/s y no hay espejo); sprint de 4.4–5.4 m/s según la toma (el regulador frena las más rápidas hasta el 88 %); la media vuelta esprintando queda 15–20° corta a los 2.4 s; tras una caída de 3 m vuelve a ~2.6–3 m/s en 2.5 s. Por eso `ParkourPlayModeTest` usa esas tolerancias y su resultado varía entre corridas (MxM no es determinista entre escenarios): 338–341/341 en la fase 2 y 526–530/531 desde la Fase 3 (529 con su código final); con el rig de pies (P31), 538/538 (`features.md` F32). |
+| T27 | Pendientes de la locomoción MxM (§7.2) | `MxMLocomotionProbe`, `ParkourPlayModeTest` | (Las suelas hundidas hasta 5.5 cm en el giro de 90° y 5–11 cm en strafe se resolvieron con el rig de pies, P31, el 2026-10-09; el strafe a la izquierda, con la toma `Neutral_SR`, todavía patina 0.2 m/s.) Frenado de 1.3–1.6 s (el actor del mocap frena así; el warping de velocidad de MxM lo acortaba pero rompía las medias vueltas); strafe a la derecha a 1.36 m/s (las tomas de lado de 100STYLE promedian ~1.5 m/s y no hay espejo); sprint de 4.4–5.4 m/s según la toma (el regulador frena las más rápidas hasta el 88 %); la media vuelta esprintando queda 15–20° corta a los 2.4 s; tras una caída de 3 m vuelve a ~2.6–3 m/s en 2.5 s. Por eso `ParkourPlayModeTest` usa esas tolerancias y su resultado varía entre corridas (MxM no es determinista entre escenarios): 338–341/341 en la fase 2 y 526–530/531 desde la Fase 3 (529 con su código final); con el rig de pies (P31), 538/538, y con la fase 4, 540/541 (el slide anticipado, intermitente; `features.md` F32). |
 | T28 | Combate sin feedback ni enemigos | `PlayerCombatStates.cs`, `TrainingDummy.cs` | El combate desarmado funciona contra el muñeco de entrenamiento (único objetivo: los enemigos se rehacen con P4). No hay camera shake, SFX ni VFX de impacto (F28, F29); las reacciones al daño son frontales (el cuerpo gira hacia el golpe); `WeaponHolder.GetKnockback` no se usa (el retroceso lo decide quien recibe el golpe). La patada cerca del objetivo (el combo J → J → K empieza a ~0.8 m) mete el pie hasta 13 cm en el muñeco antes de que este ceda. |
 
 | T25 | El IK no siempre llega a los huesos durante una transición del Animator | `PlayerContactIK` | Medido en dos casos: la mano del slide en la mezcla hacia su bucle (el objetivo pedía 5 cm y el hueso quedaba en 1 cm, ni subir el cuerpo lo cambiaba) y un pie al subir una escalera durante la mezcla de un aterrizaje (11–23 cm dentro del peldaño, intermitente). Mitigado: la entrada al bucle del slide es en seco y la salvaguarda de los pies corrige la pose final. Desde el 2026-10-09 los pies en el suelo los resuelve el rig de Animation Rigging (P31), que corre sobre la pose final también durante las mezclas; en el IK Pass quedan la mano del slide y los contactos del parkour. Falta entender la causa (orden de evaluación del IK en las transiciones de Humanoid). |
