@@ -199,6 +199,7 @@ namespace WarriorWoke.EditorTools
             if (Runs("Mantles"))        yield return Mantles();
             if (Runs("Gaits"))          yield return Gaits();
             if (Runs("DropAndJumpOff")) yield return DropAndJumpOff();
+            if (Runs("Rig"))            yield return Rig();
             if (Runs("Combat"))         yield return Combat();
         }
 
@@ -1621,6 +1622,158 @@ namespace WarriorWoke.EditorTools
 
         // ── S12: unarmed combat on the training dummy (P37), dodge, block, hit reactions ───────────────
         private const string CombatSheetFolder = "Logs/PlayModeCombat";
+        // ── Animation Rigging (P31): feet on the ground and on the curbs, foot lock, look ─────────────
+        private static IEnumerator Rig()
+        {
+            var builder = _animator.GetComponent<UnityEngine.Animations.Rigging.RigBuilder>();
+            var feet = _animator.GetComponentInChildren<GroundContactConstraint>();
+            var look = _animator.GetComponentInChildren<HeadLookConstraint>();
+            if (!Check(builder != null && builder.graph.IsValid() && feet != null && look != null,
+                       "El rig de Animation Rigging del jugador está construido (pies y mirada)")) yield break;
+
+            // Running on flat ground: the stance foot locks, does not skate and nothing of the feet sinks
+            yield return Teleport(Corridor(5f));
+            Keys(Key.W);
+            yield return 1.0f;
+            int locks = feet.LockCount;
+            var contact = new List<Vector3>();
+            var times = new List<float>();
+            float minClear = float.MaxValue, minHeight = float.MaxValue, minSpeed = float.MaxValue;
+            for (float t = 0f; t < 1.5f; t += 0.01f)
+            {
+                contact.Add(LowestFootPoint);
+                times.Add(Time.time);
+                minClear = Mathf.Min(minClear, FootClearance);
+                Vector2 cl = feet.Contact(true), cr = feet.Contact(false);
+                minHeight = Mathf.Min(minHeight, Mathf.Min(cl.x, cr.x));
+                if (cl.x < 0.03f) minSpeed = Mathf.Min(minSpeed, cl.y);
+                if (cr.x < 0.03f) minSpeed = Mathf.Min(minSpeed, cr.y);
+                yield return 0.01f;
+            }
+            Keys();
+            float skate = Skating(contact, times);
+            Check(feet.LockCount > locks, $"Corriendo, el pie de apoyo se bloquea en el suelo ({feet.LockCount - locks} bloqueos en 1.5 s; " +
+                                          $"apoyo más bajo {minHeight * 100f:F1} cm, más lento {minSpeed:F2} m/s; peso {feet.weight:F2}, bloqueo permitido {feet.LockAllowed}, Foot IK {feet.FootIKWeight:F2})");
+            Check(skate <= 0.24f, $"Corriendo, el pie de apoyo no patina (mediana {skate:F3} m/s; el mocap solo: 0.16)");
+            Check(minClear > -0.02f, $"Corriendo, ni las suelas ni las puntas se hunden (mínimo {minClear * 100f:F1} cm)");
+            yield return 1.0f;
+
+            // Up the curbs: each foot stands on the surface under it
+            yield return Teleport(new Vector3(ParkourTestCircuitBuilder.LocomotionX, Floor + OriginAboveFeet, -4f));
+            Keys(Key.W);
+            float curbMin = float.MaxValue;
+            string curbDiag = "";
+            for (float t = 0f; t < 5f && _movement.transform.position.z > -16f; t += 0.02f)
+            {
+                float c = FootClearance;
+                if (c < curbMin)
+                {
+                    curbMin = c;
+                    Vector3 lp = LowestFootPointUnder(out string part);
+                    curbDiag = $"{part} a z {lp.z:F2}, {(lp.y - GroundUnder(lp)) * 100f:F1} cm sobre su suelo; cuerpo a z {_movement.transform.position.z:F2}";
+                }
+                yield return 0.02f;
+            }
+            Keys();
+            Check(curbMin > -Penetration, $"Subiendo bordillos, cada pie pisa la superficie bajo él sin atravesarla (mínimo {curbMin * 100f:F1} cm: {curbDiag})");
+            yield return 0.8f;
+
+            // In the air the feet are the clip's (the rig fades out)
+            yield return Teleport(Corridor(5f));
+            yield return Tap(Key.Space);
+            yield return 0.3f;
+            Check((Current == _movement.JumpState || Current == _movement.FallState) && feet.weight < 0.2f,
+                  $"En el aire el rig suelta los pies (peso {feet.weight:F2}, estado {Current.GetType().Name})");
+            yield return 1.2f;
+
+            // Standing near the dummy, turned 50° away from it: the head (with the neck and the chest) looks at it
+            _dummy = Object.FindAnyObjectByType<TrainingDummy>();
+            if (_dummy != null)
+            {
+                yield return FaceDummy(2.0f, 50f);
+                yield return 1.0f;
+                Vector3 face = _head.rotation * look.data.headForward;
+                float body = AngleToDummy(_movement.transform.forward), head = AngleToDummy(face);
+                Check(look.weight > 0.9f && head < body - 25f,
+                      $"De pie junto al muñeco, la cabeza lo mira (el cuerpo a {body:F0}°, la cara a {head:F0}°; peso {look.weight:F2})");
+            }
+        }
+
+        /// <summary>Horizontal angle (°) between <paramref name="direction"/> and the way from the head to the dummy.</summary>
+        private static float AngleToDummy(Vector3 direction)
+        {
+            Vector3 to = _dummy.transform.position - _head.position;
+            to.y = 0f;
+            direction.y = 0f;
+            return Vector3.Angle(direction, to);
+        }
+
+        /// <summary>Lowest point of the feet: the soles (foot minus its bottom height) and the toe joints.</summary>
+        private static Vector3 LowestFootPoint
+        {
+            get
+            {
+                Vector3 best = _footL.position + Vector3.down * _animator.leftFeetBottomHeight;
+                Vector3 heelR = _footR.position + Vector3.down * _animator.rightFeetBottomHeight;
+                if (heelR.y < best.y) best = heelR;
+                if (_toeL != null && _toeL.position.y < best.y) best = _toeL.position;
+                if (_toeR != null && _toeR.position.y < best.y) best = _toeR.position;
+                return best;
+            }
+        }
+
+        /// <summary>The sole or toe joint lowest relative to the ground right under it, and which one.</summary>
+        private static Vector3 LowestFootPointUnder(out string part)
+        {
+            part = "suela izq";
+            Vector3 best = _footL.position + Vector3.down * _animator.leftFeetBottomHeight;
+            float bc = best.y - GroundUnder(best);
+            Vector3 p = _footR.position + Vector3.down * _animator.rightFeetBottomHeight;
+            if (p.y - GroundUnder(p) < bc) { best = p; bc = p.y - GroundUnder(p); part = "suela der"; }
+            p = _toeL.position;
+            if (p.y - GroundUnder(p) < bc) { best = p; bc = p.y - GroundUnder(p); part = "punta izq"; }
+            p = _toeR.position;
+            if (p.y - GroundUnder(p) < bc) { best = p; bc = p.y - GroundUnder(p); part = "punta der"; }
+            return best;
+        }
+
+        /// <summary>Lowest gap between a sole or a toe joint and the ground right under it (negative = sunk).</summary>
+        private static float FootClearance
+        {
+            get
+            {
+                float c = SoleClearance;
+                if (_toeL != null) c = Mathf.Min(c, _toeL.position.y - GroundUnder(_toeL.position));
+                if (_toeR != null) c = Mathf.Min(c, _toeR.position.y - GroundUnder(_toeR.position));
+                return c;
+            }
+        }
+
+        /// <summary>
+        /// Skating of the planted foot, with MocapRetargetProbe's metric: the lowest point of the feet, within
+        /// 2 cm of its p5 height in two consecutive samples, is planted; the median of its horizontal speed
+        /// (above 6 m/s it is the contact switching feet, not sliding).
+        /// </summary>
+        private static float Skating(List<Vector3> contact, List<float> times)
+        {
+            var heights = new List<float>(contact.Count);
+            foreach (Vector3 c in contact) heights.Add(c.y);
+            heights.Sort();
+            float floor = heights[Mathf.Clamp(Mathf.FloorToInt(0.05f * (heights.Count - 1)), 0, heights.Count - 1)];
+            var speeds = new List<float>();
+            for (int i = 1; i < contact.Count; i++)
+            {
+                if (contact[i].y > floor + 0.02f || contact[i - 1].y > floor + 0.02f || times[i] <= times[i - 1]) continue;
+                Vector3 d = contact[i] - contact[i - 1];
+                d.y = 0f;
+                float v = d.magnitude / (times[i] - times[i - 1]);
+                if (v < 6f) speeds.Add(v);
+            }
+            if (speeds.Count == 0) return 0f;
+            speeds.Sort();
+            return speeds[speeds.Count / 2];
+        }
+
         private static TrainingDummy _dummy;
         private static CapsuleCollider _dummyBody;
         private static PoseSheetRenderer _combatSheet;

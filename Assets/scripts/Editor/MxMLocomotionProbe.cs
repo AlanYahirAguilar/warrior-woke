@@ -21,7 +21,10 @@ namespace WarriorWoke.EditorTools
     ///  - skating of the planted feet, soles on the ground, facing kept while strafing,
     ///  - pops (a bone jumping faster than any human limb) and which takes MxM picks.
     /// The thresholds are the acceptance criteria of the locomotion; the numbers go to
-    /// Logs/MxMProbe/metrics.csv. Menu: Tools → Warrior Woke → Probar Motion Matching.
+    /// Logs/MxMProbe/metrics.csv. Since phase 3 (P31) the model carries the player's feet rig
+    /// (PlayerRigSetup: ground contact and foot lock with Animation Rigging), so the soles and the skating
+    /// are measured as the player shows them; "-wwNoRig" measures the motion matching alone
+    /// (Logs/MxMProbe/metrics_norig.csv). Menu: Tools → Warrior Woke → Probar Motion Matching.
     /// Batch: -executeMethod WarriorWoke.EditorTools.MxMLocomotionProbe.RunBatch (do not pass -quit).
     /// </summary>
     [InitializeOnLoad]
@@ -102,6 +105,7 @@ namespace WarriorWoke.EditorTools
             var animData = AssetDatabase.LoadAssetAtPath<MxMAnimData>(MxMLocomotionBuilder.AnimDataPath);
             var ground = GameObject.CreatePrimitive(PrimitiveType.Plane);
             ground.name = "Ground";
+            ground.layer = LayerMask.NameToLayer("Ground"); // what the feet rig stands on
             ground.transform.localScale = new Vector3(40f, 1f, 40f);
             var light = new GameObject("Light").AddComponent<Light>();
             light.type = LightType.Directional;
@@ -137,7 +141,13 @@ namespace WarriorWoke.EditorTools
             sm.FindProperty("m_favourCurrentPose").boolValue = true;
             sm.FindProperty("m_nextPoseToleranceTest").boolValue = true;
             sm.ApplyModifiedPropertiesWithoutUndo();
+
+            // The player's feet rig (P31); the root stands on the plane
+            if (!NoRig) PlayerRigSetup.Build(animator, 0f, false);
         }
+
+        /// <summary>"-wwNoRig" on the command line: measure the motion matching without the feet rig.</summary>
+        private static bool NoRig => System.Array.IndexOf(System.Environment.GetCommandLineArgs(), "-wwNoRig") >= 0;
 
         private static void OnPlayModeChanged(PlayModeStateChange change)
         {
@@ -198,8 +208,9 @@ namespace WarriorWoke.EditorTools
             if (_csv != null)
             {
                 Directory.CreateDirectory(OutFolder);
-                File.WriteAllText(Path.Combine(OutFolder, "metrics.csv"), _csv.ToString());
-                Debug.Log($"{Tag} Métricas en {OutFolder}/metrics.csv");
+                string file = NoRig ? "metrics_norig.csv" : "metrics.csv";
+                File.WriteAllText(Path.Combine(OutFolder, file), _csv.ToString());
+                Debug.Log($"{Tag} Métricas en {OutFolder}/{file} ({(NoRig ? "sin" : "con")} el rig de pies)");
             }
             SessionState.SetInt(FailsKey, _fails);
             EditorApplication.ExitPlaymode();
@@ -251,6 +262,13 @@ namespace WarriorWoke.EditorTools
             if (SessionState.GetBool(SweepKey, false)) { yield return Sweep(); yield break; }
 
             yield return Idle();
+            if (!NoRig)
+            {
+                // The rig must act on MxM's pose: a foot standing still in the idle locks
+                var feet = _rig.GetComponentInChildren<GroundContactConstraint>();
+                Check(feet != null && feet.LockCount > 0,
+                      $"El rig de pies actúa sobre la pose de MxM (bloqueos {(feet != null ? feet.LockCount : 0)})");
+            }
             yield return Gait("Caminar", Walk);
             yield return Gait("Correr", Run);
             yield return Gait("Sprint", Sprint);

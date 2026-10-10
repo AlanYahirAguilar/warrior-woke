@@ -8,30 +8,20 @@ using UnityEngine;
 ///  - Ledge grab / hang: both hands on the edge, the feet against the wall, and the body is nudged
 ///    so the animated hands meet the edge (the IK only does the last centimeters).
 ///  - Climb: the hands stay on the edge while the body pulls up, then rest on the top surface.
-///  - On the ground: the feet follow the terrain (steps, curbs) and never sink into it; the pelvis
-///    drops when one foot stands lower (approach of Dynamic Parkour System's foot IK, MIT).
+///  - Mantle and slide: the supporting hand on the top or the floor, nothing through the block.
+/// The feet on the ground (terrain, pelvis, foot lock) are not solved here since phase 3 of the motion
+/// matching plan: GroundContactConstraint does it with Animation Rigging on the final pose (P31), also
+/// while motion matching carries the body, where this IK pass of the controller was blended away (T25).
 /// Called by PlayerAnimator.ApplyIK from OnAnimatorIK. No allocations.
 /// </summary>
 [RequireComponent(typeof(PlayerMovement))]
 public class PlayerContactIK : MonoBehaviour
 {
     [Header("Layers")]
-    [Tooltip("Surfaces the feet stand on.")]
+    [Tooltip("Surfaces under the feet in a vault and under the hands in the slide.")]
     [SerializeField] private LayerMask groundLayer;
     [Tooltip("Walls and ledges the hands and feet touch while hanging.")]
     [SerializeField] private LayerMask wallLayer;
-
-    [Header("Feet on the ground")]
-    [Tooltip("Ray origin above the body's floor when looking for the ground under a foot (m).")]
-    [SerializeField] private float footRayAbove = 0.5f;
-    [Tooltip("How far below the body's floor a foot may reach for lower ground (m).")]
-    [SerializeField] private float footRayBelow = 0.45f;
-    [Tooltip("Largest pelvis drop to reach a lower foothold (m).")]
-    [SerializeField] private float maxPelvisDrop = 0.35f;
-    [Tooltip("Speed of the pelvis adjustment (1/s).")]
-    [SerializeField] private float pelvisSpeed = 10f;
-    [Tooltip("Speed at which the ground IK fades out when the body leaves the ground (1/s).")]
-    [SerializeField] private float groundFadeSpeed = 8f;
 
     [Header("Hang")]
     [Tooltip("Speed (1/s) at which the hanging body is nudged so its hands meet the edge.")]
@@ -40,8 +30,6 @@ public class PlayerContactIK : MonoBehaviour
     private static readonly AvatarIKGoal[] Hands = { AvatarIKGoal.LeftHand, AvatarIKGoal.RightHand };
 
     private PlayerMovement _movement;
-    private float _pelvisOffset;
-    private float _groundWeight;
 
     private void Awake()
     {
@@ -57,18 +45,6 @@ public class PlayerContactIK : MonoBehaviour
         PlayerState state = _movement.StateMachine.CurrentState;
         float progress = _movement.ParkourProgress;
 
-        // A one-tick gap in the ground check (an auto step lifts the body at once) is not leaving the
-        // ground: the FSM ignores it for FallGraceTime, and so do the feet, or they sink for a few frames
-        bool grounded = _movement.IsGrounded || _movement.AirTime < _movement.FallGraceTime;
-        bool onGround = grounded && !_movement.IsRootMotionDriven &&
-                        (state == _movement.IdleState || state == _movement.RunState || state == _movement.SlideState || state == _movement.CrouchState ||
-                         state == _movement.BlockState || state == _movement.LightAttackState || state == _movement.HeavyAttackState);
-        // On the ground the feet are solved at once (a landing must not sink); leaving it fades out,
-        // except into a parkour action, whose own contacts take over the feet immediately
-        _groundWeight = onGround ? 1f
-                      : _movement.IsRootMotionDriven ? 0f
-                      : Mathf.MoveTowards(_groundWeight, 0f, groundFadeSpeed * Time.deltaTime);
-
         if (state == _movement.VaultState)
             SolveVault(animator);
         else if (state == _movement.LedgeGrabState)
@@ -82,11 +58,6 @@ public class PlayerContactIK : MonoBehaviour
 
         if (state == _movement.SlideState)
             SolveHandsOnGround(animator);
-
-        if (_groundWeight > 0f)
-            SolveGroundFeet(animator, _groundWeight);
-        else
-            _pelvisOffset = 0f;
     }
 
     private static void ClearGoals(Animator animator)
@@ -274,22 +245,7 @@ public class PlayerContactIK : MonoBehaviour
         SetGoal(animator, goal, target, weight);
     }
 
-    // ─── Ground ──────────────────────────────────────────────────────────────────
-
-    private void SolveGroundFeet(Animator animator, float weight)
-    {
-        float floorY = animator.transform.position.y; // the model root stands on the body's floor
-        bool leftHit  = FootOnGround(animator, AvatarIKGoal.LeftFoot, animator.leftFeetBottomHeight, floorY, weight, out float leftOffset);
-        bool rightHit = FootOnGround(animator, AvatarIKGoal.RightFoot, animator.rightFeetBottomHeight, floorY, weight, out float rightOffset);
-
-        // Lower the pelvis so the foot on the lower foothold can reach it (never raise it)
-        float drop = 0f;
-        if (leftHit)  drop = Mathf.Min(drop, leftOffset);
-        if (rightHit) drop = Mathf.Min(drop, rightOffset);
-        drop = Mathf.Max(drop, -maxPelvisDrop);
-        _pelvisOffset = Mathf.Lerp(_pelvisOffset, drop, Mathf.Clamp01(pelvisSpeed * Time.deltaTime));
-        animator.bodyPosition += Vector3.up * (_pelvisOffset * weight);
-    }
+    // ─── Mantle and slide ────────────────────────────────────────────────────────
 
     /// <summary>
     /// Mantle: the supporting hand rests on the top while the clip plants it (no floating hand on a
@@ -356,33 +312,6 @@ public class PlayerContactIK : MonoBehaviour
 
     /// <summary>Height of the wrist above a surface the palm rests flat on (m).</summary>
     private const float HandOnGround = 0.05f;
-
-    /// <summary>
-    /// Follows the terrain under the foot (offset from the body's floor) and keeps the sole above the
-    /// ground. On flat ground the animated pose is left as it is.
-    /// </summary>
-    private bool FootOnGround(Animator animator, AvatarIKGoal goal, float bottomHeight, float floorY, float weight, out float offset)
-    {
-        offset = 0f;
-        Vector3 anim = animator.GetIKPosition(goal);
-        Vector3 origin = new Vector3(anim.x, floorY + footRayAbove, anim.z);
-        if (!Physics.Raycast(origin, Vector3.down, out RaycastHit hit, footRayAbove + footRayBelow, groundLayer, QueryTriggerInteraction.Ignore) ||
-            hit.normal.y < 0.6f)
-            return false;
-
-        offset = hit.point.y - floorY;
-        float targetY = Mathf.Max(anim.y + offset, hit.point.y + bottomHeight);
-        SetGoal(animator, goal, new Vector3(anim.x, targetY, anim.z), weight);
-
-        // Align a foot that touches the ground with its slope
-        if (anim.y + offset - hit.point.y < bottomHeight + 0.08f)
-        {
-            Quaternion rotation = Quaternion.FromToRotation(Vector3.up, hit.normal) * animator.GetIKRotation(goal);
-            animator.SetIKRotationWeight(goal, weight);
-            animator.SetIKRotation(goal, rotation);
-        }
-        return true;
-    }
 
     private static void SetGoal(Animator animator, AvatarIKGoal goal, Vector3 position, float weight)
     {

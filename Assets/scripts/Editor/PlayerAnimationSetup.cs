@@ -20,7 +20,8 @@ namespace WarriorWoke.EditorTools
     ///     (VaultCatalogBuilder, P36): one state per clip, with the mocap's Foot IK.
     ///  3. Generates Assets/Characters/Player/PlayerAnimator.controller (IK pass on).
     ///  4. Assigns it to Player.prefab's "Model" Animator (soles on the collider bottom, measured on
-    ///     the idle pose), adds PlayerAnimator / PlayerAnimatorIK / PlayerContactIK.
+    ///     the idle pose), adds PlayerAnimator / PlayerAnimatorIK / PlayerContactIK, and the Animation
+    ///     Rigging rig of the feet and the look (PlayerRigSetup, P31) with PlayerRig.
     ///  5. "Validar Personaje" checks Avatars, material, clips, curves, missing scripts, sampled poses
     ///     and the model's foot contact.
     /// Re-running is safe: the controller keeps its GUID and is rebuilt in place.
@@ -714,6 +715,13 @@ namespace WarriorWoke.EditorTools
                 if (root.GetComponent<PlayerContactIK>() == null)
                     root.AddComponent<PlayerContactIK>();
 
+                // Animation Rigging (P31): feet on the ground and head look on the final pose, driven by
+                // PlayerRig. The motor moves the body after the animation (PlayerMovement.LateUpdate)
+                float rootAboveFloor = model.localPosition.y - (body.center.y - body.height * 0.5f - body.skinWidth);
+                PlayerRigSetup.Build(animator, rootAboveFloor, true);
+                if (root.GetComponent<PlayerRig>() == null)
+                    root.AddComponent<PlayerRig>();
+
                 var playerAnimator = root.GetComponent<PlayerAnimator>();
                 if (playerAnimator == null)
                     playerAnimator = root.AddComponent<PlayerAnimator>();
@@ -751,7 +759,7 @@ namespace WarriorWoke.EditorTools
                 contact.ApplyModifiedPropertiesWithoutUndo();
 
                 PrefabUtility.SaveAsPrefabAsset(root, PrefabPath);
-                Debug.Log($"[PlayerAnimationSetup] Player.prefab: controller asignado, Model a y = {model.localPosition.y:F3} (suela {soleBelowRoot:F3} m bajo su raíz), CharacterController, motion matching, PlayerAnimator, PlayerAnimatorIK y PlayerContactIK presentes.");
+                Debug.Log($"[PlayerAnimationSetup] Player.prefab: controller asignado, Model a y = {model.localPosition.y:F3} (suela {soleBelowRoot:F3} m bajo su raíz), CharacterController, motion matching, PlayerAnimator, PlayerAnimatorIK, PlayerContactIK y el rig de Animation Rigging (PlayerRig) presentes.");
                 return true;
             }
             finally
@@ -883,6 +891,14 @@ namespace WarriorWoke.EditorTools
                 ok &= Check(prefab.GetComponent<PlayerAnimator>() != null, "Player.prefab tiene PlayerAnimator");
                 ok &= Check(prefab.GetComponent<PlayerContactIK>() != null, "Player.prefab tiene PlayerContactIK");
                 ok &= Check(model != null && model.GetComponent<PlayerAnimatorIK>() != null, "'Model' tiene PlayerAnimatorIK");
+                var rigBuilder = model != null ? model.GetComponent<UnityEngine.Animations.Rigging.RigBuilder>() : null;
+                var feet = model != null ? model.GetComponentInChildren<GroundContactConstraint>(true) : null;
+                var look = model != null ? model.GetComponentInChildren<HeadLookConstraint>(true) : null;
+                ok &= Check(rigBuilder != null && rigBuilder.layers.Count == 1 && rigBuilder.layers[0].rig != null &&
+                            feet != null && ((UnityEngine.Animations.Rigging.IRigConstraint)feet).IsValid() &&
+                            look != null && ((UnityEngine.Animations.Rigging.IRigConstraint)look).IsValid() &&
+                            prefab.GetComponent<PlayerRig>() != null,
+                            "Rig de Animation Rigging (P31): RigBuilder con ContactRig, pies (GroundContactConstraint) y mirada (HeadLookConstraint) válidos, y PlayerRig");
                 var body = prefab.GetComponent<CharacterController>();
                 ok &= Check(body != null && prefab.GetComponent<Rigidbody>() == null && prefab.GetComponent<CapsuleCollider>() == null,
                             "El cuerpo es un CharacterController (sin Rigidbody ni CapsuleCollider, P30)");

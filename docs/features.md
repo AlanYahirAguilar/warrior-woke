@@ -30,6 +30,10 @@
 > contacto, hit stop, reacción al daño y una esquiva más corta, probado sobre un muñeco de
 > entrenamiento (P37). `ParkourPlayModeTest` pasó a 531 comprobaciones: 529/531 con el código final
 > (los fallos son intermitentes y cambian entre corridas; F32).
+>
+> **2026-10-09 (fase 3 del motion matching):** un rig de **Animation Rigging** (P31) pone los pies sobre
+> el terreno, bloquea el pie de apoyo y gira la cabeza hacia el objetivo. `ParkourPlayModeTest`:
+> **538/538** (las 531 anteriores más la sección `Rig`).
 
 ---
 
@@ -116,7 +120,8 @@ Dependencias · Consideraciones técnicas · Falta**.
   esprintando (un cuerpo rápido gira más abierto). El Rigidbody está **interpolado**, así que el
   modelo y la cámara se mueven suaves entre pasos de física. Los clips de locomoción se reproducen
   en el sitio (antes Walk y Jog patinaban hasta 2.2 m por ciclo) y, de pie, las suelas tocan el
-  suelo (antes flotaban 11 cm). El IK de pies (`PlayerContactIK`) apoya cada pie en el terreno.
+  suelo (antes flotaban 11 cm). El rig de pies (Animation Rigging, P31; antes el IK de `PlayerContactIK`)
+  apoya cada pie en el terreno y bloquea el de apoyo.
 - **Momentum y peso (2026-10-02, P27):** la velocidad sigue la orientación del cuerpo
   (`AccelerateAlongFacing`): un giro curva la carrera y pierde velocidad según lo cerrado que es, y un
   input muy por detrás frena antes de girar. El giro máximo baja de 720°/s parado a lo que permite ~0.9 g de aceleración lateral
@@ -182,7 +187,7 @@ Dependencias · Consideraciones técnicas · Falta**.
   completa a ritmo natural).
 - **Animaciones:** Jump_Up (LowPoly; su subida ya no queda en la pose: antes el cuerpo visible
   flotaba 0.58 m sobre el collider en el aire), Fall A Loop, Falling To Landing y Fall A Land To Run
-  Forward (DPS). El IK de pies se aplica en el mismo frame del aterrizaje, así los pies no se hunden.
+  Forward (DPS). El rig de pies (P31) se aplica en el mismo frame del aterrizaje, así los pies no se hunden.
 - **Probado:** el salto sube 0.99 m; en el aire las suelas quedan a ≤ 12 cm del collider; salta el
   hueco de 2 m entre plataformas con el impulso de la carrera; caídas de 1 m (ligera), 2 m (media) y
   3 m (fuerte: la velocidad baja al 37 % y a los 1.5 s vuelve a 5 m/s), sin que los pies atraviesen el suelo.
@@ -480,16 +485,18 @@ Dependencias · Consideraciones técnicas · Falta**.
 - **Objetivo:** que el personaje se vea correctamente, anime cada acción y tenga contacto creíble
   con el entorno (GDD pilar 2; el riesgo §28 pide reutilizar animaciones).
 - **Archivos:** `Player/PlayerAnimator.cs`, `Player/PlayerAnimatorIds.cs`, `Player/PlayerAnimatorIK.cs`,
-  `Player/PlayerContactIK.cs`, `Player/ParkourTimings.cs`, `Player/IParkourAnimationProgress.cs`,
+  `Player/PlayerContactIK.cs`, `Player/PlayerRig.cs`, `Player/Rigging/` (`GroundContactConstraint`,
+  `HeadLookConstraint`), `Player/ParkourTimings.cs`, `Player/IParkourAnimationProgress.cs`,
   `Characters/Player/PlayerAnimator.controller`, `Characters/Player/Textures/`,
-  `Characters/Player/Animations/`, `Editor/PlayerAnimationSetup.cs`.
+  `Characters/Player/Animations/`, `Editor/PlayerAnimationSetup.cs`, `Editor/PlayerRigSetup.cs`.
 - **Cómo funciona:** ver `arquitectura.md` §5.10. La FSM avisa cada cambio de estado y
   `PlayerAnimator` hace cross-fade al estado equivalente del Animator; `Speed` mueve el blend
   WalkBackward → Idle → Walk → Jog → Run → Sprint. La locomoción se reproduce en el sitio y la mueve
   el motor (desde el 2026-10-08, en Idle y Run, con el root motion de motion matching mezclado
   encima, P29); el parkour usa root motion warpeado con `MatchTarget` (P22). `PlayerContactIK`
-
-  apoya manos y pies sobre las superficies medidas. 40 estados (14 de vault) y 7 parámetros, con IK Pass.
+  apoya manos y pies del parkour sobre las superficies medidas, y desde el 2026-10-09 un rig de
+  **Animation Rigging** (P31) pone los pies sobre el terreno, bloquea el pie de apoyo y gira la cabeza
+  hacia lo que importa, sobre la pose final. 40 estados (14 de vault) y 7 parámetros, con IK Pass.
 - **Cómo se implementó (2026-09-30):**
   - El personaje se veía sin textura porque Unity no usa las texturas embebidas en un FBX hasta
     extraerlas. Se extrajeron y el material del FBX ahora tiene Base Map y Normal Map.
@@ -512,8 +519,16 @@ Dependencias · Consideraciones técnicas · Falta**.
   hombros, rodillas y dedos fuera de un muro, y manos fuera de un obstáculo (`arquitectura.md` §5.10).
   Revisión visual: hojas de poses de cada clip (`Logs/CombatClips`, `Logs/VaultProbe`) y storyboards del
   juego (`Logs/PlayModeVaults`, `Logs/PlayModeCombat`).
+- **Animation Rigging (P31, 2026-10-09):** el rig `ContactRig` de `Model` corre sobre la pose final con
+  dos constraints propios: `GroundContactConstraint` (cada pie sobre el terreno bajo el talón y bajo la
+  punta, pelvis, pie de apoyo bloqueado y asentado sobre el talón o la bola del pie) y
+  `HeadLookConstraint` (cabeza, cuello y pecho hacia el objetivo, hacia donde se corre o hacia la cámara).
+  El de los pies trabaja sobre las metas de IK Humanoid porque el Foot IK del mocap se aplica después de
+  todo y borraba un IK sobre los huesos. Con la sonda de MxM: patinaje al correr 0.124 → 0.051 m/s y
+  ninguna suela ni punta bajo −0.5 cm (antes hasta −11 cm en strafe); en el jugador, las suelas de pie a
+  0.0 cm (antes 1.7) y ningún pie dentro de los bordillos (`arquitectura.md` §5.10, §7.2).
 - **Falta:** muerte (con F19/F29); free hang y agarre a la carrera (T17); confirmar la licencia de
-  `LowPoly` (T15); Animation Rigging para el apoyo de pies (P31, pospuesta).
+  `LowPoly` (T15); el strafe a la izquierda de 100STYLE todavía patina ~0.2 m/s (T27).
 
 ### F31 — Auto step y step down ✅
 - **Objetivo:** que los escalones y bordillos bajos no detengan la carrera ni conviertan cada
@@ -526,8 +541,8 @@ Dependencias · Consideraciones técnicas · Falta**.
   Ignora pendientes y lo que sea más alto (muros, obstáculos de vault). Al bajar, si el suelo queda
   hasta 0.4 m más abajo, el cuerpo baja con él (step down), salvo durante 0.3 s después de subir un
   escalón. El `GroundChecker` usa un sphere cast (la huella de los pies), así que el borde de un
-  escalón cuenta como suelo. El modelo sigue al cuerpo suavizado en 0.1 s y el IK apoya cada pie en
-  su peldaño.
+  escalón cuenta como suelo. El modelo sigue al cuerpo suavizado en 0.1 s y el rig de pies (P31) apoya
+  cada pie, talón y punta, en su peldaño.
 - **Probado:** sube bordillos de 0.15, 0.25 y 0.35 m sin detenerse ni caer, y baja la escalera
   pisando cada escalón sin pasar a `Fall`, con los pies sin atravesar los peldaños.
 - **Cómo se implementó:** adaptado de `AutoStep` del DPS el 2026-09-30 (P17); step down, sphere cast
@@ -584,6 +599,13 @@ Dependencias · Consideraciones técnicas · Falta**.
   salen de casos que dependen del ritmo del mocap
   (subir los bordillos, la rodilla contra un obstáculo sin vault, el slide anticipado, atrás → adelante;
   MxM no es determinista entre escenarios, T27).
+- **Resultado de la fase 3 del motion matching (2026-10-09):** **538/538** (las 531 más 7 de la sección
+  `Rig`). Con los pies del rig desaparecieron los fallos intermitentes de la Fase 3 (subir bordillos,
+  atrás → adelante).
+- **Sección `Rig` (P31, 2026-10-09):** el rig de Animation Rigging está construido; corriendo, el pie de
+  apoyo se bloquea, no patina (mediana ≤ 0.24 m/s, la métrica de `MocapRetargetProbe`) y ni suelas ni puntas
+  se hunden; subiendo los bordillos ningún pie atraviesa la superficie bajo él; en el aire el rig suelta los
+  pies; y de pie a 50° del muñeco, la cara lo mira.
 - **Consideraciones:** no prueba la cámara con ratón (no existe), enemigos ni la calidad visual de
   las poses; eso se revisa jugando (sección 10). El fallo intermitente de un pie hundido en escalones
   (T24) se resolvió en P27.
@@ -897,11 +919,25 @@ problema, la causa, la solución y el estado (formato del GDD §29 para bugs).
 | 2026-10-05 | (ver `git log`) | Axel | Retroceso y strafe rápidos: búsqueda de otra fuente de mocap (ninguna libre y compatible pasa de ~2 m/s); se agregan las 8 tomas **Rushed** de 100STYLE (atrás ~2.0, de lado ~2.2 m/s) y el convertidor acepta cualquier estilo. Retarget limpio con Foot IK. |
 | 2026-10-08 | (ver `git log`) | Axel | Motion matching, fase 2 (P29, P30, P33): el Player pasa de Rigidbody a **`CharacterController`** y camina, corre y esprinta con MxM mezclado sobre el Animator Controller (`PlayerMxMLocomotion`, motor en `PlayerMovement.LateUpdate`); velocidades del mocap; dos parches más en MxM (T26); parkour y prueba reajustados a las velocidades nuevas (detalle abajo). `ParkourPlayModeTest` 338–341/341 entre corridas (T27). |
 | 2026-10-08/09 | (ver `git log`) | Axel | Fase 3, vault y combate (P36, P37): el vault es un clip de mocap de Kinematica elegido de un catálogo medido (`VaultCatalogBuilder`, `VaultPlanner`) y warpeado por código propio (`arquitectura.md` §5.17); el slide espera a la barra; el combate desarmado sigue fases medidas (`CombatTimings`): jab → cross → gancho y patada de mocap CMU, objetivo, golpe por contacto, hit stop, reacción al daño y esquiva más corta, probado sobre el muñeco de entrenamiento (§5.4). Correcciones encontradas al probar: las acciones ya no reciben el root motion de MxM mientras se desvanece, la palma del mantle se fija al apoyarse, salvaguardas de rodillas, dedos y manos contra muros, step offset 0 solo en el aire o sobre una arista sin apoyo. Detalle en F04, F09–F12, F23 y F32. `ParkourPlayModeTest`: 531 comprobaciones, 529/531 con el código final (fallos intermitentes distintos en cada corrida, F32). |
+| 2026-10-09 | (ver `git log`) | Axel | Motion matching, fase 3 (P31): **Animation Rigging** 6.6.0 con dos constraints propios sobre la pose final (`GroundContactConstraint`: terreno bajo talón y punta, pelvis, pie de apoyo bloqueado y asentado; `HeadLookConstraint`: cabeza, cuello y pecho), armados por `PlayerRigSetup` y gobernados por `PlayerRig`; el IK de suelo sale de `PlayerContactIK`. Los pies trabajan sobre las metas de IK Humanoid porque el Foot IK del mocap se aplica después de todo (detalle abajo). `MxMLocomotionProbe`: suelas resueltas en todos los escenarios y patinaje menor en todos menos el strafe a la izquierda; `ParkourPlayModeTest` **538/538** con la sección `Rig` nueva. |
 | 2026-10-07 | (ver `git log`) | Axel | Motion matching, fase 1 (P29): MxM 2.3.3 embebido con un parche para Unity 6.6 (T26), base de datos horneada desde código (`MxMLocomotionBuilder`: 24 118 poses de Kinematica y 100STYLE, el estilo de strafe separado por tag) y prueba en Play Mode (`MxMLocomotionProbe`). 50/57: velocidades, respuesta, giros de 180°, retroceso y patinaje cumplen; quedan suelas hundidas en giros de 90° y strafe, frenado lento y strafe derecho lento (T27). La base va por Git LFS. El jugador todavía no la usa (detalle abajo). |
 | 2026-10-02 | (sin commit) | Axel | Reconstrucción del movimiento (P28), fases 2–10: animaciones CC0 de Quaternius, herramienta de medición de clips, locomoción direccional con marchas (caminar, strafe, retroceso a 3.5 m/s, agacharse), slide con bucle real, mantle, drop y salto de cornisa, roll de aterrizaje, laboratorio S11 y limpieza (detalle abajo). 341/341 en Play Mode. |
 | 2026-10-02 | (sin commit) | Axel | Reconstrucción del movimiento (P28): auditoría, investigación de repositorios y licencias, arquitectura D aprobada; fase 1: cámara orbital con ratón (P5) y giro limitado por la aceleración lateral (media vuelta que frena y pivota). 304/304 en Play Mode. |
 | 2026-10-02 | (sin commit) | Axel | Calidad de movimiento, segunda fase (P27): momentum en la locomoción, inclinación del torso, slide contextual, aproximación del vault, transiciones sin cambios de velocidad, T24 resuelto y laboratorio de fluidez (detalle abajo). 301/301 en Play Mode, dos corridas. |
 | 2026-10-02 | (sin commit) | Axel | Parkour Obstacle Standard: estándar centralizado, 10 prefabs de obstáculos con validación y gizmos, Parkour Test Area reconstruida con ellos y pruebas de consistencia por posición (detalle abajo). 212/212 en Play Mode. |
+
+### Detalle — motion matching, fase 3: Animation Rigging (2026-10-09)
+
+| Problema | Causa | Solución | Estado |
+|---|---|---|---|
+| Suelas hasta 5.5 cm bajo el suelo en el giro de 90° y 5–11 cm en strafe; el pie de apoyo patinaba 0.12–0.26 m/s (T27) | El mocap retargeteado a Ch45 y la mezcla de poses de MxM; el IK Pass del controller desaparecía mientras MxM llevaba el cuerpo (T25) | Rig de Animation Rigging (`com.unity.animation.rigging` 6.6.0) sobre la pose final con `GroundContactConstraint`: terreno bajo talón y punta, pelvis y pie de apoyo bloqueado | ✅ |
+| El rig no cambiaba nada (la sonda daba lo mismo con y sin él) | El Foot IK Humanoid de los clips de mocap se resuelve después de todas las salidas del Animator y devolvía los pies a su meta | El job mueve las **metas de IK Humanoid** (pies y cuerpo) y llama a `SolveIK`; la reconstrucción del rig sobre el grafo de MxM se probó y no hacía falta | ✅ |
+| Con las metas propias el patinaje subió a ~0.65 m/s | Las metas partían del pie de la pose (FK), así que el rig quitaba la corrección del Foot IK | El pie animado es la meta del Foot IK del clip (viene en el stream con peso 0) según cuánto Foot IK usa la fuente (`FootIKWeight`: MxM y los golpes de CMU) | ✅ |
+| El pie bloqueado se desplazaba con el cuerpo | El cuerpo se mueve después de evaluarse la pose (root motion y motor en `LateUpdate`) | El constraint mide cada frame el movimiento posterior a la evaluación y lo predice en la siguiente | ✅ |
+| Giro de 90° y strafe a la izquierda patinaban más con el bloqueo (0.23 y 0.31 m/s) | El bloqueo sujetaba el tobillo mientras el mocap pivotaba sobre la punta | Se sujeta el punto de apoyo real: el talón, o la bola del pie cuando el talón se levanta (0.06 y 0.20 m/s) | 🟡 strafe izquierda (T27) |
+| Subiendo bordillos, la punta entraba 12 cm en su frente | El suelo se medía solo bajo el tobillo, todavía sobre el piso | También se mide bajo la punta (y donde estará el frame siguiente) y el pie sube a la cima que alcanza | ✅ |
+| En el jugador el pie no llegaba a bloquearse (apoyo a 2.3 cm) y de pie las suelas quedaban a 1.7 cm | El Foot IK del mocap levanta el pie ~1.4 cm sobre la pose con la que se colocó el modelo | Umbral de apoyo de 4 cm y el pie bloqueado se asienta sobre el suelo: suelas a 0.0 cm | ✅ |
+| La cabeza solo seguía el clip | — | `HeadLookConstraint` reparte el giro entre pecho, cuello y cabeza con límites de cuello; `PlayerRig` elige objetivo, dirección de la carrera o cámara | ✅ |
 
 ### Detalle — motion matching, fase 2: motor y locomoción en el jugador (2026-10-08)
 

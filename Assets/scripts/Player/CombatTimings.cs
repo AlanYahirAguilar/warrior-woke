@@ -95,6 +95,12 @@ public static class CombatTimings
     public static readonly AttackData Kick = new AttackData("Kick", KickClip, 1.133f, 1.2f, 0f, HumanBodyBones.RightFoot, 0.15f,
         0.38f, 0.48f, 0.58f, 0.82f, 0.82f, 0.77f, 0.37f, 0.09f);
 
+    /// <summary>
+    /// The attack's clip is mocap (CMU) and plays with the Humanoid Foot IK, as PlayerAnimationSetup sets
+    /// its state; the feet rig takes the clip's foot goals for it (PlayerRig, P31).
+    /// </summary>
+    public static bool UsesFootIK(AttackData attack) => attack == Hook || attack == Kick;
+
     /// <summary>Most light attacks in a chain (GDD §5.6).</summary>
     public const int MaxLightChain = 3;
 

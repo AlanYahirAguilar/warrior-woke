@@ -11,7 +11,8 @@
 > **Fuente de diseño:** [`GDD_Awakened_Warrior.pdf`](../GDD_Awakened_Warrior.pdf) (raíz del repo, GDD final).
 > Si este documento y el GDD no coinciden, manda el GDD, y hay que corregir este documento.
 >
-> Última revisión completa: 2026-10-02. Actualizado el 2026-10-09 (Fase 3: vault, slide y combate).
+> Última revisión completa: 2026-10-02. Actualizado el 2026-10-09 (Fase 3: vault, slide y combate;
+> fase 3 del motion matching: Animation Rigging).
 
 ---
 
@@ -298,7 +299,10 @@ final · SFX y música básica · build para Windows.
    propio (P36: el vault alto bajó a 1.1 m y el medio estándar tiene 0.3 m de fondo); el combate
    desarmado sigue las fases medidas de sus clips, con la cadena jab → cross → gancho, la patada de mocap,
    objetivo, golpe por contacto, hit stop, reacción al daño y una esquiva más corta (P37), probado sobre un
-   muñeco de entrenamiento en el área de pruebas.
+   muñeco de entrenamiento en el área de pruebas. **Fase 3 del motion matching (2026-10-09):** un rig de
+   **Animation Rigging** (P31) pone los pies sobre el terreno (bordillos y escalones incluidos), bloquea el
+   pie de apoyo para que no patine y gira la cabeza hacia el objetivo, hacia donde se corre o hacia la
+   cámara (`arquitectura.md` §5.10).
 3. **No se implementa nada fuera del MVP** sin que antes funcione el MVP (GDD §25 y §28).
 
 ## 11. Cómo abrir el proyecto

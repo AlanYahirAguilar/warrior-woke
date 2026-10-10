@@ -484,8 +484,10 @@ public class PlayerAnimator : MonoBehaviour, IParkourAnimationProgress, ICombatA
 
     private void HandleStepped(float rise)
     {
-        // The body moved up or down the step in one physics tick; the model eases after it
+        // The body moved up or down the step in one move; the model eases after it, from this very frame
+        // (the motor climbs in LateUpdate: waiting for the next Update showed the model up the step for a frame)
         _stepOffset = Mathf.Clamp(_stepOffset - rise, -0.5f, 0.5f);
+        if (_model != null) _model.localPosition = _modelBaseLocalPosition + Vector3.up * _stepOffset;
     }
 
     private void UpdateStepSmoothing()
