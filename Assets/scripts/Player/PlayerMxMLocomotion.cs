@@ -105,6 +105,17 @@ public class PlayerMxMLocomotion : MonoBehaviour
             trajectory.ResetMotion(trajectory.transform.eulerAngles.y);
     }
 
+    /// <summary>
+    /// A teleport or a respawn: forgets the trajectory and goes straight to the idle, so the take that
+    /// was playing (a stop, a run) does not keep moving the body from its new place.
+    /// </summary>
+    public void StopInPlace()
+    {
+        ResetMotion();
+        if (mxm != null && mxm.IsInitialized)
+            mxm.ForceBeginIdle();
+    }
+
     private void Update()
     {
         if (!_hasOutput && mxm != null && mxm.IsInitialized && mxm.MxMPlayableGraph.IsValid())
@@ -124,8 +135,9 @@ public class PlayerMxMLocomotion : MonoBehaviour
         Weight = time > 0f ? Mathf.MoveTowards(Weight, target, Time.deltaTime / time) : target;
 
         // Paused while hidden: no searches and no root motion of its own under an action. On the way
-        // back, the trajectory's past is the body's real motion (an action ending at a run continues
-        // as a run, not as a start from standing)
+        // back, the trajectory's past and its predicted future carry the body's real motion (an action
+        // ending at a run continues as a run, not as a start from standing: with only the past, the
+        // future started at rest and motion matching dropped to ~2 m/s before running again)
         if (Weight > 0f && mxm.IsPaused)
         {
             mxm.UnPause();
@@ -133,7 +145,11 @@ public class PlayerMxMLocomotion : MonoBehaviour
             Vector3 v = _movement != null ? _movement.Velocity : Vector3.zero;
             v.y = 0f;
             if (v.sqrMagnitude > MinCarriedSpeed * MinCarriedSpeed)
+            {
                 trajectory.ForcePastTrajectoryByVelocity(v);
+                float facing = IsOriented ? trajectory.transform.eulerAngles.y : Vector3.SignedAngle(Vector3.forward, v, Vector3.up);
+                trajectory.ForceFutureTrajectoryByVelocity(v, facing);
+            }
         }
         else if (Weight <= 0f && !mxm.IsPaused)
         {

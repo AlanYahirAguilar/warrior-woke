@@ -134,6 +134,7 @@ MonoBehaviour:
   RollSpeedKept: 0.7
   RollRecovery: 0.45
   LedgeRegrabDelay: 0.4
+  vaultCatalog: {fileID: 11400000, guid: cee5355c573b7d946a15deb32a0db8e2, type: 2}
   faceMovementDirection: 1
   turnSmoothTime: 0.12
   sprintTurnSmoothTime: 0.2

@@ -125,9 +125,19 @@ public class PlayerIdleState : PlayerState
 public class PlayerRunState : PlayerState
 {
     private float _vaultIntentAt = -10f;
+    private float _slideIntentAt = -10f;
 
-    /// <summary>Seconds a vault intention waits for the run to reach the obstacle's take-off point.</summary>
-    private const float VaultIntentTime = 0.6f;
+    /// <summary>
+    /// Seconds a slide intention (C pressed before a bar the slide would not reach yet) waits for the
+    /// run to bring the bar within the slide's reach.
+    /// </summary>
+    private const float SlideIntentTime = 0.8f;
+
+    /// <summary>
+    /// Seconds a vault intention waits for the run to reach the obstacle's take-off point (covers the
+    /// look-ahead of ParkourStandard.VaultSpotTime down to the mantle's reach).
+    /// </summary>
+    private const float VaultIntentTime = 0.8f;
 
     public PlayerRunState(PlayerMovement player, PlayerStateMachine stateMachine)
         : base(player, stateMachine) { }
@@ -136,6 +146,7 @@ public class PlayerRunState : PlayerState
     {
         base.Enter();
         _vaultIntentAt = -10f;
+        _slideIntentAt = -10f;
     }
 
     public override void LogicUpdate()
@@ -182,14 +193,39 @@ public class PlayerRunState : PlayerState
         }
 
         // C, by context: a slide when the run has momentum, the surface and the free space for it
-        // (P2, P28); otherwise the body crouches and keeps moving crouched
-        if (player.SlideTriggered && player.IsGrounded)
+        // (P2, P28); otherwise the body crouches and keeps moving crouched. Before a bar the slide would
+        // not reach yet, the intention waits for it, as Space does for a vault
+        bool slideIntent = Time.time - _slideIntentAt < SlideIntentTime;
+        if ((player.SlideTriggered || slideIntent) && player.IsGrounded)
         {
-            player.IsSprint = false;
-            stateMachine.ChangeState(PlayerLedgeDropState.TryStart(player) ? player.LedgeDropState
-                                   : PlayerSlideState.CanStart(player) ? (PlayerState)player.SlideState
-                                   : player.CrouchState);
-            return;
+            if (player.SlideTriggered && PlayerLedgeDropState.TryStart(player))
+            {
+                player.IsSprint = false;
+                stateMachine.ChangeState(player.LedgeDropState);
+                return;
+            }
+            PlayerSlideState.Approach slide = PlayerSlideState.Evaluate(player);
+            if (slide == PlayerSlideState.Approach.Ready)
+            {
+                player.IsSprint = false;
+                _slideIntentAt = -10f;
+                stateMachine.ChangeState(player.SlideState);
+                return;
+            }
+            if (slide == PlayerSlideState.Approach.Approaching)
+            {
+                if (player.SlideTriggered) _slideIntentAt = Time.time;
+            }
+            else if (player.SlideTriggered)
+            {
+                player.IsSprint = false;
+                stateMachine.ChangeState(player.CrouchState);
+                return;
+            }
+            else
+            {
+                _slideIntentAt = -10f; // the momentum or the space went away: the intention is dropped
+            }
         }
 
         // Space: vault, mantle, ledge grab or jump, by context. An action ahead keeps the intention
@@ -340,6 +376,30 @@ public class PlayerSlideState : PlayerState
         // Enough room to get down and slide at least until the body reaches the ground
         float minLength = speed * player.SlideMinTime + 0.5f;
         return player.SlideClearance(Direction(player), minLength) >= minLength;
+    }
+
+    /// <summary>Result of evaluating a slide: none (no momentum, surface or space), ready now, or a bar ahead out of the slide's reach yet.</summary>
+    public enum Approach { None, Ready, Approaching }
+
+    /// <summary>How far short of its reach (m) the slide must meet a bar: it is still sliding, not getting up, when it passes under it.</summary>
+    private const float BarMargin = 0.4f;
+
+    /// <summary>Farthest a bar ahead (m beyond the slide's reach) makes C wait for it instead of sliding now.</summary>
+    private const float BarLookAhead = 3f;
+
+    /// <summary>
+    /// C while running, by context: a slide if the momentum, the surface and the space allow it now;
+    /// "approaching" if there is a bar (or a low ceiling) ahead that this slide would not reach before
+    /// its momentum is spent, so the run keeps the intention and the slide starts where it carries the
+    /// body under it; none otherwise (the caller crouches).
+    /// </summary>
+    public static Approach Evaluate(PlayerMovement player)
+    {
+        if (!CanStart(player)) return Approach.None;
+        float reach = player.SlideReach(player.HorizontalSpeed);
+        if (player.TryFindSlideObstacle(Direction(player), reach + BarLookAhead, out float bar) && bar > reach - BarMargin)
+            return Approach.Approaching;
+        return Approach.Ready;
     }
 
     /// <summary>

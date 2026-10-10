@@ -31,6 +31,14 @@ el Animator.
 | `Armature|Slide_Loop` (UAL2) | Slide_Loop | Slide: **bucle real** (su primer y último frame coinciden) |
 | `Armature|Slide_Exit` (UAL2) | Slide_Exit | Salida del slide a la carrera |
 | `Armature|ClimbUp_1m_RM` (UAL2) | ClimbUp_1m | Mantle: subirse a un bloque de 0.8–1.5 m (root motion, sube 1.02 m y avanza 1.72 m) |
+| `Rig|Punch_Jab` (UAL1) | Punch_Jab | Primer golpe ligero (J1, estado `LightAttack1`): jab de izquierda, el puño sale a 0.59 m |
+| `Rig|Punch_Cross` (UAL1) | Punch_Cross | Segundo golpe ligero (J2, `LightAttack2`): cross de derecha, 0.52 m |
+| `Rig|Hit_Chest` (UAL1) | Hit_Chest | Reacción a un golpe (estado `Hurt`) |
+| `Rig|Hit_Head` (UAL1) | Hit_Head | Reacción a un golpe fuerte, de 20 o más (`HurtHead`) |
 
+Revisados sobre Ch45 y **descartados** para el combate (2026-10-09, **Tools → Warrior Woke → Revisar
+Clips de Combate**): `Melee_Hook` (+ `Melee_Hook_Rec`) es una embestida que deja el cuerpo horizontal en
+el aire (la cabeza baja a 0.8 m) y `Hit_Knockback` es una caída al suelo, no una reacción de pie. El
+tercer golpe ligero y la patada vienen de CMU (`Assets/ThirdParty/CMU`).
 Reemplazan al slide del Dynamic Parkour System, cuyo tramo central se usaba como bucle sin serlo y
 hacía "reiniciarse" el slide. Detalle técnico: `docs/arquitectura.md` §5.10 y §7.1.

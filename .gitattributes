@@ -59,6 +59,7 @@ LightingData.asset binary
 # ("git lfs install" una vez). Ver docs/contexto.md §12.
 Assets/ThirdParty/Kinematica/**/*.[fF][bB][xX] filter=lfs diff=lfs merge=lfs -text
 Assets/ThirdParty/100STYLE/**/*.[fF][bB][xX] filter=lfs diff=lfs merge=lfs -text
+Assets/ThirdParty/CMU/**/*.[fF][bB][xX] filter=lfs diff=lfs merge=lfs -text
 # La base de datos horneada de motion matching (~30 MB de YAML; se regenera con
 # Tools -> Warrior Woke -> Construir Datos de Motion Matching). Ampliación de P35 del 2026-10-07.
 Assets/Data/MxM/*_AnimData.asset filter=lfs diff=lfs merge=lfs -text

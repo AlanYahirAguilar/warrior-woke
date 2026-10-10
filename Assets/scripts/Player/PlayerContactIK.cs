@@ -4,7 +4,7 @@ using UnityEngine;
 /// Physical contact of hands and feet with the environment, solved with the Humanoid IK pass
 /// (decision P22). MatchTarget (PlayerAnimator) brings the body to the right place; this keeps the
 /// limbs on the real surfaces measured by EnvironmentChecker:
-///  - Vault: the left hand rests on the obstacle's top while the clip's LHandCurve says it is planted.
+///  - Vault: each planted palm rests on its plant point on the top while the clip has it down (P36).
 ///  - Ledge grab / hang: both hands on the edge, the feet against the wall, and the body is nudged
 ///    so the animated hands meet the edge (the IK only does the last centimeters).
 ///  - Climb: the hands stay on the edge while the body pulls up, then rest on the top surface.
@@ -36,6 +36,8 @@ public class PlayerContactIK : MonoBehaviour
     [Header("Hang")]
     [Tooltip("Speed (1/s) at which the hanging body is nudged so its hands meet the edge.")]
     [SerializeField] private float hangAlignSpeed = 6f;
+
+    private static readonly AvatarIKGoal[] Hands = { AvatarIKGoal.LeftHand, AvatarIKGoal.RightHand };
 
     private PlayerMovement _movement;
     private float _pelvisOffset;
@@ -101,28 +103,72 @@ public class PlayerContactIK : MonoBehaviour
 
     // ─── Vault ───────────────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Vault (P36): each planted palm rests on its plant point on the top while the clip has it down
+    /// (it eases in just before the plant and out after that hand's release, which the planner brings
+    /// forward when the arm no longer reaches; a second contact only if the planner put it on this
+    /// top), a hand over the top never goes through it, and the feet follow
+    /// the clip's own goals (the mocap's Humanoid Foot IK) but never go inside the obstacle or under
+    /// the floor (a lowered body for a low obstacle bends the stance leg instead).
+    /// </summary>
     private void SolveVault(Animator animator)
     {
-        float weight = Mathf.Clamp01(animator.GetFloat(PlayerAnimatorIds.LHandCurveParam));
-        if (weight > 0f)
-            SetGoal(animator, AvatarIKGoal.LeftHand, _movement.VaultState.HandTarget, weight);
+        PlayerVaultState vault = _movement.VaultState;
+        VaultPlan plan = vault.Plan;
+        VaultVariant v = plan.Variant;
+        if (v == null) return;
+        float t = vault.ClipTime;
+        AvatarIKGoal first = v.RightHand ? AvatarIKGoal.RightHand : AvatarIKGoal.LeftHand;
+        AvatarIKGoal second = v.SecondRightHand ? AvatarIKGoal.RightHand : AvatarIKGoal.LeftHand;
+        float w1 = ContactWeight(t, v.Plant, plan.PlantRelease);
+        float w2 = plan.HasSecondPlant ? ContactWeight(t, v.SecondPlant, plan.SecondRelease) : 0f;
+        foreach (AvatarIKGoal goal in Hands)
+        {
+            if (goal == second && w2 > 0f && (second != first || w2 >= w1))
+                SetGoal(animator, goal, plan.SecondPlantPoint, w2);
+            else if (goal == first && w1 > 0f)
+                SetGoal(animator, goal, plan.PlantPoint, w1);
+            else
+                HandAboveTop(animator, goal, plan);
+        }
 
         FootOverObstacle(animator, AvatarIKGoal.LeftFoot, animator.leftFeetBottomHeight);
         FootOverObstacle(animator, AvatarIKGoal.RightFoot, animator.rightFeetBottomHeight);
     }
 
-    /// <summary>A foot passing over the obstacle (or about to) is kept above its top surface.</summary>
+    /// <summary>Seconds the palm takes to settle on the top before the plant and to leave it after the release.</summary>
+    private const float ContactEase = 0.08f;
+
+    private static float ContactWeight(float t, float plant, float release) =>
+        Mathf.InverseLerp(plant - ContactEase, plant, t) * (1f - Mathf.InverseLerp(release, release + ContactEase, t));
+
+    /// <summary>A free hand over the top is kept on or above its surface.</summary>
+    private static void HandAboveTop(Animator animator, AvatarIKGoal goal, VaultPlan plan)
+    {
+        Vector3 hand = animator.GetIKPosition(goal);
+        float along = Vector3.Dot(hand - plan.FrontEdge, plan.Direction);
+        float minY = plan.TopY + ParkourTimings.WristAboveSurface;
+        if (along >= 0f && along <= plan.Depth && hand.y < minY)
+            SetGoal(animator, goal, new Vector3(hand.x, minY, hand.z), 1f);
+    }
+
+    /// <summary>
+    /// A foot at the clip's goal (weight 1: the mocap's own Foot IK), lifted onto the top while it is
+    /// over the obstacle (or about to be), so a leg never cuts through it, and never below the surface
+    /// under it.
+    /// </summary>
     private void FootOverObstacle(Animator animator, AvatarIKGoal goal, float bottomHeight)
     {
-        VaultInfo vault = _movement.PendingVault;
+        VaultPlan plan = _movement.VaultState.Plan;
         Vector3 anim = animator.GetIKPosition(goal);
-        float along = Vector3.Dot(anim - vault.FrontPoint, vault.Direction); // > 0: past the front face
-        if (along < -0.2f || along > vault.Depth + 0.1f) return;
-
-        float minY = vault.TopY + bottomHeight + 0.03f;
-        if (anim.y >= minY) return;
-        float weight = along >= 0f ? 1f : Mathf.InverseLerp(-0.2f, 0f, along);
-        SetGoal(animator, goal, new Vector3(anim.x, minY, anim.z), weight);
+        float minY = float.NegativeInfinity;
+        float along = Vector3.Dot(anim - plan.FrontEdge, plan.Direction); // > 0: past the front face
+        if (along >= -0.15f && along <= plan.Depth + 0.1f)
+            minY = plan.TopY + bottomHeight + 0.03f;
+        Vector3 origin = new Vector3(anim.x, Mathf.Max(anim.y, plan.TopY) + 0.3f, anim.z);
+        if (Physics.Raycast(origin, Vector3.down, out RaycastHit hit, 3f, groundLayer, QueryTriggerInteraction.Ignore))
+            minY = Mathf.Max(minY, hit.point.y + bottomHeight);
+        SetGoal(animator, goal, new Vector3(anim.x, Mathf.Max(anim.y, minY), anim.z), 1f);
     }
 
     // ─── Ledge ───────────────────────────────────────────────────────────────────
@@ -254,23 +300,33 @@ public class PlayerContactIK : MonoBehaviour
         LedgeInfo top = _movement.CurrentLedge;
         float plant = Mathf.InverseLerp(ParkourTimings.MantleHandPlant, ParkourTimings.MantleHandPlant + 0.05f, progress)
                     * (1f - Mathf.InverseLerp(ParkourTimings.MantleHandRelease - 0.05f, ParkourTimings.MantleHandRelease, progress));
-        foreach (AvatarIKGoal goal in new[] { AvatarIKGoal.LeftHand, AvatarIKGoal.RightHand })
+        foreach (AvatarIKGoal goal in Hands)
         {
             Vector3 hand = animator.GetIKPosition(goal);
-            if (Vector3.Dot(hand - top.Edge, top.Normal) > -0.03f) continue; // not over the top
             float y = top.TopY + ParkourTimings.WristAboveSurface;
             if (goal == AvatarIKGoal.LeftHand && plant > 0f)
-                SetGoal(animator, goal, new Vector3(hand.x, y, hand.z), plant);  // the supporting hand
-            else if (hand.y < y)
+            {
+                // The supporting palm on its point of the top from the moment it plants. The body's warp
+                // toward the measured top runs on until MantleHandMatchEnd (spread out so it does not
+                // pop in a 0.67 s clip), and without this the "planted" palm slid onto the top while it
+                // did (still at the edge at 0.35)
+                SetGoal(animator, goal, _movement.MantleState.HandTarget, plant);
+                continue;
+            }
+            if (Vector3.Dot(hand - top.Edge, top.Normal) > -0.03f) continue; // not over the top
+            if (hand.y < y)
                 SetGoal(animator, goal, new Vector3(hand.x, y, hand.z), 1f);      // never through the top
         }
-        foreach ((AvatarIKGoal goal, float bottom) in new[] { (AvatarIKGoal.LeftFoot, animator.leftFeetBottomHeight), (AvatarIKGoal.RightFoot, animator.rightFeetBottomHeight) })
-        {
-            Vector3 foot = animator.GetIKPosition(goal);
-            if (Vector3.Dot(foot - top.Edge, top.Normal) > 0.05f) continue;    // still in front of the face
-            float minY = top.TopY + bottom + 0.02f;
-            if (foot.y < minY) SetGoal(animator, goal, new Vector3(foot.x, minY, foot.z), 1f);
-        }
+        FootAboveTop(animator, AvatarIKGoal.LeftFoot, animator.leftFeetBottomHeight, top);
+        FootAboveTop(animator, AvatarIKGoal.RightFoot, animator.rightFeetBottomHeight, top);
+    }
+
+    private static void FootAboveTop(Animator animator, AvatarIKGoal goal, float bottom, LedgeInfo top)
+    {
+        Vector3 foot = animator.GetIKPosition(goal);
+        if (Vector3.Dot(foot - top.Edge, top.Normal) > 0.05f) return;    // still in front of the face
+        float minY = top.TopY + bottom + 0.02f;
+        if (foot.y < minY) SetGoal(animator, goal, new Vector3(foot.x, minY, foot.z), 1f);
     }
 
     /// <summary>
@@ -282,7 +338,7 @@ public class PlayerContactIK : MonoBehaviour
     private void SolveHandsOnGround(Animator animator)
     {
         float support = 0f;
-        foreach (AvatarIKGoal goal in new[] { AvatarIKGoal.LeftHand, AvatarIKGoal.RightHand })
+        foreach (AvatarIKGoal goal in Hands)
         {
             Vector3 anim = animator.GetIKPosition(goal);
             if (!Physics.Raycast(anim + Vector3.up * 0.4f, Vector3.down, out RaycastHit hit, 0.8f, groundLayer, QueryTriggerInteraction.Ignore))

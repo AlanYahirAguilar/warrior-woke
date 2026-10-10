@@ -1,5 +1,7 @@
 using System.Collections;
 using System.Collections.Generic;
+using System.IO;
+using System.Text;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
@@ -13,9 +15,13 @@ namespace WarriorWoke.EditorTools
     /// adds a virtual keyboard and drives the real input path (Input System → PlayerInputHandler →
     /// FSM). Besides the state flow, it measures physical contact on the animated skeleton: hands on
     /// the obstacle and on the ledge, hands and feet never inside walls or the floor, soles on the
-    /// ground, facing the wall, landing weight and momentum (docs/features.md F32).
+    /// ground, facing the wall, landing weight and momentum (docs/features.md F32). The vaults are
+    /// also drawn as storyboards of the real game (Logs/PlayModeVaults) for visual review, and the
+    /// combat's impacts on the training dummy as a sheet (Logs/PlayModeCombat).
+    /// The whole run is bounded by TimeoutSeconds of real time.
     /// Menu: Tools → Warrior Woke → Probar Personaje en Play Mode.
-    /// Batch: -executeMethod WarriorWoke.EditorTools.ParkourPlayModeTest.RunBatch (do not pass -quit).
+    /// Batch: -executeMethod WarriorWoke.EditorTools.ParkourPlayModeTest.RunBatch (do not pass -quit);
+    /// add "-wwSections Vaults,Slide" to run only some sections.
     /// </summary>
     [InitializeOnLoad]
     internal static class ParkourPlayModeTest
@@ -42,6 +48,8 @@ namespace WarriorWoke.EditorTools
         private static PlayerMovement _movement;
         private static Animator       _animator;
         private static Transform      _handL, _handR, _footL, _footR, _head;
+        private static Transform      _hips, _kneeL, _kneeR, _toeL, _toeR, _armL, _armR;
+        private static double         _startedAt;
         private static string         _feetDiag = "";
         private static PlayerAnimator _playerAnimator;
         private static Vector3        _stepPos;
@@ -49,6 +57,9 @@ namespace WarriorWoke.EditorTools
 
         // Highest speed the body may show between two samples: anything faster is a visible teleport
         private const float TeleportSpeed = 13f;
+
+        // Real seconds the whole Play Mode test may take before it is stopped as failed
+        private const double TimeoutSeconds = 1500.0;
 
         static ParkourPlayModeTest()
         {
@@ -80,6 +91,7 @@ namespace WarriorWoke.EditorTools
                 Routines.Clear();
                 Routines.Push(Run());
                 _waitUntil = 0f;
+                _startedAt = EditorApplication.timeSinceStartup;
                 EditorApplication.update += Tick;
             }
             else if (change == PlayModeStateChange.EnteredEditMode)
@@ -94,6 +106,13 @@ namespace WarriorWoke.EditorTools
         private static void Tick()
         {
             if (!EditorApplication.isPlaying || Routines.Count == 0) return;
+            if (EditorApplication.timeSinceStartup - _startedAt > TimeoutSeconds)
+            {
+                Debug.LogError($"{Tag} TIEMPO AGOTADO: la prueba superó {TimeoutSeconds:F0} s reales y se detiene");
+                _fails++;
+                Finish();
+                return;
+            }
             if (Time.time < _waitUntil) return;
 
             // Runs nested coroutines: a yielded IEnumerator runs to completion before its parent continues.
@@ -158,22 +177,46 @@ namespace WarriorWoke.EditorTools
             _footL = _animator.GetBoneTransform(HumanBodyBones.LeftFoot);
             _footR = _animator.GetBoneTransform(HumanBodyBones.RightFoot);
             _head  = _animator.GetBoneTransform(HumanBodyBones.Head);
+            _hips  = _animator.GetBoneTransform(HumanBodyBones.Hips);
+            _kneeL = _animator.GetBoneTransform(HumanBodyBones.LeftLowerLeg);
+            _kneeR = _animator.GetBoneTransform(HumanBodyBones.RightLowerLeg);
+            _toeL  = _animator.GetBoneTransform(HumanBodyBones.LeftToes);
+            _toeR  = _animator.GetBoneTransform(HumanBodyBones.RightToes);
+            _armL  = _animator.GetBoneTransform(HumanBodyBones.LeftUpperArm);
+            _armR  = _animator.GetBoneTransform(HumanBodyBones.RightUpperArm);
             _playerAnimator = _movement.GetComponent<PlayerAnimator>();
             _movement.StateChanged += s => Visited.Add(s);
 
             yield return Spawn();
-            yield return Locomotion();
-            yield return JumpAndLandings();
-            yield return Vaults();
-            yield return Slide();
-            yield return LedgeGrab();
-            yield return Climb();
-            yield return Combined();
-            yield return Flow();
-            yield return Mantles();
-            yield return Gaits();
-            yield return DropAndJumpOff();
-            yield return Combat();
+            if (Runs("Locomotion"))     yield return Locomotion();
+            if (Runs("JumpAndLandings")) yield return JumpAndLandings();
+            if (Runs("Vaults"))         yield return Vaults();
+            if (Runs("Slide"))          yield return Slide();
+            if (Runs("LedgeGrab"))      yield return LedgeGrab();
+            if (Runs("Climb"))          yield return Climb();
+            if (Runs("Combined"))       yield return Combined();
+            if (Runs("Flow"))           yield return Flow();
+            if (Runs("Mantles"))        yield return Mantles();
+            if (Runs("Gaits"))          yield return Gaits();
+            if (Runs("DropAndJumpOff")) yield return DropAndJumpOff();
+            if (Runs("Combat"))         yield return Combat();
+        }
+
+        /// <summary>
+        /// Sections to run: all, or only those listed after -wwSections on the command line
+        /// (comma-separated, e.g. "-wwSections Vaults,Flow"), to iterate on one mechanic in batch.
+        /// </summary>
+        private static bool Runs(string section)
+        {
+            string[] args = System.Environment.GetCommandLineArgs();
+            for (int i = 0; i < args.Length - 1; i++)
+            {
+                if (args[i] != "-wwSections") continue;
+                foreach (string name in args[i + 1].Split(','))
+                    if (name.Trim() == section) return true;
+                return false;
+            }
+            return true;
         }
 
         private static IEnumerator Spawn()
@@ -253,9 +296,20 @@ namespace WarriorWoke.EditorTools
             // Sprint (+40 %)
             yield return Teleport(Corridor(5f));
             Keys(Key.LeftShift, Key.W);
-            yield return 1.4f;
-            // The mocap's sprint takes run at 4.4–5.4 m/s (PlayerMxMLocomotion slows the fastest down to 88 %, T27)
-            Check(Mathf.Abs(Speed - _movement.SprintSpeed) < 0.6f, $"Sprint a {Speed:F2} m/s (SprintSpeed {_movement.SprintSpeed})");
+            yield return 1.0f;
+            // The mocap's sprint takes run at 4.4–5.4 m/s (PlayerMxMLocomotion slows the fastest down to 88 %, T27).
+            // Its start-from-standing take varies between runs (motion matching is not deterministic across
+            // scenarios: 3.8–5.3 m/s at 1.4 s), so the check is the speed the sprint holds from 1 to 2.4 s
+            float sprintSum = 0f;
+            string sprintSeries = "";
+            for (int i = 0; i < 70; i++)
+            {
+                sprintSum += Speed;
+                if (i % 10 == 0) sprintSeries += $"{Speed:F1} ";
+                yield return 0.02f;
+            }
+            float sprintMean = sprintSum / 70f;
+            Check(Mathf.Abs(sprintMean - _movement.SprintSpeed) < 0.6f, $"Sprint a {sprintMean:F2} m/s de media (SprintSpeed {_movement.SprintSpeed}; de 1.0 a 2.4 s cada 0.2 s: {sprintSeries.Trim()})");
             Keys();
             yield return 1.2f;
 
@@ -264,10 +318,16 @@ namespace WarriorWoke.EditorTools
             Visited.Clear();
             Keys(Key.W);
             // 12 m at the run of P33 (3.4 m/s) plus the start from standing
-            for (float t = 0f; t < 5f && _movement.transform.position.z > -16f; t += 0.02f) yield return 0.02f;
+            string fallDiag = "";
+            for (float t = 0f; t < 5f && _movement.transform.position.z > -16f; t += 0.02f)
+            {
+                if (fallDiag.Length == 0 && Current == _movement.FallState)
+                    fallDiag = $"; cae en z = {_movement.transform.position.z:F2}, pies {_movement.FeetY:F2}, suelo debajo {GroundUnder(_movement.transform.position):F2}, vy {_movement.Velocity.y:F2}";
+                yield return 0.02f;
+            }
             Keys();
             Check(_movement.transform.position.z < -15.5f && !Visited.Contains(_movement.FallState),
-                  $"Sube los bordillos de 0.15–0.35 m sin detenerse ni caer (z = {_movement.transform.position.z:F2})");
+                  $"Sube los bordillos de 0.15–0.35 m sin detenerse ni caer (z = {_movement.transform.position.z:F2}{fallDiag})");
             yield return 0.6f;
 
             yield return Teleport(new Vector3(ParkourTestCircuitBuilder.LocomotionX, 1.0f + OriginAboveFeet, -44.5f));
@@ -314,6 +374,7 @@ namespace WarriorWoke.EditorTools
             yield return Tap(Key.Space, Key.LeftShift, Key.W);
             for (float t = 0f; t < 1.5f && !(_movement.IsGrounded && Current != _movement.JumpState); t += 0.02f) yield return 0.02f;
             Keys();
+            yield return 0.2f; // the ground check reports ground up to 0.15 m below the feet: let the body settle
             Check(_movement.transform.position.z < -14f && Mathf.Abs(_movement.FeetY - 1.0f) < 0.08f,
                   $"Salta el hueco de 2 m con el impulso de la carrera (z = {_movement.transform.position.z:F2}, pies a {_movement.FeetY:F2} m)");
             yield return 0.8f;
@@ -371,179 +432,483 @@ namespace WarriorWoke.EditorTools
             yield return 0.8f;
         }
 
-        // ── S02–S04: each standard vault from several positions, speeds and angles ─────────────────
+        // ── S02–S04: vaults by context (P36) ────────────────────────────────────────────────────────
+        // Each standard vault from a standstill, walking, running and sprinting, from several distances,
+        // lateral offsets and angles, and other depths; and what must NOT be vaulted (too high, too deep
+        // for a slow approach, too close or too far standing, a blocked landing): the action the geometry
+        // allows happens instead and nothing goes through the obstacle. Every vault is measured on the
+        // animated skeleton and drawn in a storyboard (Logs/PlayModeVaults) for visual review.
         private static IEnumerator Vaults()
         {
+            VaultCatalog catalog = _movement.VaultCatalog;
+            int clips = catalog != null && catalog.Variants != null ? catalog.Variants.Length : 0;
+            if (!Check(clips > 0, $"El Player tiene el catálogo de vaults ({clips} clips)")) yield break;
+            Directory.CreateDirectory(VaultSheetFolder);
+
             float front = ParkourTestCircuitBuilder.VaultFront;
-            var low  = ParkourStandard.Spec(ParkourObstacleType.LowVault);
-            var mid  = ParkourStandard.Spec(ParkourObstacleType.MediumVault);
-            var high = ParkourStandard.Spec(ParkourObstacleType.HighVault);
+            ParkourObstacleSpec lowSpec  = ParkourStandard.Spec(ParkourObstacleType.LowVault);
+            ParkourObstacleSpec midSpec  = ParkourStandard.Spec(ParkourObstacleType.MediumVault);
+            ParkourObstacleSpec highSpec = ParkourStandard.Spec(ParkourObstacleType.HighVault);
             float lowX = ParkourTestCircuitBuilder.LowVaultX, midX = ParkourTestCircuitBuilder.MediumVaultX, highX = ParkourTestCircuitBuilder.HighVaultX;
+            var low  = new Box(lowX, front, lowSpec.Height, lowSpec.Depth);
+            var mid  = new Box(midX, front, midSpec.Height, midSpec.Depth);
+            var deep = new Box(midX, ParkourTestCircuitBuilder.MediumDeepFront, midSpec.Height, ParkourTestCircuitBuilder.MediumDeepDepth);
+            var high = new Box(highX, front, highSpec.Height, highSpec.Depth);
 
+            // Medium vault, the reference case: every approach
+            var sheet = new VaultSheet("1_medio", 12);
             VaultResults.Clear();
-            yield return VaultCase(lowX, front, low.Height, low.Depth, false, "bajo corriendo");
-            yield return VaultCase(lowX, front, low.Height, low.Depth, false, "bajo corriendo, 1.2 m a la izquierda", lateral: 1.2f);
-            yield return VaultCase(lowX, front, low.Height, low.Depth, false, "bajo corriendo en ángulo de 20°", yaw: 20f);
-            yield return VaultCase(lowX, front, low.Height, low.Depth, true, "bajo esprintando");
-            CheckConsistency("bajo");
-            yield return VaultCase(lowX, front, low.Height, low.Depth, false, "bajo desde parado", standing: true);
-            yield return VaultCase(lowX, front, low.Height, low.Depth, false, "bajo arrancando a caminar", walk: true);
-
-            // Out of range (2 m from the face): Space is a jump, nothing is triggered by the raycast alone
-            yield return Teleport(new Vector3(lowX, Floor + OriginAboveFeet, front + 2f));
-            Visited.Clear();
-            yield return Tap(Key.Space);
-            yield return 1.2f;
-            Check(!Visited.Contains(_movement.VaultState) && Visited.Contains(_movement.JumpState),
-                  "Vault bajo fuera de alcance (2 m): Espacio salta, no dispara el vault");
-
-            VaultResults.Clear();
-            yield return VaultCase(midX, front, mid.Height, mid.Depth, false, "medio corriendo");
-            yield return VaultCase(midX, front, mid.Height, mid.Depth, false, "medio corriendo, 1.2 m a la derecha", lateral: -1.2f);
-            yield return VaultCase(midX, front, mid.Height, mid.Depth, false, "medio corriendo en ángulo de 20°", yaw: -20f);
-            yield return VaultCase(midX, front, mid.Height, mid.Depth, true, "medio esprintando");
+            yield return VaultCase(sheet, mid, Gait.Stand, "medio desde parado a 1.5 m", standAt: 1.5f);
+            yield return VaultCase(sheet, mid, Gait.Walk, "medio caminando", pressAt: 2.0f);
+            yield return VaultCase(sheet, mid, Gait.Run, "medio corriendo", pressAt: 2.4f);
+            yield return VaultCase(sheet, mid, Gait.Run, "medio corriendo, Espacio anticipado (3.2 m)", pressAt: 3.2f);
+            yield return VaultCase(sheet, mid, Gait.Run, "medio corriendo, Espacio tardío (1.4 m)", pressAt: 1.4f);
+            yield return VaultCase(sheet, mid, Gait.Run, "medio corriendo, 1.2 m a la derecha", pressAt: 2.4f, lateral: -1.2f);
+            yield return VaultCase(sheet, mid, Gait.Run, "medio corriendo en ángulo de 20°", pressAt: 2.3f, yaw: -20f);
+            yield return VaultCase(sheet, mid, Gait.Run, "medio corriendo en ángulo de 35°", pressAt: 2.0f, yaw: 35f);
+            yield return VaultCase(sheet, mid, Gait.Sprint, "medio esprintando", pressAt: 2.8f);
             CheckConsistency("medio");
-            yield return VaultCase(midX, front, mid.Height, mid.Depth, false, "medio desde parado a 1.0 m", standing: true, standDistance: 1.0f);
-            yield return VaultCase(midX, ParkourTestCircuitBuilder.MediumDeepFront, mid.Height, ParkourTestCircuitBuilder.MediumDeepDepth, false, "medio de 1.4 m de fondo");
+            yield return VaultCase(sheet, deep, Gait.Run, "medio de 1.4 m de fondo corriendo", pressAt: 2.4f);
+            yield return VaultCase(sheet, deep, Gait.Sprint, "medio de 1.4 m de fondo esprintando", pressAt: 2.8f);
+            GameObject temp = TempBox(new Box(midX, -15f, midSpec.Height, 0.6f));
+            yield return VaultCase(sheet, new Box(midX, -15f, midSpec.Height, 0.6f), Gait.Run, "medio de 0.6 m de fondo corriendo", pressAt: 2.4f);
+            Object.Destroy(temp);
+            sheet.Save();
 
+            // Low vault
+            sheet = new VaultSheet("2_bajo", 6);
             VaultResults.Clear();
-            yield return VaultCase(highX, front, high.Height, high.Depth, false, "alto corriendo");
-            yield return VaultCase(highX, front, high.Height, high.Depth, false, "alto corriendo, 1.2 m a la izquierda", lateral: 1.2f);
-            yield return VaultCase(highX, front, high.Height, high.Depth, true, "alto esprintando");
+            yield return VaultCase(sheet, low, Gait.Stand, "bajo desde parado a 1.0 m", standAt: 1.0f);
+            yield return VaultCase(sheet, low, Gait.Walk, "bajo caminando", pressAt: 1.4f);
+            yield return VaultCase(sheet, low, Gait.Run, "bajo corriendo", pressAt: 2.2f);
+            yield return VaultCase(sheet, low, Gait.Run, "bajo corriendo, 1.2 m a la izquierda", pressAt: 2.2f, lateral: 1.2f);
+            yield return VaultCase(sheet, low, Gait.Run, "bajo corriendo en ángulo de 20°", pressAt: 2.2f, yaw: 20f);
+            yield return VaultCase(sheet, low, Gait.Sprint, "bajo esprintando", pressAt: 2.8f);
+            CheckConsistency("bajo");
+            sheet.Save();
+
+            // High vault: only a run's momentum carries the body over 1.1 m (no slow clip reaches it)
+            sheet = new VaultSheet("3_alto", 3);
+            VaultResults.Clear();
+            yield return VaultCase(sheet, high, Gait.Run, "alto corriendo", pressAt: 2.4f);
+            yield return VaultCase(sheet, high, Gait.Run, "alto corriendo, 1.2 m a la izquierda", pressAt: 2.4f, lateral: 1.2f);
+            yield return VaultCase(sheet, high, Gait.Sprint, "alto esprintando", pressAt: 2.8f);
             CheckConsistency("alto");
-            yield return VaultCase(highX, front, high.Height, high.Depth, false, "alto desde parado a 1.0 m", standing: true, standDistance: 1.0f);
+            sheet.Save();
 
-            // Too close for a tall vault's take-off (< 0.91 m): Space jumps instead of cutting through it
-            yield return Teleport(new Vector3(highX, Floor + OriginAboveFeet, front + 0.6f));
-            Visited.Clear();
-            yield return Tap(Key.Space);
-            yield return 1.4f;
-            Check(!Visited.Contains(_movement.VaultState) && Visited.Contains(_movement.JumpState),
-                  "Vault alto pegado al obstáculo (0.6 m): sin espacio para el despegue, salta en vez de atravesarlo");
+            // Not vaulted: no clip fits, so the geometry's other action happens (or the jump), never a vault
+            yield return NoVaultCase(high, Gait.Stand, "alto desde parado a 1.5 m (ningún clip lento llega a 1.1 m)", standAt: 1.5f, expect: _movement.JumpState);
+            yield return NoVaultCase(high, Gait.Walk, "alto caminando", pressAt: 2.0f, expect: _movement.JumpState);
+            yield return NoVaultCase(mid, Gait.Stand, "medio pegado al obstáculo (0.5 m: sin espacio para la carrera del clip)", standAt: 0.5f, expect: _movement.JumpState);
+            yield return NoVaultCase(mid, Gait.Stand, "medio desde parado lejos (3.0 m: más de dos pasos)", standAt: 3.0f, expect: _movement.JumpState);
+            yield return NoVaultCase(deep, Gait.Walk, "medio de 1.4 m de fondo caminando: sube con mantle", pressAt: 0.9f, expect: _movement.MantleState);
 
-            // Above the vault range (1.6 m, in the barrier band, on layer Obstacle): Space jumps.
-            // Built only for this check and removed afterwards, so the scene keeps standard obstacles only.
-            GameObject tall = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            tall.layer = LayerMask.NameToLayer("Obstacle");
-            tall.transform.SetPositionAndRotation(new Vector3(highX, 0.8f, -20.25f), Quaternion.identity);
-            tall.transform.localScale = new Vector3(4f, 1.6f, 0.5f);
-            Physics.SyncTransforms();
-            yield return Teleport(new Vector3(highX, Floor + OriginAboveFeet, -20f + 0.9f));
-            Visited.Clear();
-            yield return Tap(Key.Space);
-            yield return 1.4f;
-            Check(!Visited.Contains(_movement.VaultState) && !Visited.Contains(_movement.LedgeGrabState) && Visited.Contains(_movement.JumpState),
-                  "Obstáculo de 1.6 m (fuera del rango del vault): salta en vez de hacer vault");
-            Object.Destroy(tall);
+            var tooHigh = new Box(highX, -15f, 1.2f, 0.3f);
+            temp = TempBox(tooHigh);
+            yield return NoVaultCase(tooHigh, Gait.Run, "de 1.2 m corriendo (más alto que el vault)", pressAt: 2.4f, expect: null);
+            Object.Destroy(temp);
+
+            var walkDeep = new Box(midX, -15f, midSpec.Height, 0.6f);
+            temp = TempBox(walkDeep);
+            yield return NoVaultCase(walkDeep, Gait.Walk, "medio de 0.6 m de fondo caminando (ningún clip lento lo cubre)", pressAt: 2.0f, expect: _movement.JumpState);
+            Object.Destroy(temp);
+
+            // A wall right behind the medium vault: no room to land
+            var wall = new Box(midX, mid.BackZ - 0.6f, 3f, 2f);
+            temp = TempBox(wall);
+            yield return NoVaultCase(mid, Gait.Run, "medio con un muro detrás (aterrizaje bloqueado)", pressAt: 2.4f, expect: null, extra: wall);
+            Object.Destroy(temp);
             yield return 0.5f;
         }
 
-        private struct VaultResult { public string Label; public float HandError, LandingBehind; }
+        private enum Gait { Stand, Walk, Run, Sprint }
+
+        private static Key[] GaitKeys(Gait gait) =>
+            gait == Gait.Walk   ? new[] { Key.LeftCtrl, Key.W } :
+            gait == Gait.Run    ? new[] { Key.W } :
+            gait == Gait.Sprint ? new[] { Key.LeftShift, Key.W } : new Key[0];
+
+        /// <summary>A box obstacle of a vault lane: its approach face at FrontZ, facing +Z (the lanes run toward −Z).</summary>
+        private readonly struct Box
+        {
+            public readonly float LaneX, FrontZ, Height, Depth;
+            public Box(float laneX, float frontZ, float height, float depth) { LaneX = laneX; FrontZ = frontZ; Height = height; Depth = depth; }
+            public float BackZ => FrontZ - Depth;
+
+            /// <summary>How deep (m) a point is inside the box (≤ 0: outside).</summary>
+            public float Inside(Vector3 p) => Mathf.Min(Mathf.Min(FrontZ - p.z, p.z - BackZ),
+                                                        Mathf.Min(Floor + Height - p.y, ParkourStandard.PrefabWidth * 0.5f - Mathf.Abs(p.x - LaneX)));
+        }
+
+        /// <summary>A box on layer Obstacle, built only for one check and removed afterwards (the scene keeps standard obstacles only).</summary>
+        private static GameObject TempBox(Box o)
+        {
+            GameObject go = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            go.name = "PruebaTemporal";
+            go.layer = LayerMask.NameToLayer("Obstacle");
+            go.transform.SetPositionAndRotation(new Vector3(o.LaneX, Floor + o.Height * 0.5f, o.FrontZ - o.Depth * 0.5f), Quaternion.identity);
+            go.transform.localScale = new Vector3(ParkourStandard.PrefabWidth, o.Height, o.Depth);
+            Physics.SyncTransforms();
+            return go;
+        }
+
+        /// <summary>Deepest point of the body inside the obstacle (m): soles, toes, knees, hips and hands.</summary>
+        private static float BodyInside(Box o, out string part)
+        {
+            float worst = float.MinValue;
+            string worstPart = "";
+            void Probe(Vector3 p, string name)
+            {
+                float d = o.Inside(p);
+                if (d > worst) { worst = d; worstPart = name; }
+            }
+            Probe(_footL.position + Vector3.down * _animator.leftFeetBottomHeight, "suela izq");
+            Probe(_footR.position + Vector3.down * _animator.rightFeetBottomHeight, "suela der");
+            if (_toeL != null) Probe(_toeL.position, "dedos izq");
+            if (_toeR != null) Probe(_toeR.position, "dedos der");
+            Probe(_kneeL.position, "rodilla izq");
+            Probe(_kneeR.position, "rodilla der");
+            Probe(_hips.position, "cadera");
+            Probe(_handL.position, "mano izq");
+            Probe(_handR.position, "mano der");
+            part = worstPart;
+            return worst;
+        }
+
+        private struct VaultResult { public string Label, Clip; public float HandError, LandingBehind; }
         private static readonly List<VaultResult> VaultResults = new List<VaultResult>();
 
         /// <summary>
-        /// The same obstacle must behave the same from any running position: hand on its point, and a
-        /// landing at the same distance behind it (the approach speed is the only valid difference).
+        /// The same obstacle must behave the same from any running position: the hand on its point and,
+        /// with the same clip, a landing at the same distance behind it (sprinting lands farther on purpose).
         /// </summary>
         private static void CheckConsistency(string type)
         {
-            float minLand = float.MaxValue, maxLand = float.MinValue, maxHand = 0f;
+            float maxHand = 0f;
+            var landings = new Dictionary<string, Vector2>();
             int n = 0;
             foreach (VaultResult r in VaultResults)
             {
-                if (r.Label.Contains("esprintando")) continue; // faster: lands farther on purpose
-                minLand = Mathf.Min(minLand, r.LandingBehind);
-                maxLand = Mathf.Max(maxLand, r.LandingBehind);
+                if (!r.Label.Contains("corriendo") || r.Label.Contains("fondo")) continue;
                 maxHand = Mathf.Max(maxHand, r.HandError);
+                string clip = r.Clip.Replace("_M", "");
+                landings[clip] = landings.TryGetValue(clip, out Vector2 range)
+                    ? new Vector2(Mathf.Min(range.x, r.LandingBehind), Mathf.Max(range.y, r.LandingBehind))
+                    : new Vector2(r.LandingBehind, r.LandingBehind);
                 n++;
             }
             if (n < 2) return;
-            Check(maxLand - minLand < 0.3f && maxHand < HandOnTarget,
-                  $"Vault {type}: resultado consistente desde todas las posiciones corriendo (termina {minLand:F2}–{maxLand:F2} m detrás, mano a ≤ {maxHand * 100f:F1} cm)");
+            float spread = 0f;
+            string summary = "";
+            foreach (KeyValuePair<string, Vector2> kv in landings)
+            {
+                spread = Mathf.Max(spread, kv.Value.y - kv.Value.x);
+                summary += $" {kv.Key}: {kv.Value.x:F2}–{kv.Value.y:F2} m";
+            }
+            Check(spread < 0.35f && maxHand < VaultHandTolerance,
+                  $"Vault {type}: resultado consistente desde todas las posiciones corriendo (aterrizaje tras la cara trasera por clip:{summary}; mano a ≤ {maxHand * 100f:F1} cm)");
         }
 
-        private static IEnumerator VaultCase(float laneX, float frontZ, float height, float depth, bool sprint, string label,
-                                             bool standing = false, float lateral = 0f, float yaw = 0f, float standDistance = 0.85f, bool walk = false)
+        /// <summary>A planted palm may be this far (m) from its plant point on the top while it is down.</summary>
+        private const float VaultHandTolerance = 0.07f;
+
+        /// <summary>
+        /// One vault: placed <paramref name="standAt"/> m from the face (standing), or running up in the
+        /// gait and pressing Space <paramref name="pressAt"/> m from it (offset <paramref name="lateral"/> m,
+        /// at <paramref name="yaw"/>° to the face). Measures the plan, the contacts, the trajectory and
+        /// the hand-over to the locomotion, and draws one storyboard row.
+        /// </summary>
+        private static IEnumerator VaultCase(VaultSheet sheet, Box o, Gait gait, string label,
+                                             float pressAt = 0f, float standAt = 0f, float lateral = 0f, float yaw = 0f)
         {
-            float backZ = frontZ - depth;
-            label = $"{label} ({height:F2} m)";
-            // An angled run-up starts off-axis so it reaches the obstacle near the lane's center
-            float runUp = standing ? standDistance : walk ? 1.35f : 4f;
-            float startX = laneX + lateral + Mathf.Tan(yaw * Mathf.Deg2Rad) * runUp;
-            yield return Teleport(new Vector3(startX, Floor + OriginAboveFeet, frontZ + runUp), 180f + yaw);
+            label = $"{label} ({o.Height:F2} × {o.Depth:F2} m)";
+            bool moving = gait != Gait.Stand;
+            float runUp = moving ? pressAt + (gait == Gait.Walk ? 2f : gait == Gait.Run ? 3.5f : 5f) : standAt;
+            float startX = o.LaneX + lateral + Mathf.Tan(yaw * Mathf.Deg2Rad) * runUp;
+            yield return Teleport(new Vector3(startX, Floor + OriginAboveFeet, o.FrontZ + runUp), 180f + yaw);
             Visited.Clear();
-            Key[] held = standing ? new Key[0] : sprint ? new[] { Key.LeftShift, Key.W } : new[] { Key.W };
+            Key[] held = GaitKeys(gait);
             Keys(held);
-            // Running, Space is pressed early (as a player does): the run keeps the intention until the
-            // take-off point. Walking, it is pressed within reach.
-            float pressAt = walk ? 1.0f : 2.2f;
-            for (float t = 0f; t < 3f && !standing && _movement.transform.position.z - frontZ > pressAt; t += 0.02f) yield return 0.02f;
-            float approach = Speed;
+            for (float t = 0f; t < 5f && moving && _movement.transform.position.z - o.FrontZ > pressAt; t += 0.02f) yield return 0.02f;
+            float approach = Speed, pressed = _movement.transform.position.z - o.FrontZ;
             yield return Tap(Key.Space, held);
 
-            bool sawAnim = false;
-            float handError = float.MaxValue, minFeetOver = float.MaxValue, exitSpeed = -1f, facingErr = -1f, exitZ = 0f;
-            float rootSpeed = 0f, maxStep = 0f, maxLean = 0f;
-            string stepAt = "";
+            sheet.NextRow(label);
+            VaultVariant v = null;
+            VaultPlan plan = null;
+            float entryTime = 0f, entrySpeed = 0f, entryDistance = 0f, startedAt = 0f;
+            float handWindow = -1f, handAtPlant = float.MaxValue, handNear = float.MaxValue;
+            float secondWindow = -1f, secondAtPlant = float.MaxValue, secondNear = float.MaxValue;
+            float maxInside = float.MinValue, maxStep = 0f, maxLean = 0f, rootSpeed = 0f, minFloor = float.MaxValue;
+            float takeoff = float.NaN, landBehind = float.NaN, apex = float.MinValue, landSole = float.MaxValue;
+            float exitSpeed = -1f, exitYaw = -1f, exitAt = 0f, runOutMin = float.MaxValue, speedJump = 0f;
+            string insideAt = "", stepAt = "", floorAt = "", runOut = "", handWindowAt = "";
+            float nextRunOutSample = 0f;
+            bool sawState = false;
+            var descent = new List<Vector2>();
+            int column = 0;
             ResetStep();
-            for (float t = 0f; t < 2f; t += 0.02f)
+            for (float t = 0f; t < 5f; t += 0.02f)
             {
-                sawAnim |= AnimIs(PlayerAnimatorIds.Vault);
-                float stepNow = StepSpeed();
-                if (stepNow > maxStep)
-                {
-                    maxStep = stepNow;
-                    stepAt = $"[estado={Current.GetType().Name} n={_movement.ParkourProgress:F2} dt={_lastStepDt:F3} rootMotion={_movement.IsRootMotionDriven} pos={_movement.transform.position}]";
-                }
+                float step = StepSpeed();
+                if (step > maxStep) { maxStep = step; stepAt = $"[{Current.GetType().Name} clip={_movement.VaultState.ClipTime:F2} dt={_lastStepDt:F3}]"; }
+
                 if (Current == _movement.VaultState)
                 {
+                    if (v == null)
+                    {
+                        plan = _movement.VaultState.Plan;
+                        v = plan.Variant;
+                        entryTime = plan.EntryTime;
+                        entrySpeed = _movement.VaultState.ApproachSpeed;
+                        entryDistance = Vector3.Dot(plan.FrontEdge - _movement.transform.position, plan.Direction);
+                        startedAt = Time.time;
+                    }
+                    if (v == null) break;
+                    float ct = _movement.VaultState.ClipTime;
+                    sawState |= AnimIs(Animator.StringToHash(v.State));
                     rootSpeed = Vector3.Dot(_movement.RootMotionVelocity, _movement.transform.forward);
                     maxLean = Mathf.Max(maxLean, _playerAnimator.Lean.magnitude);
-                    if (_animator.GetFloat(PlayerAnimatorIds.LHandCurveParam) > 0.9f)
-                        handError = Mathf.Min(handError, Vector3.Distance(_handL.position, _movement.VaultState.HandTarget));
-                    foreach (Transform foot in new[] { _footL, _footR })
+
+                    // Palms on their plant points while the clip has them down
+                    Transform first = v.RightHand ? _handR : _handL;
+                    float e1 = Vector3.Distance(first.position, plan.PlantPoint);
+                    if (ct >= v.Plant && ct <= plan.PlantRelease && e1 > handWindow)
                     {
-                        float z = foot.position.z;
-                        if (z < frontZ && z > backZ && Mathf.Abs(foot.position.x - laneX) < 1.9f &&
-                            foot.position.y - height < minFeetOver)
-                        {
-                            minFeetOver = foot.position.y - height;
-                            _feetDiag = $"[{foot.name} n={_movement.ParkourProgress:F2} pie={foot.position} cuerpo={_movement.transform.position} manoIzq={_handL.position} objetivo={_movement.VaultState.HandTarget}]";
-                        }
+                        handWindow = e1;
+                        Vector3 sh = (v.RightHand ? _armR : _armL).position;
+                        handWindowAt = $"[clip={ct:F2} (apoyo {v.Plant:F2}–{plan.PlantRelease:F2}, clip hasta {v.PlantRelease:F2}), hombro a {Vector3.Distance(sh, plan.PlantPoint):F2} m del punto, mano {first.position - plan.PlantPoint}]";
                     }
+                    if (Mathf.Abs(ct - v.Plant) < handNear) { handNear = Mathf.Abs(ct - v.Plant); handAtPlant = e1; }
+                    if (plan.HasSecondPlant)
+                    {
+                        Transform second = v.SecondRightHand ? _handR : _handL;
+                        float e2 = Vector3.Distance(second.position, plan.SecondPlantPoint);
+                        if (ct >= v.SecondPlant && ct <= plan.SecondRelease) secondWindow = Mathf.Max(secondWindow, e2);
+                        if (Mathf.Abs(ct - v.SecondPlant) < secondNear) { secondNear = Mathf.Abs(ct - v.SecondPlant); secondAtPlant = e2; }
+                    }
+
+                    float inside = BodyInside(o, out string part);
+                    if (inside > maxInside) { maxInside = inside; insideAt = $"[{part} clip={ct:F2}]"; }
+                    float floor = SoleClearance;
+                    if (floor < minFloor) { minFloor = floor; floorAt = $"[clip={ct:F2}]"; }
+                    apex = Mathf.Max(apex, _hips.position.y);
+                    float along = Vector3.Dot(_movement.transform.position - plan.FrontEdge, plan.Direction);
+                    if (float.IsNaN(takeoff) && ct >= v.Takeoff) takeoff = -along;
+                    if (float.IsNaN(landBehind) && ct >= v.Land) landBehind = along - plan.Depth;
+                    if (ct >= v.Land && ct <= v.Land + 0.2f) landSole = Mathf.Min(landSole, SoleClearance);
+                    if (ct > v.Release + 0.02f && ct < v.Land - 0.02f) descent.Add(new Vector2(Time.time, _hips.position.y));
+
+                    // Storyboard: entry, take-off, plant, release, landing
+                    float[] moments = { entryTime, v.Takeoff, v.Plant, v.Release, v.Land };
+                    while (column < moments.Length && ct >= moments[column])
+                        sheet.Capture(column++, o.LaneX, plan.PlantPoint);
                 }
-                else if (Visited.Contains(_movement.VaultState) && exitSpeed < 0f)
+                else if (v != null)
                 {
-                    exitSpeed = Speed;
-                    exitZ = _movement.transform.position.z; // where the vault itself ends (the run after it follows the input)
-                    facingErr = Mathf.Abs(Mathf.DeltaAngle(Yaw, 180f)); // at the end of the vault, before the run turns it
+                    if (exitSpeed < 0f)
+                    {
+                        // A clip that hands over on its landing frame lands here
+                        if (float.IsNaN(landBehind)) landBehind = Vector3.Dot(_movement.transform.position - plan.FrontEdge, plan.Direction) - plan.Depth;
+                        exitSpeed = Speed;
+                        exitYaw = Mathf.Abs(Mathf.DeltaAngle(Yaw, Quaternion.LookRotation(plan.Direction).eulerAngles.y));
+                        exitAt = Time.time;
+                        sheet.Capture(5, o.LaneX, plan.PlantPoint);
+                    }
+                    float since = Time.time - exitAt;
+                    if (since <= 0.6f) runOutMin = Mathf.Min(runOutMin, Speed);
+                    if (since >= nextRunOutSample && since <= 0.6f)
+                    {
+                        // Speed / motion matching weight after the hand-over, every 0.1 s (diagnostic)
+                        runOut += $"{Speed:F1}/{_movement.Locomotion.Weight:F1} ";
+                        nextRunOutSample += 0.1f;
+                    }
+                    if (since <= 0.2f && landSole == float.MaxValue) landSole = SoleClearance;
+                    if (since >= 0.2f && speedJump == 0f) speedJump = Mathf.Max(0.001f, exitSpeed - Speed);
+                    if (since >= 0.4f && column < 6) { sheet.Capture(6, o.LaneX, null); column = 6; }
+                    if (since >= 0.6f) break;
                 }
-                if (exitSpeed >= 0f && t > 1.2f) break;
                 yield return 0.02f;
             }
             Keys();
             yield return 0.4f;
-            float z1 = _movement.transform.position.z;
-            Check(Visited.Contains(_movement.VaultState) && sawAnim, $"Vault {label}: Espacio cerca del obstáculo inicia el vault con su animación (aproximación {approach:F1} m/s)");
-            Check(handError < HandOnTarget, $"Vault {label}: la mano izquierda se apoya en el obstáculo (a {handError * 100f:F1} cm del punto)");
-            Check(minFeetOver > -Penetration || minFeetOver == float.MaxValue, $"Vault {label}: los pies no atraviesan el obstáculo (mínimo {(minFeetOver == float.MaxValue ? 0f : minFeetOver) * 100f:F1} cm sobre la cima) {_feetDiag}");
-            Check(z1 < backZ - 0.3f && Mathf.Abs(_movement.FeetY - Floor) < 0.06f, $"Vault {label}: aterriza detrás (z = {z1:F2}, pies a {_movement.FeetY - Floor:F2} m)");
-            if (yaw != 0f)
-                Check(facingErr >= 0f && facingErr < 5f, $"Vault {label}: el cuerpo se alinea perpendicular al obstáculo (desvío {facingErr:F1}°)");
-            Check(maxStep < TeleportSpeed, $"Vault {label}: sin teleport (velocidad máxima entre muestras {maxStep:F1} m/s) {stepAt}");
-            Check(Mathf.Abs(exitSpeed - rootSpeed) < 1.0f, $"Vault {label}: sale a la velocidad que llevaba el clip ({rootSpeed:F2} → {exitSpeed:F2} m/s)");
-            Check(maxLean < 0.01f, $"Vault {label}: la inclinación procedural está apagada durante el parkour ({maxLean:F2}°)");
-            if (!standing && !walk)
+
+            string clip = v != null ? $"{v.Id}{(v.Mirror ? " (espejo)" : "")}, {v.Style}" : "ninguno";
+            if (!Check(Visited.Contains(_movement.VaultState) && v != null && sawState,
+                       $"Vault {label}: Espacio a {pressed:F2} m inicia el vault con su clip ({clip}; aproximación {approach:F1} m/s; motivo si no: '{_movement.VaultState.LastReason}', medido {_movement.VaultState.LastEvaluation.MeasuredHeight:F3} × {_movement.VaultState.LastEvaluation.MeasuredDepth:F3} m a {_movement.VaultState.LastEvaluation.MeasuredSpeed:F2} m/s)"))
             {
-                Check(exitSpeed > _movement.BaseSpeed * 0.7f, $"Vault {label}: mantiene el impulso al salir ({exitSpeed:F2} m/s)");
-                float entry = _movement.VaultState.ApproachSpeed;
-                Check(Mathf.Abs(exitSpeed - entry) < entry * 0.15f, $"Vault {label}: entra y sale a la misma velocidad, sin acelerones ({entry:F2} → {exitSpeed:F2} m/s)");
-                VaultResults.Add(new VaultResult { Label = label, HandError = handError, LandingBehind = backZ - exitZ });
+                yield return 0.6f;
+                yield break;
             }
+            // (palm error: the worst while it is down, or at the plant if no sample fell inside that window)
+            float handErr = handWindow >= 0f ? handWindow : handAtPlant;
+            float secondErr = secondWindow >= 0f ? secondWindow : secondAtPlant;
+            string planInfo = $"entra en t={entryTime:F2} s a {entryDistance:F2} m de la cara (corrección {plan.EntryError * 100f:F0} cm), lift {plan.Lift * 100f:F0} cm, estiramiento {plan.Stretch * 100f:F0} cm, ritmo {plan.ApproachRate:F2}/{plan.AirRate:F2}";
+            string states = "";
+            foreach (PlayerState st in Visited) states += st.GetType().Name.Replace("Player", "").Replace("State", "") + " ";
+            Debug.Log($"{Tag} INFO  Vault {label}: clip {clip}; {planInfo}; estados {states.Trim()}");
+
+            Check(handErr < VaultHandTolerance, $"Vault {label}: la mano se apoya en la cima ({handErr * 100f:F1} cm del punto de apoyo; al apoyar {handAtPlant * 100f:F1} cm) {handWindowAt}");
+            if (plan.HasSecondPlant)
+                Check(secondErr < VaultHandTolerance, $"Vault {label}: la segunda mano se apoya en la cima ({secondErr * 100f:F1} cm del punto)");
+            Check(maxInside < Penetration, $"Vault {label}: ni pies, rodillas, cadera ni manos atraviesan el obstáculo (máximo {Mathf.Max(0f, maxInside) * 100f:F1} cm dentro) {insideAt}");
+            Check(minFloor > -Penetration, $"Vault {label}: los pies nunca se hunden en el suelo ni en la cima (mínimo {minFloor * 100f:F1} cm) {floorAt}");
+            Check(maxStep < TeleportSpeed, $"Vault {label}: sin teleport (velocidad máxima entre muestras {maxStep:F1} m/s) {stepAt}");
+            Check(maxLean < 0.01f, $"Vault {label}: la inclinación procedural está apagada durante el vault ({maxLean:F2}°)");
+
+            // Take-off where the clip takes off (not a far jump), flight with gravity, landing close behind
+            float natural = NaturalTakeoff(v, plan);
+            Check(!float.IsNaN(takeoff) && Mathf.Abs(takeoff - natural) < 0.35f && takeoff < 2.0f,
+                  $"Vault {label}: despega a {takeoff:F2} m de la cara (el clip despega a {natural:F2} m)");
+            float g = descent.Count >= 5 && descent[descent.Count - 1].x - descent[0].x >= 0.1f ? FittedGravity(descent) : float.NaN;
+            if (v.Style != VaultStyle.Lazy && !float.IsNaN(g))
+                Check(g > 5f && g < 18f, $"Vault {label}: el vuelo cae con gravedad natural ({g:F1} m/s²), sin cámara lenta ni flotación");
+            else
+                Debug.Log($"{Tag} INFO  Vault {label}: gravedad del vuelo {(float.IsNaN(g) ? "sin vuelo medible" : g.ToString("F1") + " m/s²")} (estilo {v.Style})");
+            Check(!float.IsNaN(landBehind) && landBehind > 0.15f && landBehind < 2.0f,
+                  $"Vault {label}: aterriza a {landBehind:F2} m tras la cara trasera (cimas a {apex - Floor:F2} m de cadera)");
+            Check(landSole > -Penetration && landSole < 0.08f, $"Vault {label}: al aterrizar el pie apoya en el suelo, sin flotar ni hundirse ({landSole * 100f:F1} cm)");
+
+            // Hand-over to the locomotion: facing the obstacle's direction, momentum kept, no stop
+            Check(exitYaw >= 0f && exitYaw < 5f, $"Vault {label}: termina alineado con la dirección del vault (desvío {exitYaw:F1}°)");
+            Check(Mathf.Abs(exitSpeed - rootSpeed) < 1.0f, $"Vault {label}: sale a la velocidad que llevaba el clip ({rootSpeed:F2} → {exitSpeed:F2} m/s)");
+            if (gait == Gait.Run || gait == Gait.Sprint)
+            {
+                // Against the gait's speed: some sprint takes of the locomotion overshoot it (T27). No
+                // surge, and the momentum kept (a dive's landing absorbs some of it, then the run goes on)
+                float gaitSpeed = gait == Gait.Sprint ? _movement.SprintSpeed : _movement.BaseSpeed;
+                float reference = Mathf.Min(entrySpeed, gaitSpeed + 0.3f);
+                Check(exitSpeed < reference + 0.4f && exitSpeed > reference * 0.75f,
+                      $"Vault {label}: sale sin acelerón y con el impulso de la carrera ({entrySpeed:F2} → {exitSpeed:F2} m/s; marcha {gaitSpeed:F1})");
+                Check(runOutMin > entrySpeed * 0.6f && speedJump < 0.8f,
+                      $"Vault {label}: sigue corriendo sin pararse (mínimo {runOutMin:F2} m/s en 0.6 s, caída {speedJump:F2} m/s; velocidad/peso MxM cada 0.1 s: {runOut.Trim()})");
+            }
+            VaultResults.Add(new VaultResult { Label = label, Clip = v.Id, HandError = handErr, LandingBehind = landBehind });
+
             float after = float.MaxValue;
             for (float t = 0f; t < 0.4f; t += 0.02f) { after = Mathf.Min(after, SoleClearance); yield return 0.02f; }
             Check(after > -Penetration && after < SoleOnGround, $"Vault {label}: después del vault los pies pisan el suelo ({after * 100f:F1} cm)");
             yield return 0.6f;
+        }
+
+        /// <summary>Distance (m) from the face at which the clip itself takes off for this plan (no approach correction).</summary>
+        private static float NaturalTakeoff(VaultVariant v, VaultPlan plan)
+        {
+            float sPlant = VaultWarpProfile.Stretch(v, v.Plant);
+            float toHand = v.PathAt(v.Plant).y - v.PathAt(v.Takeoff).y + v.HandOffset.z + plan.Stretch * sPlant;
+            return toHand - plan.Inset;
+        }
+
+        /// <summary>Acceleration (m/s², downward positive) of the parabola that best fits (time, height) samples.</summary>
+        private static float FittedGravity(List<Vector2> samples)
+        {
+            double t0 = samples[0].x, s0 = 0, s1 = 0, s2 = 0, s3 = 0, s4 = 0, y0 = 0, y1 = 0, y2 = 0;
+            foreach (Vector2 p in samples)
+            {
+                double t = p.x - t0, tt = t * t;
+                s0 += 1; s1 += t; s2 += tt; s3 += tt * t; s4 += tt * tt;
+                y0 += p.y; y1 += t * p.y; y2 += tt * p.y;
+            }
+            // Normal equations of y = a t² + b t + c, solved for a by Cramer's rule
+            double det = s4 * (s2 * s0 - s1 * s1) - s3 * (s3 * s0 - s1 * s2) + s2 * (s3 * s1 - s2 * s2);
+            if (System.Math.Abs(det) < 1e-12) return float.NaN;
+            double detA = y2 * (s2 * s0 - s1 * s1) - s3 * (y1 * s0 - s1 * y0) + s2 * (y1 * s1 - s2 * y0);
+            return (float)(-2.0 * detA / det);
+        }
+
+        /// <summary>
+        /// An obstacle that must not be vaulted from this approach: Space does the action the geometry
+        /// allows (<paramref name="expect"/>, if given) and nothing of the body goes through it (nor through
+        /// <paramref name="extra"/>, a second box such as a wall behind).
+        /// </summary>
+        private static IEnumerator NoVaultCase(Box o, Gait gait, string label, PlayerState expect,
+                                               float pressAt = 0f, float standAt = 0f, Box? extra = null)
+        {
+            label = $"{label} ({o.Height:F2} × {o.Depth:F2} m)";
+            bool moving = gait != Gait.Stand;
+            float runUp = moving ? pressAt + (gait == Gait.Walk ? 2f : gait == Gait.Run ? 3.5f : 5f) : standAt;
+            yield return Teleport(new Vector3(o.LaneX, Floor + OriginAboveFeet, o.FrontZ + runUp));
+            Visited.Clear();
+            Key[] held = GaitKeys(gait);
+            Keys(held);
+            for (float t = 0f; t < 5f && moving && _movement.transform.position.z - o.FrontZ > pressAt; t += 0.02f) yield return 0.02f;
+            yield return Tap(Key.Space, held);
+            string reason = _movement.VaultState.LastReason;
+            float maxInside = float.MinValue, maxStep = 0f;
+            string insideAt = "";
+            ResetStep();
+            for (float t = 0f; t < 2.0f; t += 0.02f)
+            {
+                float inside = BodyInside(o, out string part);
+                if (extra.HasValue)
+                {
+                    float other = BodyInside(extra.Value, out string otherPart);
+                    if (other > inside) { inside = other; part = otherPart + " (segundo obstáculo)"; }
+                }
+                if (inside > maxInside)
+                {
+                    maxInside = inside;
+                    insideAt = $"[{part} {Current.GetType().Name} t={t:F2} s, centro a {_movement.transform.position.z - o.FrontZ:F2} m de la cara, " +
+                               $"contra la pared={_movement.IsAgainstWall}, peso MxM {_movement.Locomotion.Weight:F1}, {Speed:F1} m/s, " +
+                               $"salvaguardas de mano {_playerAnimator.HandGuards}, hombro izq a {_armL.position.z - o.FrontZ:F2} m de la cara y {_armL.position.y - Floor:F2} m de alto, mano a {_handL.position.y - Floor:F2} m]";
+                }
+                maxStep = Mathf.Max(maxStep, StepSpeed());
+                yield return 0.02f;
+            }
+            Keys();
+            yield return 0.8f;
+            string seen = "";
+            foreach (PlayerState s in Visited) if (!seen.Contains(s.GetType().Name)) seen += s.GetType().Name.Replace("Player", "").Replace("State", "") + " ";
+            Check(!Visited.Contains(_movement.VaultState) && (expect == null || Visited.Contains(expect)),
+                  $"Sin vault: {label}: {(expect == null ? "no hace el vault" : "hace " + expect.GetType().Name.Replace("Player", "").Replace("State", ""))} (estados: {seen.Trim()}; motivo del rechazo: '{reason}')");
+            Check(maxInside < Penetration && maxStep < TeleportSpeed,
+                  $"Sin vault: {label}: nada atraviesa el obstáculo ni se teletransporta (máximo {Mathf.Max(0f, maxInside) * 100f:F1} cm dentro {insideAt}, {maxStep:F1} m/s)");
+            yield return 0.4f;
+        }
+
+        private const string VaultSheetFolder = "Logs/PlayModeVaults";
+
+        /// <summary>
+        /// Storyboard of a group of vaults, rendered from the game's scene: one row per vault, one column
+        /// per key moment, seen from the side at the obstacle's lane (only that lane's slice of the scene,
+        /// so the other lanes do not hide the body). The red dot is the planned plant point of the hand.
+        /// </summary>
+        private sealed class VaultSheet
+        {
+            public static readonly string[] Moments = { "entrada", "despegue", "apoyo", "suelta", "aterrizaje", "salida", "+0.4 s" };
+            private readonly PoseSheetRenderer _renderer;
+            private readonly string _name;
+            private readonly int _rows;
+            private readonly List<string> _labels = new List<string>();
+
+            public VaultSheet(string name, int rows)
+            {
+                _name = name;
+                _rows = rows;
+                _renderer = new PoseSheetRenderer(300, 210, 1.4f, studio: false);
+                _renderer.SetDepthRange(8f - 2.6f, 8f + 2.6f);
+                _renderer.Begin(Moments.Length, rows);
+            }
+
+            public void NextRow(string label) => _labels.Add(label);
+
+            public void Capture(int column, float laneX, Vector3? marker)
+            {
+                int row = Mathf.Clamp(_labels.Count - 1, 0, _rows - 1);
+                _renderer.SetMarker(marker);
+                _renderer.Capture(row, column, new Vector3(laneX, Floor + 1.1f, _movement.transform.position.z), Vector3.right, Floor);
+            }
+
+            public void Save()
+            {
+                string path = $"{VaultSheetFolder}/{_name}.png";
+                _renderer.Save(path);
+                var text = new StringBuilder("Columnas: " + string.Join(" · ", Moments) + "\n");
+                for (int i = 0; i < _labels.Count; i++) text.AppendLine($"fila {i + 1}: {_labels[i]}");
+                File.WriteAllText(Path.ChangeExtension(path, ".txt"), text.ToString());
+                _renderer.Dispose();
+                Debug.Log($"{Tag} INFO  Storyboard de vaults: {path}");
+            }
         }
 
         // ── S05: slide under the standard bar and through the tunnel ────────────────────────────────────────
@@ -594,6 +959,81 @@ namespace WarriorWoke.EditorTools
             Check(_movement.transform.position.z < -24.5f, $"Atraviesa el túnel de 4 m deslizándose (z = {_movement.transform.position.z:F2})");
             Check(maxHeadInTunnel < 1.2f, $"En el túnel la cabeza nunca lo atraviesa ({maxHeadInTunnel:F2} m < 1.2 m)");
             yield return 1.2f;
+
+            // C pressed early, out of the slide's reach: the run keeps the intention and the slide starts
+            // where it carries the body under the bar
+            yield return EarlySlideCase(new[] { Key.LeftShift, Key.W }, 3.5f, "esprintando");
+            yield return EarlySlideCase(new[] { Key.W }, 3.0f, "corriendo");
+
+            // No headroom: a slab whose underside (0.6 m) is lower than a sliding body. The slide is
+            // refused (the body crouches) and nothing goes into the slab
+            float slabFront = -30f;
+            GameObject slab = TempSlab(ParkourTestCircuitBuilder.SlideX, slabFront, 0.6f, 1.4f, 2f);
+            yield return Teleport(new Vector3(ParkourTestCircuitBuilder.SlideX, Floor + OriginAboveFeet, slabFront + 6f));
+            Visited.Clear();
+            Keys(Key.W);
+            for (float t = 0f; t < 3f && _movement.transform.position.z > slabFront + 1.5f; t += 0.02f) yield return 0.02f;
+            yield return Tap(Key.C, Key.W);
+            float maxInSlab = float.MinValue;
+            string inSlabAt = "";
+            Bounds b = slab.GetComponent<Collider>().bounds;
+            for (float t = 0f; t < 2f; t += 0.02f)
+            {
+                foreach ((Transform bone, string name) in new[] { (_head, "cabeza"), (_hips, "cadera"), (_handL, "mano izq"), (_handR, "mano der"), (_kneeL, "rodilla izq"), (_kneeR, "rodilla der") })
+                {
+                    Vector3 q = bone.position;
+                    float d = Mathf.Min(Mathf.Min(q.x - b.min.x, b.max.x - q.x), Mathf.Min(Mathf.Min(q.y - b.min.y, b.max.y - q.y), Mathf.Min(q.z - b.min.z, b.max.z - q.z)));
+                    if (d > maxInSlab) { maxInSlab = d; inSlabAt = $"[{name} {Current.GetType().Name}]"; }
+                }
+                yield return 0.02f;
+            }
+            Keys();
+            Object.Destroy(slab);
+            if (Current == _movement.CrouchState) yield return Tap(Key.C); // stand up for the next cases
+            string seen = "";
+            foreach (PlayerState st in Visited) if (!seen.Contains(st.GetType().Name)) seen += st.GetType().Name.Replace("Player", "").Replace("State", "") + " ";
+            Check(!Visited.Contains(_movement.SlideState), $"Slide sin altura libre (techo a 0.6 m): C no desliza bajo él (estados: {seen.Trim()})");
+            Check(maxInSlab < Penetration, $"Slide sin altura libre: nada del cuerpo entra bajo el techo bajo (máximo {Mathf.Max(0f, maxInSlab) * 100f:F1} cm) {inSlabAt}");
+            yield return 1.0f;
+        }
+
+        /// <summary>
+        /// C pressed <paramref name="pressAt"/> m before the slide bar, farther than the slide reaches:
+        /// the slide must still pass under the bar (it starts where the momentum carries it there).
+        /// </summary>
+        private static IEnumerator EarlySlideCase(Key[] held, float pressAt, string label)
+        {
+            float barFront = ParkourTestCircuitBuilder.SlideBarFront;
+            yield return Teleport(new Vector3(ParkourTestCircuitBuilder.SlideX, Floor + OriginAboveFeet, barFront + pressAt + 5f));
+            Visited.Clear();
+            Keys(held);
+            for (float t = 0f; t < 4f && _movement.transform.position.z > barFront + pressAt; t += 0.02f) yield return 0.02f;
+            float speed = Speed;
+            yield return Tap(Key.C, held);
+            float startedAt = float.NaN, maxHead = float.MinValue;
+            for (float t = 0f; t < 3f && _movement.transform.position.z > barFront - 1.5f; t += 0.02f)
+            {
+                if (float.IsNaN(startedAt) && Current == _movement.SlideState) startedAt = _movement.transform.position.z - barFront;
+                float z = _movement.transform.position.z;
+                if (z < barFront + 0.1f && z > barFront - ParkourStandard.SlideBarThickness - 0.1f) maxHead = Mathf.Max(maxHead, _head.position.y);
+                yield return 0.02f;
+            }
+            Keys();
+            Check(Visited.Contains(_movement.SlideState) && _movement.transform.position.z < barFront - 1f && maxHead < 1.2f,
+                  $"Slide con C anticipado {label} ({pressAt:F1} m antes de la barra, {speed:F1} m/s): empieza a {startedAt:F2} m y pasa bajo ella (cabeza a {maxHead:F2} m, z = {_movement.transform.position.z:F2})");
+            yield return 1.0f;
+        }
+
+        /// <summary>A horizontal slab on layer Obstacle with its underside <paramref name="bottom"/> m above the floor (a ceiling), for one check.</summary>
+        private static GameObject TempSlab(float laneX, float frontZ, float bottom, float top, float depth)
+        {
+            GameObject go = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            go.name = "PruebaTemporal";
+            go.layer = LayerMask.NameToLayer("Obstacle");
+            go.transform.SetPositionAndRotation(new Vector3(laneX, Floor + (bottom + top) * 0.5f, frontZ - depth * 0.5f), Quaternion.identity);
+            go.transform.localScale = new Vector3(ParkourStandard.PrefabWidth, top - bottom, depth);
+            Physics.SyncTransforms();
+            return go;
         }
 
         // ── S06: the standard ledge from the ground, running, chained, off-center and angled ───────
@@ -762,11 +1202,12 @@ namespace WarriorWoke.EditorTools
                 float z = _movement.transform.position.z;
                 PlayerState s = Current;
                 bool free = s == _movement.RunState || s == _movement.IdleState;
-                if (!vault1 && free && z - vaultA < 1.0f) { vault1 = true; yield return Tap(Key.Space, Key.LeftShift, Key.W); continue; }
+                // Sprinting, Space about half a second before each vault (the clips take off 0.7–1.7 m before it)
+                if (!vault1 && free && z - vaultA < 2.6f) { vault1 = true; yield return Tap(Key.Space, Key.LeftShift, Key.W); continue; }
                 if (vault1 && !slide && free && z < vaultA - 2f && z - bar < ParkourStandard.SlideEntryDistance + 1f) { slide = true; yield return Tap(Key.C, Key.LeftShift, Key.W); continue; }
                 if (slide && !grab && free && z < bar - 1.5f && z - wall < 0.9f) { grab = true; yield return Tap(Key.Space, Key.LeftShift, Key.W); continue; }
                 if (grab && !climbTap && s == _movement.LedgeGrabState) { climbTap = true; yield return Tap(Key.Space, Key.LeftShift, Key.W); continue; }
-                if (climbTap && !vault2 && free && z < wall - 4f && z - vaultB < 1.0f && _movement.IsGrounded) { vault2 = true; yield return Tap(Key.Space, Key.LeftShift, Key.W); continue; }
+                if (climbTap && !vault2 && free && z < wall - 4f && z - vaultB < 2.6f && _movement.IsGrounded) { vault2 = true; yield return Tap(Key.Space, Key.LeftShift, Key.W); continue; }
                 if (vault2 && !mantle && free && z < vaultB - 2f && z - block < 2.2f && _movement.IsGrounded) { mantle = true; yield return Tap(Key.Space, Key.LeftShift, Key.W); continue; }
                 yield return 0.02f;
             }
@@ -843,10 +1284,10 @@ namespace WarriorWoke.EditorTools
             Keys();
             yield return 0.06f;
             float braking = Speed;
-            yield return 1.2f; // the strafe takes' stop ends in ~1 s
+            yield return 1.45f; // the strafe takes' stop ends in 1.0–1.5 s (motion matching's choice varies, T27)
             // (the strafe takes sway ±10°, as in the gaits below)
             Check(braking > 0.2f && braking < _movement.BackpedalSpeed && Speed < 0.05f && Mathf.Abs(Mathf.DeltaAngle(yaw0, Yaw)) < 10f,
-                  $"Caminar hacia atrás → parar: frena gradualmente sin girar ({braking:F2} m/s a los 0.06 s, {Speed:F2} m/s a los 1.26 s, giró {Mathf.Abs(Mathf.DeltaAngle(yaw0, Yaw)):F1}°)");
+                  $"Caminar hacia atrás → parar: frena gradualmente sin girar ({braking:F2} m/s a los 0.06 s, {Speed:F2} m/s a los 1.51 s, giró {Mathf.Abs(Mathf.DeltaAngle(yaw0, Yaw)):F1}°)");
 
             // Reversal while sprinting (S + Shift): the body brakes and pivots progressively, the camera stays put
             yield return Teleport(Corridor(-5f), 0f);
@@ -1033,9 +1474,10 @@ namespace WarriorWoke.EditorTools
                 yield return Tap(Key.Space);
             }
 
-            float handErr = float.MaxValue, minFootOver = float.MaxValue, maxStep = 0f;
-            string handDiag = "";
+            float handErr = float.MaxValue, minFootOver = float.MaxValue, maxStep = 0f, maxInside = float.MinValue;
+            string handDiag = "", insideAt = "";
             bool poseOk = true;
+            var block = new Box(laneX, frontZ, top, ParkourStandard.Spec(ParkourObstacleType.Mantle).Depth);
             ResetStep();
             for (float t = 0f; t < 2.5f && !(Visited.Contains(_movement.MantleState) && Current != _movement.MantleState); t += 0.02f)
             {
@@ -1044,6 +1486,8 @@ namespace WarriorWoke.EditorTools
                 {
                     float n = _movement.ParkourProgress;
                     poseOk &= PoseFacesBody();
+                    float inside = BodyInside(block, out string part);
+                    if (inside > maxInside) { maxInside = inside; insideAt = $"[{part} n={n:F2}, centro a {_movement.transform.position.z - frontZ:F2} m de la cara]"; }
                     if (handDiag == "" && n > 0.33f)
                         handDiag = $"[n={n:F2} manoIzq={_handL.position} manoDer={_handR.position} cara z={frontZ}]";
                     if (n > ParkourTimings.MantleHandPlant + 0.06f && n < ParkourTimings.MantleHandRelease - 0.06f && _handL.position.z < frontZ)
@@ -1061,6 +1505,7 @@ namespace WarriorWoke.EditorTools
             Check(Mathf.Abs(_movement.FeetY - top) < 0.06f, $"{label}: queda de pie sobre la cima (pies a {_movement.FeetY - top:F2} m)");
             Check(handErr < HandOnTarget, $"{label}: la mano de apoyo descansa sobre la cima (a {handErr * 100f:F1} cm) {handDiag}");
             Check(minFootOver == float.MaxValue || minFootOver > -Penetration, $"{label}: los pies no atraviesan el bloque (mínimo {(minFootOver == float.MaxValue ? 0f : minFootOver) * 100f:F1} cm)");
+            Check(maxInside < Penetration, $"{label}: ni rodillas, cadera ni manos atraviesan el bloque (máximo {Mathf.Max(0f, maxInside) * 100f:F1} cm dentro) {insideAt}");
             Check(maxStep < TeleportSpeed, $"{label}: sin teleport ({maxStep:F1} m/s)");
             Check(poseOk, $"{label}: la pose mira hacia donde sube el cuerpo");
             yield return 0.8f;
@@ -1174,49 +1619,371 @@ namespace WarriorWoke.EditorTools
             yield return 0.8f;
         }
 
-        // ── Combat (corridor): combo with buffer, dodge, block ─────────────────────────────────────
+        // ── S12: unarmed combat on the training dummy (P37), dodge, block, hit reactions ───────────────
+        private const string CombatSheetFolder = "Logs/PlayModeCombat";
+        private static TrainingDummy _dummy;
+        private static CapsuleCollider _dummyBody;
+        private static PoseSheetRenderer _combatSheet;
+
         private static IEnumerator Combat()
         {
-            yield return Teleport(Corridor(-30f));
-            Visited.Clear();
-            Vector3 c0 = _movement.transform.position;
-            yield return Tap(Key.J);
-            yield return 0.07f;
-            yield return Tap(Key.J);
-            yield return 0.3f;
-            yield return Tap(Key.K);
-            yield return 1.6f;
-            int lights = Count(_movement.LightAttackState);
-            float lunge = Vector3.Dot(_movement.transform.position - c0, _movement.transform.forward);
-            Check(lights >= 2, $"El segundo J pulsado durante el golpe se encadena ({lights} golpes ligeros)");
-            Check(Visited.Contains(_movement.HeavyAttackState), "K cierra el combo con el ataque fuerte");
-            Check(lunge > 0.3f, $"Los ataques avanzan (impulso de {lunge:F2} m)");
+            _dummy = Object.FindAnyObjectByType<TrainingDummy>();
+            if (!Check(_dummy != null, "El muñeco de entrenamiento está en el área (S12)")) yield break;
+            foreach (CapsuleCollider c in _dummy.GetComponentsInChildren<CapsuleCollider>())
+                if (c.gameObject.layer == LayerMask.NameToLayer("Enemy")) _dummyBody = c;
+            Directory.CreateDirectory(CombatSheetFolder);
+            _combatSheet = new PoseSheetRenderer(260, 300, 1.25f, studio: false);
+            _combatSheet.SetDepthRange(8f - 2.6f, 8f + 2.6f);
+            _combatSheet.Begin(4, 2);
+            var light = _movement.LightAttackState;
+            var heavy = _movement.HeavyAttackState;
 
+            // Light chain J → J → J: three presses inside the first blow (buffered)
+            yield return FaceDummy(1.0f);
+            var log = new CombatLog { Columns = new Dictionary<string, int> { ["Jab"] = 0, ["Cross"] = 1, ["Hook"] = 2 } };
+            yield return CombatRun(1.8f, log, null, (0f, Key.J), (0.12f, Key.J), (0.26f, Key.J));
+            Check(Count(light) == 3 && log.Anims.Contains(PlayerAnimatorIds.LightAttack1) && log.Anims.Contains(PlayerAnimatorIds.LightAttack2) &&
+                  log.Anims.Contains(PlayerAnimatorIds.LightAttack3),
+                  $"J → J → J: jab, cross y gancho, uno tras otro ({Count(light)} golpes ligeros)");
+            Check(log.Hits.Count == 3 && log.Hits.TrueForAll(h => h.Damage == 10),
+                  $"Cada golpe ligero conecta con el muñeco y hace 10 de daño ({log.Describe()})");
+            Check(log.Hits.Count == 3 && log.Hits[0].Time < 0.35f && log.Intervals(0.15f, 0.5f),
+                  $"Ritmo de la cadena: primer impacto a {log.FirstHit:F2} s, impactos cada {log.IntervalText} s (GDD: ~0.25 s)");
+            Check(log.SawHitStop, "Hit stop: el atacante se congela un instante al conectar");
+            Check(log.MaxSway >= 2f, $"El muñeco reacciona: se inclina {log.MaxSway:F1}° con los golpes");
+            Check(log.MinDistance >= ParkourTestCircuitBuilder.DummyPostRadius + 0.3f,
+                  $"El cuerpo nunca entra en el muñeco (distancia mínima al eje {log.MinDistance:F2} m)");
+            Check(log.MaxLimbDepth <= 0.12f, $"Puños y pies no atraviesan el muñeco (lo más hondo: {log.MaxLimbDepth * 100f:F0} cm, {log.DeepestLimb})");
+            Check(log.MaxStepSpeed < TeleportSpeed, $"Sin teleport durante la cadena (máx {log.MaxStepSpeed:F1} m/s)");
+            Check(log.MinSole > -0.04f, $"Las suelas no se hunden durante los golpes (mín {log.MinSole * 100f:F1} cm)");
+            Check(log.EndedIdleAt > 0f && log.EndedIdleAt - log.LastHitTime < 1.2f,
+                  $"Tras el gancho vuelve a la locomoción ({log.EndedIdleAt - log.LastHitTime:F2} s después del último impacto)");
+            yield return SettleDummy();
+            Check(_dummy.Sway < 1f && _dummy.Displacement < 0.03f, $"El muñeco se recupera (inclinación {_dummy.Sway:F1}°)");
+
+            // Combo J → J → K (GDD §5.9): the kick ends it and knocks the dummy back
+            yield return FaceDummy(1.0f);
+            log = new CombatLog { Columns = new Dictionary<string, int> { ["Kick"] = 3 } };
+            yield return CombatRun(2.4f, log, null, (0f, Key.J), (0.2f, Key.J), (0.42f, Key.K));
+            Check(log.Hits.Count == 3 && log.Hits[2].Attack == "Kick" && log.Hits[2].Damage == 20 && log.SawCombo,
+                  $"J → J → K: dos golpes y la patada de remate de 20 ({log.Describe()})");
+            Check(log.MaxDisplacement >= 0.15f, $"La patada hace retroceder al muñeco ({log.MaxDisplacement:F2} m)");
+            Check(log.MaxStepSpeed < TeleportSpeed && log.MinDistance >= ParkourTestCircuitBuilder.DummyPostRadius + 0.3f,
+                  $"La patada avanza sin teleport ni meterse en el muñeco (máx {log.MaxStepSpeed:F1} m/s, distancia mínima {log.MinDistance:F2} m)");
+            Check(log.MaxLimbDepth <= 0.15f, $"El pie de la patada no atraviesa el muñeco ({log.MaxLimbDepth * 100f:F0} cm, {log.DeepestLimb})");
+            yield return SettleDummy();
+            Check(_dummy.Displacement < 0.05f, $"El muñeco vuelve a su sitio ({_dummy.Displacement:F2} m)");
+
+            // Target orientation: facing 45° away from the dummy, J turns the body toward it
+            yield return FaceDummy(1.0f, 45f);
+            log = new CombatLog();
+            yield return CombatRun(1.0f, log, null, (0f, Key.J));
+            Check(log.Hits.Count == 1 && log.Hits[0].YawError < 12f,
+                  $"El golpe gira hacia el muñeco ({(log.Hits.Count > 0 ? log.Hits[0].YawError : -1f):F0}° de error al impactar, empezando a 45°)");
+
+            // Approach: from 1.6 m the jab steps in; from 2.0 m the kick does
+            yield return FaceDummy(1.6f);
+            log = new CombatLog();
+            yield return CombatRun(1.0f, log, null, (0f, Key.J));
+            Check(log.Hits.Count == 1 && log.Hits[0].Distance < 1.05f && log.MinDistance > 0.6f,
+                  $"Desde 1.6 m el jab da un paso y conecta ({log.Describe()})");
+            yield return SettleDummy();
+            yield return FaceDummy(2.0f);
+            log = new CombatLog();
+            yield return CombatRun(1.4f, log, null, (0f, Key.K));
+            Check(log.Hits.Count == 1 && log.Hits[0].Attack == "Kick",
+                  $"Desde 2.0 m la patada avanza y conecta ({log.Describe()})");
+            yield return SettleDummy();
+
+            // Out of reach: from 3.5 m nothing is struck and the body does not lunge
+            yield return FaceDummy(3.5f);
+            Vector3 p0 = _movement.transform.position;
+            log = new CombatLog();
+            yield return CombatRun(1.0f, log, null, (0f, Key.J));
+            float moved = Vector3.Distance(p0, _movement.transform.position);
+            Check(log.Hits.Count == 0 && moved < 0.12f, $"Fuera de alcance: el jab no conecta ni se lanza ({moved:F2} m)");
+
+            // Recovery cancel: holding W the jab still lands, then the run takes over before the clip ends
+            yield return FaceDummy(1.0f);
+            log = new CombatLog();
+            yield return CombatRun(1.2f, log, new[] { Key.W }, (0f, Key.J));
+            AttackData jab = CombatTimings.Jab;
+            Check(log.Hits.Count == 1 && log.RunAt >= jab.SecondsTo(jab.HitEnd) && log.RunAt <= jab.SecondsTo(0.97f),
+                  $"Con W mantenido el jab conecta y la carrera lo interrumpe en la recuperación (a {log.RunAt:F2} s; golpe hasta {jab.SecondsTo(jab.HitEnd):F2} s)");
+            yield return SettleDummy();
+
+            // A kick that misses leaves the player open (GDD §5.7): moving cannot cut its recovery
+            yield return FaceDummy(4.5f);
+            log = new CombatLog();
+            yield return CombatRun(1.4f, log, new[] { Key.W }, (0f, Key.K));
+            AttackData kick = CombatTimings.Kick;
+            Check(log.Hits.Count == 0 && log.HeavyUntil >= kick.SecondsTo(0.9f) - 0.05f,
+                  $"La patada fallada no se cancela al moverse (dura {log.HeavyUntil:F2} s; con impacto se podría a los {kick.SecondsTo(kick.MoveCancel):F2} s)");
+
+            // The chain restarts after 0.5 s without a press (GDD §5.9)
+            yield return FaceDummy(1.0f);
+            log = new CombatLog();
+            yield return CombatRun(2.0f, log, null, (0f, Key.J), (1.0f, Key.J));
+            Check(log.Hits.Count == 2 && log.MaxChain == 1, $"Pasados 0.5 s sin pulsar, la cadena vuelve al jab (golpes: {log.Describe()})");
+            yield return SettleDummy();
+
+            // Hit reactions: the body reacts and cannot dodge until the reaction ends (GDD §5.5)
+            var health = _movement.GetComponent<HealthSystem>();
             yield return Teleport(Corridor(-30f));
             Visited.Clear();
-            Keys(Key.S);
-            yield return 0.2f;
-            yield return Tap(Key.Q, Key.S);
-            Check(Visited.Contains(_movement.DodgeState) && _movement.DodgeState.LocalDirection.y < -0.5f,
-                  $"Q + S: esquiva hacia atrás (dirección local {_movement.DodgeState.LocalDirection})");
-            Keys();
+            Vector3 h0 = _movement.transform.position;
+            health.TakeDamage(15, h0 + _movement.transform.forward * 2f);
+            bool hurt = Current == _movement.HurtState;
+            yield return 0.06f;
+            bool hurtAnim = AnimIs(PlayerAnimatorIds.Hurt);
+            yield return Tap(Key.Q);
+            bool dodged = Visited.Contains(_movement.DodgeState);
+            float pushed = 0f;
+            for (float t = 0f; t < 1.2f && Current == _movement.HurtState; t += 0.02f)
+            {
+                pushed = Mathf.Max(pushed, Vector3.Distance(h0, _movement.transform.position));
+                yield return 0.02f;
+            }
+            Check(hurt && hurtAnim && !dodged && Current == _movement.IdleState && pushed > 0.1f && pushed < 0.45f,
+                  $"Recibir un golpe: reacción, empujón de {pushed:F2} m, sin esquivar durante ella y de vuelta a Idle");
+            yield return 0.5f; // i-frames
+            health.TakeDamage(25, _movement.transform.position + _movement.transform.forward * 2f);
+            yield return 0.06f;
+            Check(Current == _movement.HurtState && AnimIs(PlayerAnimatorIds.HurtHead), "Un golpe fuerte (25) usa la reacción a la cabeza");
             yield return 1f;
 
+            // Dodge: a roll of ~2.6 m that slows down (it was a 6 m dash), then an attack right out of it
             yield return Teleport(Corridor(-30f));
-            var health = _movement.GetComponent<HealthSystem>();
+            Visited.Clear();
+            Vector3 d0 = _movement.transform.position;
+            Keys(Key.S);
+            yield return 0.15f;
+            yield return Tap(Key.Q, Key.S);
+            Keys();
+            yield return 0.7f;
+            float rolled = Vector3.Distance(d0, _movement.transform.position);
+            Check(Visited.Contains(_movement.DodgeState) && _movement.DodgeState.LocalDirection.y < -0.5f && rolled > 2.0f && rolled < 3.4f,
+                  $"Q + S: esquiva hacia atrás de {rolled:F2} m (dirección local {_movement.DodgeState.LocalDirection})");
+            yield return Teleport(Corridor(-30f));
+            yield return 0.5f; // dodge cooldown
+            Visited.Clear();
+            yield return Tap(Key.Q);
+            yield return 0.25f;
+            yield return Tap(Key.J);
+            yield return 0.3f;
+            int dodge = Visited.IndexOf(_movement.DodgeState);
+            Check(dodge >= 0 && Visited.IndexOf(light) > dodge, "Después de la esquiva J responde con un ataque (GDD §5.5)");
+            yield return 1f;
+
+            // Block: −70 % from the front only, and a hit from behind breaks the guard
+            yield return Teleport(Corridor(-30f));
             Keys(Key.L);
             yield return 0.6f;
             Check(Current == _movement.BlockState, "L mantenido bloquea");
-            int h0 = health.CurrentHealth;
+            int b0 = health.CurrentHealth;
             health.TakeDamage(20, _movement.transform.position + _movement.transform.forward * 2f);
-            int frontal = h0 - health.CurrentHealth;
+            int frontal = b0 - health.CurrentHealth;
+            bool held = Current == _movement.BlockState;
             yield return 0.6f; // i-frames
-            int h1 = health.CurrentHealth;
+            int b1 = health.CurrentHealth;
             health.TakeDamage(20, _movement.transform.position - _movement.transform.forward * 2f);
-            int back = h1 - health.CurrentHealth;
+            int back = b1 - health.CurrentHealth;
             Check(frontal == 6 && back == 20, $"Bloqueo: golpe frontal de 20 quita {frontal}, por la espalda quita {back}");
+            Check(held && Current == _movement.HurtState, "El golpe bloqueado no rompe la guardia; el de la espalda sí");
             Keys();
-            yield return 0.5f;
+            yield return 1f;
+            health.InitializeHealth(health.MaxHealth);
+
+            string path = $"{CombatSheetFolder}/impactos.png";
+            _combatSheet.Save(path);
+            _combatSheet.Dispose();
+            _combatSheet = null;
+            File.WriteAllText(Path.ChangeExtension(path, ".txt"),
+                "Columnas: jab · cross · gancho · patada (en el momento del impacto). Fila 1: de lado; fila 2: en diagonal.\n");
+            Debug.Log($"{Tag} INFO  Hoja de impactos del combate: {path}");
+        }
+
+        /// <summary>One strike that connected with the dummy, as the test saw it.</summary>
+        private sealed class CombatHit
+        {
+            public float Time, Distance, YawError;
+            public int Damage;
+            public string Attack;
+        }
+
+        /// <summary>What happened during a combat run, sampled every 10 ms.</summary>
+        private sealed class CombatLog
+        {
+            public readonly List<CombatHit> Hits = new List<CombatHit>();
+            public readonly HashSet<int> Anims = new HashSet<int>();
+            public float MinDistance = float.MaxValue, MaxLimbDepth, MaxStepSpeed, MinSole = float.MaxValue, MaxSway, MaxDisplacement;
+            public float EndedIdleAt = -1f, RunAt = -1f, HeavyUntil;
+            public bool SawHitStop, SawCombo;
+            public int MaxChain;
+            public string DeepestLimb = "-";
+            /// <summary>Closest the striking limb came to the dummy's surface during a strike (m; negative = inside), and the body's distance then.</summary>
+            public float MinStrikeGap = float.MaxValue, StrikeBodyDistance = -1f;
+            /// <summary>Logs every sample of the first 0.45 s (diagnostic).</summary>
+            public bool Trace;
+            /// <summary>Impacts drawn on the combat sheet: attack name → column.</summary>
+            public Dictionary<string, int> Columns;
+
+            public float FirstHit => Hits.Count > 0 ? Hits[0].Time : -1f;
+            public float LastHitTime => Hits.Count > 0 ? Hits[Hits.Count - 1].Time : -1f;
+
+            public bool Intervals(float min, float max)
+            {
+                for (int i = 1; i < Hits.Count; i++)
+                {
+                    float d = Hits[i].Time - Hits[i - 1].Time;
+                    if (d < min || d > max) return false;
+                }
+                return true;
+            }
+
+            public string IntervalText
+            {
+                get
+                {
+                    var s = new StringBuilder();
+                    for (int i = 1; i < Hits.Count; i++) s.Append(i > 1 ? " / " : "").Append((Hits[i].Time - Hits[i - 1].Time).ToString("F2"));
+                    return s.Length > 0 ? s.ToString() : "-";
+                }
+            }
+
+            public string Describe()
+            {
+                var s = new StringBuilder();
+                foreach (CombatHit h in Hits) s.Append($"{h.Attack} {h.Damage} a {h.Time:F2} s ({h.Distance:F2} m, {h.YawError:F0}°); ");
+                return s.Length > 0 ? s.ToString() : $"ninguno; el miembro pasó a {MinStrikeGap:F2} m de la superficie con el cuerpo a {StrikeBodyDistance:F2} m del eje";
+            }
+        }
+
+        /// <summary>Places the player <paramref name="distance"/> m in front of the dummy, facing it (turned by <paramref name="yawOffset"/>).</summary>
+        private static IEnumerator FaceDummy(float distance, float yawOffset = 0f)
+        {
+            yield return SettleDummy();
+            Vector3 d = _dummy.transform.position;
+            // The dummy stands at the entrance strip; the player comes from +Z (yaw 180 faces it)
+            yield return Teleport(new Vector3(d.x, Floor + OriginAboveFeet, d.z + distance), 180f + yawOffset);
+            Visited.Clear();
+        }
+
+        /// <summary>Waits (up to 4 s) for the dummy to stop swaying and return to its place.</summary>
+        private static IEnumerator SettleDummy()
+        {
+            for (float t = 0f; t < 4f && (_dummy.Sway > 0.5f || _dummy.Displacement > 0.02f); t += 0.1f)
+                yield return 0.1f;
+        }
+
+        /// <summary>
+        /// Presses keys at the given times (each held 60 ms) while <paramref name="held"/> stays down, and
+        /// samples the fight every 10 ms for <paramref name="duration"/> seconds.
+        /// </summary>
+        private static IEnumerator CombatRun(float duration, CombatLog log, Key[] held, params (float At, Key Key)[] presses)
+        {
+            held ??= new Key[0];
+            Keys(held);
+            float t0 = Time.time, release = -1f;
+            int next = 0, hits = _dummy.Hits;
+            ResetStep();
+            while (Time.time - t0 < duration)
+            {
+                float t = Time.time - t0;
+                if (next < presses.Length && t >= presses[next].At)
+                {
+                    var down = new Key[held.Length + 1];
+                    held.CopyTo(down, 0);
+                    down[held.Length] = presses[next].Key;
+                    Keys(down);
+                    release = t + 0.06f;
+                    next++;
+                }
+                else if (release > 0f && t >= release)
+                {
+                    Keys(held);
+                    release = -1f;
+                }
+                SampleCombat(log, t, ref hits);
+                yield return 0.01f;
+            }
+            Keys();
+        }
+
+        private static void SampleCombat(CombatLog log, float t, ref int hits)
+        {
+            PlayerState s = Current;
+            Vector3 p = _movement.transform.position, d = _dummy.transform.position;
+            Vector3 to = new Vector3(d.x - p.x, 0f, d.z - p.z);
+            float distance = to.magnitude;
+            log.MinDistance = Mathf.Min(log.MinDistance, distance);
+            log.MaxStepSpeed = Mathf.Max(log.MaxStepSpeed, StepSpeed());
+            log.MaxSway = Mathf.Max(log.MaxSway, _dummy.Sway);
+            log.MaxDisplacement = Mathf.Max(log.MaxDisplacement, _dummy.Displacement);
+            if (_movement.IsGrounded) log.MinSole = Mathf.Min(log.MinSole, SoleClearance);
+            if (_playerAnimator.IsHitStopped) log.SawHitStop = true;
+            AnimatorStateInfo info = _animator.IsInTransition(0) ? _animator.GetNextAnimatorStateInfo(0) : _animator.GetCurrentAnimatorStateInfo(0);
+            log.Anims.Add(info.shortNameHash);
+            if (s == _movement.LightAttackState) log.MaxChain = Mathf.Max(log.MaxChain, _movement.LightAttackState.ChainIndex);
+            if (s == _movement.HeavyAttackState)
+            {
+                log.HeavyUntil = t;
+                if (_movement.HeavyAttackState.FromCombo) log.SawCombo = true;
+            }
+            if (s == _movement.RunState && log.RunAt < 0f) log.RunAt = t;
+            if (log.Trace && t < 0.45f)
+                Debug.Log($"{Tag} TRACE t={t:F3} estado={s.GetType().Name} n={(s is PlayerAttackState tr ? tr.Progress : -2f):F3} dist={distance:F3} vel={_movement.Velocity} pesoMxM={(_movement.Locomotion != null ? _movement.Locomotion.Weight : -1f):F2} hitstop={_playerAnimator.IsHitStopped} deltaAnim/s={(Time.deltaTime > 0f ? Vector3.Dot(_animator.deltaPosition, _movement.transform.forward) / Time.deltaTime : 0f):F2} pos={_movement.transform.position.z:F3}");
+            if (s is PlayerAttackState striking && striking.Progress >= striking.Data.HitStart && striking.Progress <= striking.Data.HitEnd)
+            {
+                Transform limbBone = _animator.GetBoneTransform(striking.Data.Limb);
+                float gap = -SignedDepthInDummy(limbBone.position);
+                if (gap < log.MinStrikeGap) { log.MinStrikeGap = gap; log.StrikeBodyDistance = distance; }
+            }
+            if (s == _movement.IdleState && log.Hits.Count > 0 && log.EndedIdleAt < 0f) log.EndedIdleAt = t;
+
+            foreach ((Transform limb, string name) in new[] { (_handL, "mano izq"), (_handR, "mano der"), (_footL, "pie izq"), (_footR, "pie der") })
+            {
+                float depth = DepthInDummy(limb.position);
+                if (depth > log.MaxLimbDepth) { log.MaxLimbDepth = depth; log.DeepestLimb = name; }
+            }
+
+            if (_dummy.Hits == hits) return;
+            hits = _dummy.Hits;
+            var attack = s as PlayerAttackState;
+            float yawError = distance > 0.01f ? Vector3.Angle(_movement.transform.forward, to) : 0f;
+            log.Hits.Add(new CombatHit
+            {
+                Time = t, Distance = distance, YawError = yawError, Damage = _dummy.LastDamage,
+                Attack = attack != null ? attack.Data.Name : s.GetType().Name,
+            });
+            string attackName = log.Hits[log.Hits.Count - 1].Attack;
+            Debug.Log($"{Tag} INFO  Impacto: {attackName} de {_dummy.LastDamage} a {t:F2} s, a {distance:F2} m del eje, {yawError:F0}° de la mira");
+            if (_combatSheet != null && log.Columns != null && log.Columns.TryGetValue(attackName, out int column))
+                CaptureCombat(column);
+        }
+
+        /// <summary>How deep (m) a point is inside the dummy's body capsule (0 if outside).</summary>
+        private static float DepthInDummy(Vector3 point) => Mathf.Max(0f, SignedDepthInDummy(point));
+
+        /// <summary>How deep (m) a point is inside the dummy's body capsule (negative: how far outside).</summary>
+        private static float SignedDepthInDummy(Vector3 point)
+        {
+            if (_dummyBody == null) return -1f;
+            Transform b = _dummyBody.transform;
+            Vector3 axisBottom = b.TransformPoint(_dummyBody.center - Vector3.up * (_dummyBody.height * 0.5f - _dummyBody.radius));
+            Vector3 axisTop = b.TransformPoint(_dummyBody.center + Vector3.up * (_dummyBody.height * 0.5f - _dummyBody.radius));
+            Vector3 axis = axisTop - axisBottom;
+            float k = Mathf.Clamp01(Vector3.Dot(point - axisBottom, axis) / axis.sqrMagnitude);
+            return _dummyBody.radius - Vector3.Distance(point, axisBottom + axis * k);
+        }
+
+        /// <summary>Draws the pose of this moment (an impact) in column <paramref name="column"/> of the combat sheet: from the side and in diagonal.</summary>
+        private static void CaptureCombat(int column)
+        {
+            Vector3 focus = Vector3.Lerp(_movement.transform.position, _dummy.transform.position, 0.5f);
+            focus.y = Floor + 1.0f;
+            _combatSheet.Capture(0, column, focus, Vector3.right, Floor);
+            _combatSheet.Capture(1, column, focus, new Vector3(1f, 0f, -1f), Floor);
         }
 
         /// <summary>Distance of an obstacle's front face from the start of the combined course (prefab layout).</summary>
@@ -1373,6 +2140,15 @@ namespace WarriorWoke.EditorTools
             _movement.Teleport(position, facing);
             Object.FindAnyObjectByType<CameraFollow>()?.SnapToTarget();
             yield return 0.7f;
+
+            // The cases measure distances from where the body stands: if the end of the previous
+            // motion still moved it, place it again now that it is at rest
+            Vector3 drift = _movement.transform.position - position;
+            if (new Vector2(drift.x, drift.z).magnitude > 0.02f)
+            {
+                _movement.Teleport(position, facing);
+                yield return 0.3f;
+            }
         }
 
         private static bool Check(bool condition, string label)

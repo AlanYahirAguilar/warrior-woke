@@ -59,7 +59,8 @@ entran a la base de motion matching llevan la altura horneada en la pose (basada
 Con Foot IK, Ch45 patina lo mismo que el esqueleto original (mediana 0.03–0.15 m/s) en los dos
 estilos.
 
-## Estado: 🔧 base de motion matching
+## Estado: ✅ en uso (motion matching)
 
 Desde el 2026-10-07, `BW`, `BR`, `SW`, `SR` y `TR1` de los dos estilos forman la parte de strafe de la base
-de MxM (tag `Strafe`, `docs/arquitectura.md` §7.2). Todavía **no** las usa el jugador.
+de MxM (tag `Strafe`, `docs/arquitectura.md` §7.2). Desde el 2026-10-08 el jugador corre hacia atrás y camina
+en cualquier dirección con ellas.

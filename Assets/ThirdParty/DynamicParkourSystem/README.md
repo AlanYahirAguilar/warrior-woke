@@ -7,8 +7,10 @@
 
 ## Qué se copió
 
-Solo las animaciones que usa el jugador (10 desde el 2026-10-02: `Slide.fbx` se eliminó al reemplazar el
-slide por los clips de Quaternius, cuyo bucle sí es continuo), con sus `.meta` originales (rangos de clip):
+Solo las animaciones que usa el jugador (9 desde el 2026-10-09: `Slide.fbx` se eliminó el 2026-10-02 al
+reemplazar el slide por los clips de Quaternius, cuyo bucle sí es continuo, y `VaultFence.fbx` el
+2026-10-09, al pasar el vault a los clips de mocap de Kinematica, P36), con sus `.meta` originales
+(rangos de clip):
 
 | Archivo | Clip | Uso en el proyecto |
 |---|---|---|
@@ -18,23 +20,26 @@ slide por los clips de Quaternius, cuyo bucle sí es continuo), con sus `.meta` 
 | `Fall Idle.fbx` | Fall A Loop | Estado `Fall` |
 | `Falling To Landing.fbx` | Falling To Landing | Aterrizaje ligero sin input, medio y fuerte |
 | `Land To Run Forward.fbx` | Fall A Land To Run Forward | Aterrizaje ligero con input |
-| `VaultFence.fbx` | Vault1 | Vault, con root motion y la curva `LHandCurve` (IK de la mano) |
 | `Idle To Braced Hang.fbx` | Idle To Braced Hang | Agarrarse de la cornisa, con root motion |
 | `Braced Hanging Idle.fbx` | Hanging Idle | Colgado de la cornisa |
 | `Braced Hang Climb.fbx` | Braced Hang To Crouch | Subir la cornisa, con root motion |
 
 `Tools → Warrior Woke → Configurar Animaciones del Jugador` los reimporta como Humanoid con Avatar
 propio (el original copiaba el Avatar del modelo Erika, que no se importó) y fija el root motion de
-cada clip: la locomoción, el aire, los aterrizajes y el slide se reproducen en el sitio; el vault,
-el agarre y la subida conservan su root motion, que el juego aplica y warpea con `MatchTarget`
-(`docs/arquitectura.md` §5.10). La curva `LHandCurve` de *VaultFence* se perdió en una reimportación
-(fallo de `ModelImporter.clipAnimations` en Unity 6000.6) y la herramienta la restaura con las claves
-del `.meta` original.
+cada clip: la locomoción, el aire y los aterrizajes se reproducen en el sitio; el agarre y la subida
+conservan su root motion, que el juego aplica y warpea con `MatchTarget` (`docs/arquitectura.md` §5.10).
+(Hoy la locomoción la hace motion matching; Walk, Jog y Run solo se ven en la mezcla de MxM con el
+Animator Controller.)
+
+**Por qué se dejó *VaultFence* (P36):** medido sobre Ch45, su vuelo caía como con una gravedad de ~4.2
+m/s² (cámara lenta), aterrizaba a ~2.6 m del obstáculo y era un solo vault de carrera de una mano para
+cualquier velocidad y obstáculo. Su curva `LHandCurve` se había perdido en una reimportación (fallo de
+`ModelImporter.clipAnimations` en Unity 6000.6, T22).
 
 ## Qué no se copió
 
-Ningún script, prefab, escena, modelo ni material. Se adaptaron a la FSM del jugador la lógica de
-vault (`EnvironmentChecker.TryFindVault`, `PlayerVaultState`), del braced hang con `MatchTarget` e
+Ningún script, prefab, escena, modelo ni material. Se adaptaron a la FSM del jugador la detección del
+vault (`EnvironmentChecker.TryFindVault`; el vault en sí es hoy el de P36), la del braced hang con `MatchTarget` e
 IK (`EnvironmentChecker.TryFindLedge`, `PlayerLedgeGrabState`, `PlayerLedgeClimbState`,
 `PlayerContactIK`), del root motion por estado (`PlayerAnimator`), del auto step
 (`PlayerMovement.TryAutoStep`) y del IK de pies (`PlayerContactIK`), con créditos en sus comentarios.

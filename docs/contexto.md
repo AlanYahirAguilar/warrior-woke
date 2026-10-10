@@ -11,7 +11,7 @@
 > **Fuente de diseño:** [`GDD_Awakened_Warrior.pdf`](../GDD_Awakened_Warrior.pdf) (raíz del repo, GDD final).
 > Si este documento y el GDD no coinciden, manda el GDD, y hay que corregir este documento.
 >
-> Última revisión completa: 2026-10-02.
+> Última revisión completa: 2026-10-02. Actualizado el 2026-10-09 (Fase 3: vault, slide y combate).
 
 ---
 
@@ -207,10 +207,13 @@ Comandante (fin del juego y reencuentro con la familia).
   - Entorno: `LowPolyCity` (estilo cartoon "cyber").
   - Protagonista: personaje **Ch45** de Mixamo (`Assets/Characters/Player/character.fbx`), armadura
     oscura con sangre. No es el samurái "de apariencia sencilla" del GDD §22.
-  - Animaciones: clips Humanoid retargeteados a Ch45 de tres orígenes: `LowPoly` (idle, sprint,
-    caminar hacia atrás, salto, rolls, combate), **Dynamic Parkour System** (walk, jog, run, caída,
-    aterrizajes, vault, slide y cornisa; licencia MIT, animaciones de Mixamo; ver
-    `Assets/ThirdParty/DynamicParkourSystem/README.md`) y dos transiciones de guardia de Ch45.
+  - Animaciones: clips Humanoid retargeteados a Ch45: mocap del **Kinematica Demo** (locomoción por
+    motion matching y vaults; Unity Companion License) y de **100STYLE** (retroceso y strafe; CC BY 4.0),
+    **Quaternius** UAL (agacharse, slide, mantle, roll, jab, cross y reacciones al daño; CC0), mocap de la
+    **CMU Mocap Database** (gancho y patada; uso libre con agradecimiento), **Dynamic Parkour System**
+    (caída, aterrizajes y cornisa; MIT, animaciones de Mixamo), `LowPoly` (idle, salto, rolls de la
+    esquiva, bloqueo) y dos transiciones de guardia de Ch45. Origen y licencia de cada una en el README de
+    su carpeta en `Assets/ThirdParty/`; los créditos del juego deben nombrar 100STYLE y CMU.
     Las animaciones `LowPoly` vienen del paquete gratuito *FREE Low Poly Human - RPG Character* de
     la Unity Asset Store (lo indica el bloque `AssetOrigin` de sus `.meta`). Falta confirmar su
     licencia en la página del paquete antes de publicar el juego (arquitectura T15).
@@ -290,7 +293,12 @@ final · SFX y música básica · build para Windows.
    Mode (`arquitectura.md` §7.2). **Desde el 2026-10-08 (fase 2)** el jugador se mueve con un
    `CharacterController` (P30) y camina, corre y esprinta con motion matching a las velocidades del
    mocap (P33: 1.3 / 3.4 / 4.8 m/s, atrás ~2 m/s); el parkour y el combate siguen como acciones del
-   Animator, reajustadas a esas velocidades.
+   Animator, reajustadas a esas velocidades. **Fase 3 (2026-10-08/09):** el vault es un clip de mocap
+   elegido de un catálogo por obstáculo, velocidad y distancia, y warpeado sobre la geometría por código
+   propio (P36: el vault alto bajó a 1.1 m y el medio estándar tiene 0.3 m de fondo); el combate
+   desarmado sigue las fases medidas de sus clips, con la cadena jab → cross → gancho, la patada de mocap,
+   objetivo, golpe por contacto, hit stop, reacción al daño y una esquiva más corta (P37), probado sobre un
+   muñeco de entrenamiento en el área de pruebas.
 3. **No se implementa nada fuera del MVP** sin que antes funcione el MVP (GDD §25 y §28).
 
 ## 11. Cómo abrir el proyecto
@@ -300,10 +308,11 @@ final · SFX y música básica · build para Windows.
 - Unity Hub → **Add** → selecciona la carpeta `warrior-woke/`. La primera importación tarda varios
   minutos.
 - **Escena del juego:** `Assets/Scenes/Level-1.unity` (la única en Build Settings). Desde el
-  2026-10-01 es el **Parkour Test Area** (P24): un suelo plano con perímetro y once secciones hechas
+  2026-10-01 es el **Parkour Test Area** (P24): un suelo plano con perímetro y doce secciones hechas
   con los prefabs estándar (P25), sin textos (01 locomoción · 02 vault bajo · 03 vault medio ·
   04 vault alto · 05 slide · 06 cornisa · 07 muro de escalada · 08 salto y aterrizaje · 09 combinado ·
-  10 laboratorio de fluidez · 11 mantle; ver `features.md` F32). Al dar Play apareces en su entrada,
+  10 laboratorio de fluidez · 11 mantle · 12 combate, con un muñeco de entrenamiento a la derecha de la
+  entrada; ver `features.md` F32). Al dar Play apareces en su entrada,
   mirando hacia las secciones. Los niveles reales del GDD (§10) todavía no existen.
   `Assets/LowPolyCity/Scenes/CartoonLowPolyCityLite_01.unity` es solo la demo del asset pack y no
   tiene lógica del juego.
@@ -314,27 +323,35 @@ final · SFX y música básica · build para Windows.
   lo vuelve a bloquear) · WASD/flechas correr, relativo a la cámara · Ctrl (mantener) caminar, en
   cualquier dirección mirando a la cámara (strafe y hacia atrás) · S sin sprint correr hacia atrás
   sin girar (~2 m/s) · Shift (mantener) sprint (S con Shift: media vuelta) · Espacio, según el
-  contexto: subirse a un bloque de 0.8–1.5 m (mantle), vault de un obstáculo de 0.45–1.2 m, agarrarse
-  de una cornisa de 1.9–2.7 m o saltar (y agarrarse en el aire); corriendo se puede pulsar antes y la
-  acción espera a su punto de inicio · C, según el contexto: deslizarse corriendo con momentum
-  (Espacio durante el slide encadena vault o salto), bajar a colgarse junto a un borde con caída, o
-  agacharse / levantarse · colgado: Espacio sube, dirección contraria al muro suelta, Espacio + esa
-  dirección salta lejos del muro · J ataque ligero · K ataque fuerte · L bloquear (mantener) ·
-  Q + dirección esquivar. E (recoger arma) y ESC (pausa) todavía no hacen nada. Los rangos están en
+  contexto: subirse a un bloque de 0.8–1.5 m (mantle), vault de un obstáculo de 0.45–1.1 m (si algún
+  clip encaja con su altura, fondo, la velocidad y la distancia), agarrarse de una cornisa de 1.9–2.7 m o
+  saltar (y agarrarse en el aire); corriendo se puede pulsar antes y la acción espera a su punto de
+  inicio · C, según el contexto: deslizarse corriendo con momentum (pulsada antes de una barra, espera a
+  alcanzarla; Espacio durante el slide encadena vault o salto), bajar a colgarse junto a un borde con
+  caída, o agacharse / levantarse · colgado: Espacio sube, dirección contraria al muro suelta, Espacio +
+  esa dirección salta lejos del muro · J ataque ligero (jab → cross → gancho; las pulsaciones durante un
+  golpe quedan en cola) · K ataque fuerte (patada; remata el combo J → J → K) · los ataques giran y dan
+  un paso hacia el objetivo más cercano de frente · L bloquear (mantener) · Q + dirección esquivar
+  (después, J o K responden con un ataque). E (recoger arma) y ESC (pausa) todavía no hacen nada. Los rangos están en
   `ParkourStandard`.
 - **Si cambias animaciones o el modelo:** corre **Tools → Warrior Woke → Configurar Animaciones del
   Jugador** (y **Validar Personaje** para revisar). Ver `arquitectura.md` §5.10.
 - **Pruebas automáticas:** **Tools → Warrior Woke → Probar Personaje en Play Mode** recorre el
   Parkour Test Area con teclado simulado y reporta cada comprobación en la consola
-  (`[PlayModeTest]`): el flujo de estados y el contacto físico medido sobre el esqueleto (manos en
-  el borde, pies que no atraviesan nada, etc.). También en batch (ver `arquitectura.md` §5.9). Si
+  (`[PlayModeTest]`): el flujo de estados, el contacto físico medido sobre el esqueleto (manos en
+  el borde, pies que no atraviesan nada, etc.), los vaults y el combate sobre el muñeco; deja
+  storyboards en `Logs/PlayModeVaults` y `Logs/PlayModeCombat`. También en batch (ver `arquitectura.md` §5.9). Si
   cambias la escena, regenérala con **Tools → Warrior Woke → Construir Parkour Test Area**. Si
   cambias el estándar de obstáculos, regenera los prefabs con **Generar Prefabs de Obstáculos** y
   revisa con **Validar Obstáculos de Parkour**.
-- **Motion matching** (🔧, todavía sin uso en el jugador): **Tools → Warrior Woke → Construir Datos de
+- **Motion matching** (la locomoción del jugador): **Tools → Warrior Woke → Construir Datos de
   Motion Matching** rehace la base de MxM (hazlo si cambias las tomas de la base) y **Probar Motion
   Matching** la prueba en Play Mode (`[MxMProbe]` en la consola, `Logs/MxMProbe/metrics.csv`). Ver
   `arquitectura.md` §7.2.
+- **Vaults y combate:** **Construir Catálogo de Vaults** rehace `Assets/Data/Parkour/VaultCatalog.asset`
+  (hazlo si cambias las tomas de vault; después corre **Configurar Animaciones del Jugador**) y **Revisar
+  Clips de Combate** dibuja y mide los golpes sobre Ch45 (`Logs/CombatClips`), de donde salen los tiempos
+  de `CombatTimings`. Ver `arquitectura.md` §5.17 y §5.4.
 
 ### "Hice pull y no veo los cambios"
 
@@ -389,7 +406,7 @@ git config merge.unityyamlmerge.recursive binary
 - La serialización es **Force Text** (`EditorSettings.asset`, `m_SerializationMode: 2`). No la
   cambies a Binary.
 - **Git LFS solo para el mocap** (P35, 2026-10-05): `.gitattributes` manda a LFS los FBX de
-  `Assets/ThirdParty/Kinematica/` y `Assets/ThirdParty/100STYLE/` y, desde el 2026-10-07, la base horneada
+  `Assets/ThirdParty/Kinematica/`, `Assets/ThirdParty/100STYLE/` y `Assets/ThirdParty/CMU/` y, desde el 2026-10-07, la base horneada
   de motion matching (`Assets/Data/MxM/*_AnimData.asset`, ~30 MB). Cada máquina necesita Git LFS (`git lfs install`, una vez); sin él,
   esos FBX llegan como punteros de texto y Unity no los importa. No reescribe el historial: el resto
   del arte sigue en git normal. Al final de `.gitattributes` hay un bloque comentado para extender LFS

@@ -231,16 +231,14 @@ public class ParkourObstacle : MonoBehaviour
             Gizmos.color = Color.cyan;
             Gizmos.DrawLine(new Vector3(0f, ParkourStandard.VaultKneeRay, -ParkourStandard.VaultReach), new Vector3(0f, ParkourStandard.VaultKneeRay, 0f));
             DrawBand(ParkourStandard.VaultMinHeight, ParkourStandard.VaultMaxHeight, width, 0f);
-            // Start: where the run-up reaches the hand point at the clip's pace
+            // Typical take-off, palm on the top and landing of a vault (each clip's own values are in the
+            // VaultCatalog, P36)
             Gizmos.color = Color.green;
-            Gizmos.DrawWireSphere(new Vector3(0f, 0.05f, -(ParkourTimings.VaultClipHandReach - ParkourTimings.VaultHandInset)), 0.12f);
-            // Hand: left of the body line, just past the edge
+            Gizmos.DrawWireSphere(new Vector3(0f, 0.05f, -ParkourStandard.VaultTakeoffDistance), 0.12f);
             Gizmos.color = Color.yellow;
-            Gizmos.DrawSphere(new Vector3(-ParkourTimings.VaultHandLateral, height, ParkourTimings.VaultHandInset), 0.06f);
-            // Landing: where the clip lands, and the closest landing accepted
+            Gizmos.DrawSphere(new Vector3(-ParkourTimings.HandLateral, height, ParkourStandard.VaultHandInset), 0.06f);
             Gizmos.color = Color.magenta;
-            Gizmos.DrawWireSphere(new Vector3(0f, 0.05f, depth + ParkourTimings.VaultClipLandDistance), 0.15f);
-            Gizmos.DrawLine(new Vector3(-0.3f, 0.02f, depth + ParkourStandard.VaultMinLanding), new Vector3(0.3f, 0.02f, depth + ParkourStandard.VaultMinLanding));
+            Gizmos.DrawWireSphere(new Vector3(0f, 0.05f, depth + ParkourStandard.VaultLandDistance), 0.15f);
         }
         else if (ParkourStandard.IsLedge(type))
         {
@@ -271,7 +269,7 @@ public class ParkourObstacle : MonoBehaviour
             Gizmos.color = Color.green;
             Gizmos.DrawWireSphere(new Vector3(0f, 0.05f, -ParkourStandard.MantleReach * 0.6f), 0.12f);
             Gizmos.color = Color.yellow;
-            Gizmos.DrawSphere(new Vector3(-ParkourTimings.HandLateral, height + ParkourTimings.WristAboveSurface, ParkourTimings.VaultHandInset), 0.06f);
+            Gizmos.DrawSphere(new Vector3(-ParkourTimings.HandLateral, height + ParkourTimings.WristAboveSurface, ParkourTimings.MantleHandInset), 0.06f);
             Gizmos.color = Color.magenta;
             Gizmos.DrawWireSphere(new Vector3(0f, height + 0.05f, ParkourStandard.MantleStandInset), 0.15f);
         }

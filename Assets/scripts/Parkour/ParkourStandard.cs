@@ -45,12 +45,14 @@ public readonly struct ParkourObstacleSpec
 /// values, so the standard changes here and nowhere else.
 ///
 /// Every value derives from the character and the clips, not from taste: the Player's capsule is
-/// 1.975 m tall (0.54 m radius), the jump rises ~1 m (JumpSpeed 4.5), the vault clip clears 0.8 m on
-/// its own and lands 1.6 m behind the obstacle, and the hang clips put the hands ~2.1 m above the
-/// feet (ParkourTimings has the clip measurements). The obstacle heights sit inside the detection
-/// ranges with a margin on both sides, so a standard obstacle never lands on a limit.
-/// Up to 1.5 m a block deep enough to stand on is climbed onto (mantle, P28); between 1.5 m and
-/// 1.9 m (lowest grab) there is no action: that band is the Barrier, which blocks the way on purpose.
+/// 1.975 m tall (0.35 m radius), the jump rises ~1 m (JumpSpeed 4.5), the vault clips (Kinematica
+/// mocap, VaultCatalog, P36) fit tops of 0.45-1.1 m with a bounded warp (a 1.0 m top up to 0.3 m deep at
+/// every gait, deeper ones only running or sprinting, 1.1 m only sprinting) and land ~1 m behind the
+/// obstacle, and the hang clips put the hands ~2.1 m above the feet (ParkourTimings has the clip
+/// measurements). The obstacle heights sit inside the detection ranges with a margin on both sides, so
+/// a standard obstacle never lands on a limit. Up to 1.5 m a block deep enough to stand on is climbed
+/// onto (mantle, P28); above the vault (1.1 m) a shallow top, and everything between 1.5 m and 1.9 m
+/// (lowest grab), has no action: that band is the Barrier, which blocks the way on purpose.
 /// </summary>
 public static class ParkourStandard
 {
@@ -69,27 +71,40 @@ public static class ParkourStandard
     // ─── Vault detection (EnvironmentChecker.TryFindVault) ───────────────────────
     /// <summary>Lowest top (m above the feet) that counts as a vault; lower ones are stepped or jumped.</summary>
     public const float VaultMinHeight = 0.45f;
-    /// <summary>Highest top (m above the feet) that can be vaulted (GDD §5.4: low obstacles only).</summary>
-    public const float VaultMaxHeight = 1.2f;
-    /// <summary>Deepest obstacle (m along the vault) crossed in one move.</summary>
-    public const float VaultMaxDepth = 1.5f;
-    /// <summary>How far ahead (m from the feet) an obstacle is detected when Space is pressed.</summary>
+    /// <summary>
+    /// Highest top (m above the feet) that can be vaulted (GDD §5.4: low obstacles only). Above it no
+    /// vault clip fits without lifting the body more than 0.2 m (an exaggerated flight): the vault of a
+    /// 1.2 m top was disabled in P36.
+    /// </summary>
+    public const float VaultMaxHeight = 1.1f;
+    /// <summary>Deepest obstacle (m along the vault) crossed in one move (only sprinting: the dive vault).</summary>
+    public const float VaultMaxDepth = 1.4f;
+    /// <summary>Base reach (m from the feet) of the vault's detection ray; the Space look-ahead is VaultSpotReach.</summary>
     public const float VaultReach = 1.1f;
-    /// <summary>Closest landing (m behind the back face) accepted when the clip's natural landing is blocked.</summary>
-    public const float VaultMinLanding = 0.6f;
+    /// <summary>
+    /// How far ahead (m) Space finds a vault standing still: about two steps. The slow clips walk in
+    /// from up to ~4 m, but a vault that walks the body farther than this on its own takes the control
+    /// away from the player (P36).
+    /// </summary>
+    public const float VaultStandReach = 1.8f;
     /// <summary>Height of the knee ray that finds the front face (m above the feet).</summary>
     public const float VaultKneeRay = VaultMinHeight * 0.6f;
     /// <summary>
-    /// Ideal take-off: body this far (m) from the face, where the clip's run-up meets the obstacle
-    /// with no frames skipped (hand reach 1.34 m − hand inset 0.12 m). Closer, the clip must start
-    /// later and a tall obstacle has no time for its take-off.
+    /// Typical take-off: body this far (m) from the face when the lead foot leaves the ground in a
+    /// vault (measured 0.93-0.97 m running; 0.55 walking, 1.5 sprinting). Each clip's own values are in
+    /// the VaultCatalog; this one sizes the look-ahead and the gizmos.
     /// </summary>
     public const float VaultTakeoffDistance = 1.2f;
-    /// <summary>Seconds of run-up that Space looks ahead when running: the vault waits for the take-off point.</summary>
-    public const float VaultSpotTime = 0.35f;
+    /// <summary>
+    /// Seconds of run-up that Space looks ahead when running: the vault waits for its entry point. A
+    /// player presses about half a second to a second before the obstacle (P36).
+    /// </summary>
+    public const float VaultSpotTime = 0.7f;
+    /// <summary>Typical palm inset past the front edge (m) and landing distance behind the back face (m) of the vault clips (gizmos).</summary>
+    public const float VaultHandInset = 0.1f, VaultLandDistance = 1.0f;
 
     /// <summary>How far ahead (m) Space finds a vault at <paramref name="speed"/>: farther when running fast.</summary>
-    public static float VaultSpotReach(float speed) => Mathf.Max(VaultReach, VaultTakeoffDistance + speed * VaultSpotTime);
+    public static float VaultSpotReach(float speed) => Mathf.Max(VaultStandReach, VaultTakeoffDistance + speed * VaultSpotTime);
 
     // ─── Mantle (EnvironmentChecker.TryFindMantle, PlayerMantleState) ───────────
     /// <summary>
@@ -170,10 +185,11 @@ public static class ParkourStandard
         {
             // Curb: auto step (never a vault: below VaultMinHeight, and on Ground)
             case ParkourObstacleType.Step:        return new ParkourObstacleSpec(0.25f, 0.05f, 0.35f, 0.6f, 0.3f, 100f, 1.0f, Ground);
-            // Vaults: low = the clip clears it alone; medium = small take-off warp; high = top of the vault range
-            case ParkourObstacleType.LowVault:    return new ParkourObstacleSpec(0.6f, VaultMinHeight, ParkourTimings.VaultClipFenceHeight, 0.4f, 0.2f, VaultMaxDepth, 1.0f, Obstacle);
-            case ParkourObstacleType.MediumVault: return new ParkourObstacleSpec(1.0f, ParkourTimings.VaultClipFenceHeight, 1.1f, 0.5f, 0.2f, VaultMaxDepth, 1.0f, Obstacle);
-            case ParkourObstacleType.HighVault:   return new ParkourObstacleSpec(1.2f, 1.1f, VaultMaxHeight, 0.6f, 0.2f, VaultMaxDepth, 1.0f, Obstacle);
+            // Vaults (P36): low = every gait, the body lowered; medium = a wall every gait vaults (deeper
+            // tops only running or sprinting); high = top of the vault range, sprinting only
+            case ParkourObstacleType.LowVault:    return new ParkourObstacleSpec(0.6f, VaultMinHeight, 0.8f, 0.4f, 0.2f, VaultMaxDepth, 1.0f, Obstacle);
+            case ParkourObstacleType.MediumVault: return new ParkourObstacleSpec(1.0f, 0.8f, 1.05f, 0.3f, 0.2f, VaultMaxDepth, 1.0f, Obstacle);
+            case ParkourObstacleType.HighVault:   return new ParkourObstacleSpec(1.1f, 1.05f, VaultMaxHeight, 0.4f, 0.2f, 0.6f, 1.0f, Obstacle);
             // Mantle block: deep enough to stand on, climbed onto (slow) — a fast run vaults what it can
             case ParkourObstacleType.Mantle:      return new ParkourObstacleSpec(1.3f, MantleMinRise, MantleMaxRise, 1.5f, MantleMinDepth, 100f, 1.0f, Obstacle);
             // Dead band between the mantle and the grab, on Ground so it is never climbed either

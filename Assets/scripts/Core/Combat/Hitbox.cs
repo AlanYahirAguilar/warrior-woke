@@ -1,11 +1,18 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 /// <summary>
-/// Trigger-based hitbox that detects IDamageable entities within a sphere on activation.
+/// Detects IDamageable entities on its target layers and applies damage to them. Two queries:
+///  - <see cref="Activate"/>: a pulse — every target inside a sphere in front of the owner (the enemy's attack).
+///  - <see cref="Sweep"/>: the path of a striking limb this frame (the player's attacks, decision P37):
+///    a capsule from where the fist or foot was to where it is, so a hit is real contact with the limb
+///    the animation shows, once per target and attack.
+/// <see cref="FindTarget"/> picks what an attack turns toward. A target's collider may be a child of
+/// the object that takes the damage (the training dummy's swaying body).
 ///
 /// Best practices applied:
-///  - Uses Physics.OverlapSphereNonAlloc with a pre-allocated buffer — zero GC per activation.
-///  - The hitbox is disabled by default; only active during attack animation windows.
+///  - Physics queries with pre-allocated buffers (NonAlloc) — zero GC per query.
+///  - Only active during attack windows; it is not a persistent trigger.
 ///  - Does NOT apply damage to the owner (self-hit prevention via OwnerCollider exclusion).
 /// </summary>
 public class Hitbox : MonoBehaviour
@@ -54,6 +61,71 @@ public class Hitbox : MonoBehaviour
                 OnHit?.Invoke(target, col.ClosestPoint(center));
             }
         }
+    }
+
+    /// <summary>
+    /// The path of a striking limb this frame: a capsule of <paramref name="limbRadius"/> from
+    /// <paramref name="from"/> to <paramref name="to"/>. Every living IDamageable it touches that is not
+    /// yet in <paramref name="struck"/> takes <paramref name="amount"/> and is added to it. Returns how
+    /// many it struck now.
+    /// </summary>
+    public int Sweep(Vector3 from, Vector3 to, float limbRadius, int amount, List<IDamageable> struck)
+    {
+        int count = Physics.OverlapCapsuleNonAlloc(from, to, limbRadius, _hitBuffer, targetLayers, QueryTriggerInteraction.Collide);
+        int hits = 0;
+        for (int i = 0; i < count; i++)
+        {
+            Collider col = _hitBuffer[i];
+            if (ownerCollider != null && col == ownerCollider) continue;
+            IDamageable target = col.GetComponentInParent<IDamageable>();
+            if (target == null || target.IsDead || struck.Contains(target)) continue;
+            struck.Add(target);
+            target.TakeDamage(amount, transform.position);
+            OnHit?.Invoke(target, col.ClosestPoint(to));
+            hits++;
+        }
+        return hits;
+    }
+
+    /// <summary>
+    /// The target an attack should turn toward: the living IDamageable within <paramref name="range"/>
+    /// (m, horizontally from <paramref name="origin"/>) and <paramref name="maxAngle"/> (°) of
+    /// <paramref name="direction"/> that is the best mix of near and in front. <paramref name="target"/>
+    /// is the object that takes the damage (its position is the target's axis on the floor) and
+    /// <paramref name="targetRadius"/> its horizontal radius.
+    /// </summary>
+    public bool FindTarget(Vector3 origin, Vector3 direction, float range, float maxAngle, out Transform target, out float targetRadius)
+    {
+        target = null;
+        targetRadius = 0f;
+        direction.y = 0f;
+        if (direction.sqrMagnitude < 0.0001f) return false;
+        direction.Normalize();
+
+        int count = Physics.OverlapSphereNonAlloc(origin, range + 1f, _hitBuffer, targetLayers, QueryTriggerInteraction.Collide);
+        float best = float.MaxValue;
+        for (int i = 0; i < count; i++)
+        {
+            Collider col = _hitBuffer[i];
+            if (ownerCollider != null && col == ownerCollider) continue;
+            var damageable = col.GetComponentInParent<IDamageable>();
+            if (damageable == null || damageable.IsDead || !(damageable is Component owner)) continue;
+
+            Vector3 to = owner.transform.position - origin;
+            to.y = 0f;
+            float distance = to.magnitude;
+            float r = Mathf.Min(col.bounds.extents.x, col.bounds.extents.z);
+            if (distance - r > range) continue;
+            float angle = distance > 0.01f ? Vector3.Angle(direction, to) : 0f;
+            if (angle > maxAngle) continue;
+            // Near and in front: an angle of maxAngle weighs like 1 m more distance
+            float score = distance + angle / maxAngle;
+            if (score >= best) continue;
+            best = score;
+            target = owner.transform;
+            targetRadius = r;
+        }
+        return target != null;
     }
 
     /// <summary>Adjusts damage value at runtime (e.g., weapon swaps, buffs).</summary>

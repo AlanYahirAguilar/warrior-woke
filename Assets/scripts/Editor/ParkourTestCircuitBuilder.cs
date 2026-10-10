@@ -23,7 +23,8 @@ namespace WarriorWoke.EditorTools
         private const string FixtureMaterial = ParkourObstaclePrefabs.Folder + "/Materials/Step.mat";
         private const float  LaneWidth      = ParkourStandard.PrefabWidth;
         public  const float  FloorTop       = 0f;
-        private const int    LaneCount      = 11;
+        private const int    LaneCount      = 12;
+        private const string DummyMaterial  = "Assets/material/enemy.mat";
 
         // Floor and perimeter (x and z limits of the walkable area)
         private const float MinX = -34f, MaxX = 44f, MinZ = -65f, MaxZ = 15f;
@@ -40,6 +41,11 @@ namespace WarriorWoke.EditorTools
         public const float JumpGapFront = -8f;
         public const float FlowVaultFront = -14f, FlowRunwayStart = -20f;
         public const float MantleFront = -8f, MantleLowFront = -18f, MantleLowHeight = 0.9f, MantleHighFront = -28f, MantleHighHeight = 1.5f;
+
+        // S12 (P37): the training dummy, in the open strip at the entrance (the lanes start at z = 0)
+        public const float CombatX = MantleX, DummyZ = 10f;
+        /// <summary>Radius and height of the dummy's body (the part the attacks strike), and radius of its post (what stops the player's body).</summary>
+        public const float DummyRadius = 0.25f, DummyHeight = 1.8f, DummyPostRadius = 0.12f;
 
         public static readonly Vector3 SpawnPosition = new Vector3(0f, 1.2f, 8f);
 
@@ -87,6 +93,7 @@ namespace WarriorWoke.EditorTools
             Place(Lane(root, "S09_Combinado", ComboX), ParkourObstacleType.Combined, 0f);
             BuildFlow(Lane(root, "S10_Fluidez", FlowX));
             BuildMantle(Lane(root, "S11_Mantle", MantleX));
+            BuildCombat(Lane(root, "S12_Combate", CombatX));
 
             PlaceSpawner(scene);
 
@@ -267,6 +274,66 @@ namespace WarriorWoke.EditorTools
             GameObject high = Place(lane, ParkourObstacleType.Mantle, MantleHighFront);
             high.name += "_Alto";
             ParkourObstaclePrefabs.SetBoxSize(high, LaneWidth, MantleHighHeight, spec.Depth);
+        }
+
+        // S12 (P37): a training dummy to validate the combat (impact → reaction → recovery) while the
+        // GDD's enemies are pending (P4). A fixture, not an enemy: it never moves on its own or attacks.
+        // Its body (layer Enemy, what the attacks strike) sways on a spring; a thin post inside it (layer
+        // Ground) stops the player's body, because the Player and Enemy layers do not collide, and is
+        // thinner than the body so a fist or a foot reaches the body first.
+        private static void BuildCombat(Transform lane)
+        {
+            int enemy = LayerMask.NameToLayer("Enemy");
+            Material mat = AssetDatabase.LoadAssetAtPath<Material>(DummyMaterial);
+            var dummy = new GameObject("TrainingDummy");
+            dummy.layer = enemy;
+            dummy.transform.SetParent(lane, false);
+            dummy.transform.localPosition = new Vector3(0f, 0f, DummyZ);
+            var rb = dummy.AddComponent<Rigidbody>(); // it moves (knockback): a kinematic body, not a static collider
+            rb.isKinematic = true;
+            rb.useGravity = false;
+            var health = dummy.AddComponent<HealthSystem>();
+            var hs = new SerializedObject(health);
+            hs.FindProperty("maxHealth").intValue = 1000;
+            hs.FindProperty("iFramesDuration").floatValue = 0.1f; // under the light chain's ~0.25 s cadence
+            hs.ApplyModifiedPropertiesWithoutUndo();
+
+            var body = new GameObject("Cuerpo");
+            body.layer = enemy;
+            body.transform.SetParent(dummy.transform, false);
+            var capsule = body.AddComponent<CapsuleCollider>();
+            capsule.radius = DummyRadius;
+            capsule.height = DummyHeight;
+            capsule.center = new Vector3(0f, DummyHeight * 0.5f, 0f);
+            Visual(body.transform, PrimitiveType.Capsule, "Torso", new Vector3(0f, DummyHeight * 0.45f, 0f), new Vector3(DummyRadius * 2f, DummyHeight * 0.45f, DummyRadius * 2f), mat);
+            Visual(body.transform, PrimitiveType.Sphere, "Cabeza", new Vector3(0f, DummyHeight - 0.15f, 0f), Vector3.one * 0.3f, mat);
+
+            var post = new GameObject("Poste");
+            post.layer = _ground;
+            post.transform.SetParent(dummy.transform, false);
+            var postCollider = post.AddComponent<CapsuleCollider>();
+            postCollider.radius = DummyPostRadius;
+            postCollider.height = DummyHeight;
+            postCollider.center = new Vector3(0f, DummyHeight * 0.5f, 0f);
+            Visual(dummy.transform, PrimitiveType.Cylinder, "Base", new Vector3(0f, 0.025f, 0f), new Vector3(0.7f, 0.025f, 0.7f), mat);
+
+            var trainingDummy = dummy.AddComponent<TrainingDummy>();
+            var td = new SerializedObject(trainingDummy);
+            td.FindProperty("body").objectReferenceValue = body.transform;
+            td.ApplyModifiedPropertiesWithoutUndo();
+        }
+
+        /// <summary>A mesh without a collider (the dummy's look).</summary>
+        private static void Visual(Transform parent, PrimitiveType shape, string name, Vector3 center, Vector3 size, Material mat)
+        {
+            GameObject go = GameObject.CreatePrimitive(shape);
+            go.name = name;
+            Object.DestroyImmediate(go.GetComponent<Collider>());
+            go.layer = parent.gameObject.layer;
+            go.transform.SetParent(parent, false);
+            go.transform.localPosition = center;
+            go.transform.localScale = size;
+            if (mat != null) go.GetComponent<MeshRenderer>().sharedMaterial = mat;
         }
 
         // ─── Builders ────────────────────────────────────────────────────────────────

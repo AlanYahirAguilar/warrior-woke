@@ -12,9 +12,9 @@ using UnityEngine.Playables;
 namespace WarriorWoke.EditorTools
 {
     /// <summary>
-    /// Retarget probe for the motion matching mocap (P29, P34): the Kinematica Demo takes (Unity
-    /// Companion License) and the 100STYLE Neutral takes (CC BY 4.0, backward and strafe). Both are
-    /// Generic rigs that must retarget cleanly onto Ch45 through Humanoid. For each source:
+    /// Retarget probe for the mocap (P29, P34, P37): the Kinematica Demo takes (Unity Companion License),
+    /// the 100STYLE takes (CC BY 4.0, backward and strafe) and the CMU kick (free, attribution
+    /// requested). All are Generic rigs that must retarget cleanly onto Ch45 through Humanoid. For each source:
     ///  1. Imports its actor's skeleton as Humanoid with its own Avatar, and every clip of its Animations
     ///     folder as Humanoid copying that Avatar, root motion kept.
     ///  2. Plays each clip (PlayableGraph, root motion, Foot IK on/off) on the actor and on Ch45 at 30 Hz
@@ -22,7 +22,8 @@ namespace WarriorWoke.EditorTools
     ///     and hips height. A retarget that is clean keeps Ch45's numbers close to the actor's.
     ///  3. Renders contact sheets around the action (actor on top, Ch45 with Foot IK below) to
     ///     Logs/MocapProbe/{source}/.
-    /// Menu: Tools → Warrior Woke → Probar Retarget del Mocap. Batch: MocapRetargetProbe.RunBatch.
+    /// Menu: Tools → Warrior Woke → Probar Retarget del Mocap. Batch: MocapRetargetProbe.RunBatch
+    /// (add "-wwSources CMU" to probe only some sources).
     /// </summary>
     internal static class MocapRetargetProbe
     {
@@ -36,6 +37,8 @@ namespace WarriorWoke.EditorTools
         private sealed class Source
         {
             public string Name, ActorPath, ClipFolder;
+            /// <summary>Only the takes whose file name starts with this (several sources share a folder); null = all.</summary>
+            public string ClipPrefix;
             /// <summary>Explicit Humanoid mapping (human bone → transform); null = Unity's automatic one.</summary>
             public Dictionary<string, string> Mapping;
         }
@@ -69,7 +72,46 @@ namespace WarriorWoke.EditorTools
                     ["RightFoot"]     = "RightAnkle",  ["RightToes"]     = "RightToe",
                 },
             },
+            new Source
+            {
+                // CMU mocap, Daz-friendly BVH (heavy attack kick, docs/arquitectura.md P37). Daz names:
+                // Collar is the shoulder, Shldr the upper arm, Thigh the upper leg (the Buttock in between
+                // is folded into it by bvh2fbx.py); no toes, so the feet end at the ankle. Every CMU subject
+                // has its own skeleton (same names, other lengths), so each one is a source with its actor
+                Name       = "CMU",
+                ActorPath  = "Assets/ThirdParty/CMU/Character/CMU_135_04_FrontKick_Skeleton.fbx",
+                ClipFolder = "Assets/ThirdParty/CMU/Animations",
+                ClipPrefix = "CMU_135_",
+                Mapping    = CmuMapping,
+            },
+            new Source
+            {
+                // CMU subject 14 (boxing): the hook of the light chain (P37)
+                Name       = "CMU14",
+                ActorPath  = "Assets/ThirdParty/CMU/Character/CMU_14_01_Hook_Skeleton.fbx",
+                ClipFolder = "Assets/ThirdParty/CMU/Animations",
+                ClipPrefix = "CMU_14_",
+                Mapping    = CmuMapping,
+            },
         };
+
+        /// <summary>Humanoid mapping of the CMU Daz-friendly skeleton.</summary>
+        private static Dictionary<string, string> CmuMapping => new Dictionary<string, string>
+        {
+            ["Hips"] = "hip", ["Spine"] = "abdomen", ["Chest"] = "chest", ["Neck"] = "neck", ["Head"] = "head",
+            ["LeftShoulder"]  = "lCollar",  ["LeftUpperArm"]  = "lShldr",
+            ["LeftLowerArm"]  = "lForeArm", ["LeftHand"]      = "lHand",
+            ["RightShoulder"] = "rCollar",  ["RightUpperArm"] = "rShldr",
+            ["RightLowerArm"] = "rForeArm", ["RightHand"]     = "rHand",
+            ["LeftUpperLeg"]  = "lThigh",   ["LeftLowerLeg"]  = "lShin",  ["LeftFoot"]  = "lFoot",
+            ["RightUpperLeg"] = "rThigh",   ["RightLowerLeg"] = "rShin",  ["RightFoot"] = "rFoot",
+        };
+
+        /// <summary>The take files of a source (its folder, filtered by its prefix).</summary>
+        private static IEnumerable<string> TakePaths(Source source) =>
+            AssetDatabase.FindAssets("t:Model", new[] { source.ClipFolder })
+                .Select(AssetDatabase.GUIDToAssetPath)
+                .Where(p => source.ClipPrefix == null || Path.GetFileName(p).StartsWith(source.ClipPrefix));
 
         [MenuItem("Tools/Warrior Woke/Probar Retarget del Mocap")]
         private static void RunMenu() => Run();
@@ -87,6 +129,7 @@ namespace WarriorWoke.EditorTools
             bool ok = true;
             foreach (Source source in Sources)
             {
+                if (!Selected(source.Name)) continue;
                 Avatar avatar = ImportActor(source);
                 if (avatar == null) { ok = false; continue; }
                 List<AnimationClip> clips = ImportClips(source, avatar);
@@ -96,7 +139,23 @@ namespace WarriorWoke.EditorTools
             return ok;
         }
 
+        /// <summary>All sources, or only those after -wwSources on the command line (comma-separated).</summary>
+        private static bool Selected(string name)
+        {
+            string[] args = System.Environment.GetCommandLineArgs();
+            for (int i = 0; i < args.Length - 1; i++)
+                if (args[i] == "-wwSources") return args[i + 1].Split(',').Contains(name);
+            return true;
+        }
+
         // ─── Import ──────────────────────────────────────────────────────────────────
+
+        /// <summary>Imports the actor of the source named <paramref name="name"/> as Humanoid and returns its Avatar (PlayerAnimationSetup uses the CMU one).</summary>
+        internal static Avatar ImportActor(string name)
+        {
+            Source source = Sources.FirstOrDefault(s => s.Name == name);
+            return source != null ? ImportActor(source) : null;
+        }
 
         private static Avatar ImportActor(Source source)
         {
@@ -155,9 +214,9 @@ namespace WarriorWoke.EditorTools
         private static HashSet<string> ClipSkeleton(Source source)
         {
             var names = new HashSet<string>();
-            string guid = AssetDatabase.FindAssets("t:Model", new[] { source.ClipFolder }).FirstOrDefault();
-            if (guid == null) return names;
-            var model = AssetDatabase.LoadAssetAtPath<GameObject>(AssetDatabase.GUIDToAssetPath(guid));
+            string path = TakePaths(source).FirstOrDefault();
+            if (path == null) return names;
+            var model = AssetDatabase.LoadAssetAtPath<GameObject>(path);
             if (model == null) return names;
             foreach (Transform t in model.GetComponentsInChildren<Transform>(true))
                 names.Add(t.name);
@@ -167,56 +226,71 @@ namespace WarriorWoke.EditorTools
         private static List<AnimationClip> ImportClips(Source source, Avatar avatar)
         {
             var clips = new List<AnimationClip>();
-            foreach (string guid in AssetDatabase.FindAssets("t:Model", new[] { source.ClipFolder }))
+            foreach (string path in TakePaths(source))
             {
-                string path = AssetDatabase.GUIDToAssetPath(guid);
-                if (!(AssetImporter.GetAtPath(path) is ModelImporter importer)) continue;
-                string name = Path.GetFileNameWithoutExtension(path);
-
-                // A failed Humanoid import leaves the file without takes: read them as Generic first
-                if (importer.defaultClipAnimations.Length == 0)
-                {
-                    importer.animationType = ModelImporterAnimationType.Generic;
-                    importer.avatarSetup   = ModelImporterAvatarSetup.NoAvatar;
-                    importer.clipAnimations = new ModelImporterClipAnimation[0];
-                    importer.SaveAndReimport();
-                }
-
-                importer.animationType      = ModelImporterAnimationType.Human;
-                importer.avatarSetup        = ModelImporterAvatarSetup.CopyFromOther;
-                importer.sourceAvatar       = avatar;
-                importer.materialImportMode = ModelImporterMaterialImportMode.None;
-                importer.importAnimation    = true;
-                importer.importBlendShapes  = false;
-                importer.importCameras      = false;
-                importer.importLights       = false;
-
-                // Root motion is kept in the clip (motion matching reads the trajectory from it). Only
-                // the clip setter is used (T22); these takes have no curves to lose.
-                ModelImporterClipAnimation[] takes = importer.defaultClipAnimations;
-                if (takes.Length == 0) { Debug.LogWarning($"[MocapProbe] {path} no tiene tomas."); continue; }
-                ModelImporterClipAnimation take = takes[0];
-                take.name                    = name;
-                take.loopTime                = false;
-                take.lockRootRotation        = false;
-                // Ground locomotion of the motion matching database: height baked into the pose
-                // (MxMLocomotionBuilder.IsGroundLocomotion); parkour takes keep their vertical root motion
-                take.lockRootHeightY         = MxMLocomotionBuilder.IsGroundLocomotion(path);
-                take.lockRootPositionXZ      = false;
-                take.keepOriginalOrientation = false;
-                take.keepOriginalPositionY   = false;
-                take.keepOriginalPositionXZ  = false;
-                take.heightFromFeet          = true;
-                importer.clipAnimations = new[] { take };
-                importer.SaveAndReimport();
-
-                AnimationClip clip = AssetDatabase.LoadAllAssetsAtPath(path).OfType<AnimationClip>()
-                    .FirstOrDefault(c => !c.name.StartsWith("__preview__"));
-                if (clip != null && clip.humanMotion) clips.Add(clip);
-                else Debug.LogError($"[MocapProbe] {name}: el clip no quedó como Humanoid.");
+                AnimationClip clip = ImportTake(path, avatar);
+                if (clip != null) clips.Add(clip);
             }
             clips.Sort((a, b) => string.CompareOrdinal(a.name, b.name));
             return clips;
+        }
+
+        /// <summary>
+        /// Imports one mocap take as Humanoid copying <paramref name="avatar"/> (its actor's), with the
+        /// whole take as one clip and its root motion kept. A take that also carries the player's vault
+        /// sub-clips (VaultCatalogBuilder configures it, with this same whole-take clip first) is left as
+        /// it is. Returns the whole-take clip, or null if it did not import.
+        /// </summary>
+        internal static AnimationClip ImportTake(string path, Avatar avatar)
+        {
+            if (!(AssetImporter.GetAtPath(path) is ModelImporter importer)) return null;
+            string name = Path.GetFileNameWithoutExtension(path);
+            SerializedProperty existing = new SerializedObject(importer).FindProperty("m_ClipAnimations");
+            if (existing != null && existing.arraySize > 1 && importer.animationType == ModelImporterAnimationType.Human)
+                return AssetDatabase.LoadAllAssetsAtPath(path).OfType<AnimationClip>().FirstOrDefault(c => c.name == name);
+
+            // A failed Humanoid import leaves the file without takes: read them as Generic first
+            if (importer.defaultClipAnimations.Length == 0)
+            {
+                importer.animationType = ModelImporterAnimationType.Generic;
+                importer.avatarSetup   = ModelImporterAvatarSetup.NoAvatar;
+                importer.clipAnimations = new ModelImporterClipAnimation[0];
+                importer.SaveAndReimport();
+            }
+
+            importer.animationType      = ModelImporterAnimationType.Human;
+            importer.avatarSetup        = ModelImporterAvatarSetup.CopyFromOther;
+            importer.sourceAvatar       = avatar;
+            importer.materialImportMode = ModelImporterMaterialImportMode.None;
+            importer.importAnimation    = true;
+            importer.importBlendShapes  = false;
+            importer.importCameras      = false;
+            importer.importLights       = false;
+
+            // Root motion is kept in the clip (motion matching reads the trajectory from it). Only
+            // the clip setter is used (T22); these takes have no curves to lose.
+            ModelImporterClipAnimation[] takes = importer.defaultClipAnimations;
+            if (takes.Length == 0) { Debug.LogWarning($"[MocapProbe] {path} no tiene tomas."); return null; }
+            ModelImporterClipAnimation take = takes[0];
+            take.name                    = name;
+            take.loopTime                = false;
+            take.lockRootRotation        = false;
+            // Ground locomotion of the motion matching database: height baked into the pose
+            // (MxMLocomotionBuilder.IsGroundLocomotion); parkour takes keep their vertical root motion
+            take.lockRootHeightY         = MxMLocomotionBuilder.IsGroundLocomotion(path);
+            take.lockRootPositionXZ      = false;
+            take.keepOriginalOrientation = false;
+            take.keepOriginalPositionY   = false;
+            take.keepOriginalPositionXZ  = false;
+            take.heightFromFeet          = true;
+            importer.clipAnimations = new[] { take };
+            importer.SaveAndReimport();
+
+            AnimationClip clip = AssetDatabase.LoadAllAssetsAtPath(path).OfType<AnimationClip>()
+                .FirstOrDefault(c => !c.name.StartsWith("__preview__"));
+            if (clip != null && clip.humanMotion) return clip;
+            Debug.LogError($"[MocapProbe] {name}: el clip no quedó como Humanoid.");
+            return null;
         }
 
         // ─── Measurement ─────────────────────────────────────────────────────────────
@@ -264,7 +338,7 @@ namespace WarriorWoke.EditorTools
             Rig actor = CreateRig(src.ActorPath, new Vector3(-50f, 0f, 0f));
             Rig ch45 = CreateRig(Ch45Path, new Vector3(50f, 0f, 0f));
             if (actor == null || ch45 == null) return;
-            var sheets = new SheetRenderer();
+            var sheets = new PoseSheetRenderer(CellWidth, CellHeight, 1.25f);
 
             var ci = CultureInfo.InvariantCulture;
             var csv = new StringBuilder("clip,length,frameRate,model,footIK,speed,speedPeak,hipsHeight,skateMedian,skateP90,soleP5,soleMedian\n");
@@ -277,11 +351,11 @@ namespace WarriorWoke.EditorTools
                     // The source first, to find the moment worth looking at
                     Track source = Simulate(actor, clip, false, null, null);
                     int[] frames = PickSheetFrames(source);
-                    sheets.Begin(frames.Length);
+                    sheets.Begin(frames.Length, 2);
 
-                    source     = Simulate(actor, clip, false, frames, (i, rig) => sheets.Capture(0, i, rig));
+                    source     = Simulate(actor, clip, false, frames, (i, rig) => CaptureSide(sheets, 0, i, rig));
                     Track raw  = Simulate(ch45, clip, false, null, null);
-                    Track ik   = Simulate(ch45, clip, true, frames, (i, rig) => sheets.Capture(1, i, rig));
+                    Track ik   = Simulate(ch45, clip, true, frames, (i, rig) => CaptureSide(sheets, 1, i, rig));
                     CarryAlong(ik, raw);
                     sheets.Save(Path.Combine(outFolder, clip.name + ".png"));
 
@@ -511,79 +585,15 @@ namespace WarriorWoke.EditorTools
             return frames;
         }
 
-        private sealed class SheetRenderer : System.IDisposable
+        /// <summary>Side view of the rig (from its left), following the hips; ground at the model's floor.</summary>
+        private static void CaptureSide(PoseSheetRenderer sheets, int row, int column, Rig rig)
         {
-            private readonly GameObject _camGo, _lightGo, _ground;
-            private readonly Camera _cam;
-            private readonly RenderTexture _rt;
-            private readonly Texture2D _cell;
-            private Texture2D _sheet;
-
-            public SheetRenderer()
-            {
-                _camGo = new GameObject("ProbeCamera");
-                _cam = _camGo.AddComponent<Camera>();
-                _cam.orthographic = true;
-                _cam.orthographicSize = 1.25f;
-                _cam.clearFlags = CameraClearFlags.SolidColor;
-                _cam.backgroundColor = new Color(0.82f, 0.84f, 0.88f);
-                _cam.nearClipPlane = 0.05f;
-                _cam.farClipPlane = 30f;
-                _lightGo = new GameObject("ProbeLight");
-                var light = _lightGo.AddComponent<Light>();
-                light.type = LightType.Directional;
-                light.intensity = 1.2f;
-                _lightGo.transform.rotation = Quaternion.Euler(45f, 30f, 0f);
-                _ground = GameObject.CreatePrimitive(PrimitiveType.Plane);
-                _ground.transform.localScale = new Vector3(0.6f, 1f, 0.6f);
-                Object.DestroyImmediate(_ground.GetComponent<Collider>());
-                _rt = new RenderTexture(CellWidth, CellHeight, 24, RenderTextureFormat.ARGB32);
-                _cam.targetTexture = _rt;
-                _cell = new Texture2D(CellWidth, CellHeight, TextureFormat.RGB24, false);
-            }
-
-            public void Begin(int frames)
-            {
-                if (_sheet != null) Object.DestroyImmediate(_sheet);
-                _sheet = new Texture2D(CellWidth * frames, CellHeight * 2, TextureFormat.RGB24, false);
-            }
-
-            /// <summary>Side view of the rig (from its left), following the hips; ground at the model's floor.</summary>
-            public void Capture(int row, int column, Rig rig)
-            {
-                Vector3 right = rig.LegR.position - rig.LegL.position;
-                right.y = 0f;
-                Vector3 forward = Vector3.Cross(right.normalized, Vector3.up);
-                float floor = rig.Root.transform.position.y;
-                Vector3 focus = new Vector3(rig.Hips.position.x, Mathf.Max(floor + 1.0f, rig.Hips.position.y + 0.05f), rig.Hips.position.z);
-                Vector3 view = Quaternion.AngleAxis(-70f, Vector3.up) * forward;
-                _camGo.transform.SetPositionAndRotation(focus - view * 8f, Quaternion.LookRotation(view, Vector3.up));
-                _ground.transform.position = new Vector3(focus.x, floor, focus.z);
-
-                _cam.Render();
-                RenderTexture.active = _rt;
-                _cell.ReadPixels(new Rect(0, 0, CellWidth, CellHeight), 0, 0);
-                _cell.Apply();
-                RenderTexture.active = null;
-                _sheet.SetPixels(column * CellWidth, (1 - row) * CellHeight, CellWidth, CellHeight, _cell.GetPixels());
-            }
-
-            public void Save(string path)
-            {
-                _sheet.Apply();
-                File.WriteAllBytes(path, _sheet.EncodeToPNG());
-            }
-
-            public void Dispose()
-            {
-                _cam.targetTexture = null;
-                Object.DestroyImmediate(_rt);
-                Object.DestroyImmediate(_cell);
-                if (_sheet != null) Object.DestroyImmediate(_sheet);
-                Object.DestroyImmediate(_ground);
-                Object.DestroyImmediate(_lightGo);
-                Object.DestroyImmediate(_camGo);
-            }
+            Vector3 right = rig.LegR.position - rig.LegL.position;
+            right.y = 0f;
+            Vector3 forward = Vector3.Cross(right.normalized, Vector3.up);
+            float floor = rig.Root.transform.position.y;
+            Vector3 focus = new Vector3(rig.Hips.position.x, Mathf.Max(floor + 1.0f, rig.Hips.position.y + 0.05f), rig.Hips.position.z);
+            sheets.Capture(row, column, focus, Quaternion.AngleAxis(-70f, Vector3.up) * forward, floor);
         }
     }
 }

@@ -12,8 +12,9 @@ using UnityEngine;
 /// write <see cref="Velocity"/> at the physics rate; the motor moves the body once per frame in
 /// LateUpdate, after the animation: in Idle and Run the motion matching locomotion
 /// (PlayerMxMLocomotion, P29) carries it with its root motion, blended with the states' velocity by
-/// the motion matching weight; everywhere else the velocity moves it, with gravity. Parkour
-/// actions (vault, ledge grab, climb) are driven by the animation's root motion: while
+/// the motion matching weight; everywhere else the velocity moves it, with gravity. An attack's own
+/// step (its clip's root motion) also goes through the motor, so a wall or a target's post stops it
+/// (P37). Parkour actions (vault, ledge grab, climb) are driven by the animation's root motion: while
 /// IsRootMotionDriven the controller is off and PlayerAnimator writes the clip's motion, warped
 /// onto the real contact points (P22), straight to the transform.
 /// Adheres to SRP: orchestrates state routing, never implements game logic directly.
@@ -101,6 +102,13 @@ public class PlayerMovement : MonoBehaviour, IDamageModifier
     [Header("Ledge")]
     [Tooltip("Seconds after letting go of a ledge before another can be grabbed.")]
     public float LedgeRegrabDelay = 0.4f;
+
+    [Header("Vault")]
+    [Tooltip("Measured vault clips and where each one fits (Assets/Data/Parkour/VaultCatalog, built by Tools → Warrior Woke → Construir Catálogo de Vaults). Without it there is no vault.")]
+    [SerializeField] private VaultCatalog vaultCatalog;
+
+    /// <summary>The vault clips the planner chooses from (P36).</summary>
+    public VaultCatalog VaultCatalog => vaultCatalog;
 
     [Header("Facing")]
     [SerializeField] private bool faceMovementDirection = true;
@@ -203,9 +211,6 @@ public class PlayerMovement : MonoBehaviour, IDamageModifier
     /// <summary>Horizontal speed of the body (m/s).</summary>
     public float HorizontalSpeed => new Vector2(Velocity.x, Velocity.z).magnitude;
 
-    /// <summary>Obstacle found by the last vault check (set right before entering VaultState).</summary>
-    public VaultInfo PendingVault   { get; set; }
-
     /// <summary>Ledge found by the last ledge check (set right before entering LedgeGrabState).</summary>
     public LedgeInfo CurrentLedge   { get; set; }
 
@@ -222,6 +227,15 @@ public class PlayerMovement : MonoBehaviour, IDamageModifier
 
     /// <summary>Normalized progress of the current parkour clip, or −1 if unknown.</summary>
     public float ParkourProgress => ParkourAnimation != null ? ParkourAnimation.Progress : -1f;
+
+    /// <summary>Set by PlayerAnimator. Attack and hit reaction states follow their clip and freeze it on a hit (hit stop) through it.</summary>
+    public ICombatAnimation CombatAnimation { get; set; }
+
+    /// <summary>
+    /// Fraction of an attack's own step (its clip's root motion) the motor applies: the attack shortens it
+    /// so the body stops in front of a close target (PlayerAttackState). 1 outside attacks.
+    /// </summary>
+    public float ActionRootMotionScale { get; set; } = 1f;
 
     /// <summary>Fired after an auto step moves the body up (positive) or down (negative), in m. Used to smooth the model visually.</summary>
     public event System.Action<float> Stepped;
@@ -283,6 +297,7 @@ public class PlayerMovement : MonoBehaviour, IDamageModifier
     public PlayerHeavyAttackState HeavyAttackState  { get; private set; }
     public PlayerBlockState       BlockState        { get; private set; }
     public PlayerDodgeState       DodgeState        { get; private set; }
+    public PlayerHurtState        HurtState         { get; private set; }
 
     // ─── Collider Snapshots ───────────────────────────────────────────────────────
     private float   _originalColliderHeight;
@@ -293,6 +308,10 @@ public class PlayerMovement : MonoBehaviour, IDamageModifier
     private Vector3 _lastMotorPosition;
     private Vector3    _rootDelta;     // root motion of the frame (from the Animator, OnAnimatorMove)
     private Quaternion _rootRotation = Quaternion.identity;
+    private Vector3    _actionDelta;   // an attack's own step this frame (its clip's root motion)
+    private bool       _actionMotion;  // an attack reported its root motion this frame: it owns the motion
+    private float      _actionYaw, _actionTurnRate;
+    private bool       _hasActionTurn;
 
     // ─── Lifecycle ───────────────────────────────────────────────────────────────
 
@@ -351,12 +370,18 @@ public class PlayerMovement : MonoBehaviour, IDamageModifier
         float w = Locomotion != null ? Locomotion.Weight : 0f;
         Vector3 v = Velocity;
         Vector3 displacement = new Vector3(v.x, 0f, v.z) * ((1f - w) * dt);
-        if (w > 0f) displacement += new Vector3(_rootDelta.x, 0f, _rootDelta.z);
+        // An attack owns the motion from its first frame: while motion matching fades out under it, its
+        // root motion (the Animator's whole delta: the idle's drift moved the body ±10 cm) is left out,
+        // and once it is gone the attack's own step moves the body
+        if (w > 0f && !_actionMotion) displacement += new Vector3(_rootDelta.x, 0f, _rootDelta.z);
+        else if (w <= 0f) displacement += new Vector3(_actionDelta.x, 0f, _actionDelta.z) * ActionRootMotionScale;
+        Vector3 edgeSlide = EdgeSlide();
+        displacement += edgeSlide * (EdgeSlideSpeed * dt);
         v.y += Physics.gravity.y * dt;
         if (IsGrounded && v.y < 0f) v.y = Mathf.Max(v.y, -GroundStickSpeed);
         displacement.y = v.y * dt;
 
-        float yaw = transform.eulerAngles.y + (w > 0f ? _rootRotation.eulerAngles.y : 0f);
+        float yaw = transform.eulerAngles.y + (w > 0f && !_actionMotion ? _rootRotation.eulerAngles.y : 0f);
         if (_hasTurnTarget && w < 1f)
         {
             float turned = Mathf.SmoothDampAngle(yaw, _turnTargetYaw, ref _turnSmoothVelocity, CurrentTurnSmoothTime(), MaxTurnRate(HorizontalSpeed), dt);
@@ -374,10 +399,23 @@ public class PlayerMovement : MonoBehaviour, IDamageModifier
             else if (Mathf.Abs(error) < ResidualHeadingAngle && HorizontalSpeed > 0.5f)
                 yaw += error * Mathf.Clamp01(ResidualHeadingGain * dt) * w;
         }
+        // Attacks and hit reactions turn the body toward their target or the hit at a fixed rate
+        if (_hasActionTurn) yaw = Mathf.MoveTowardsAngle(yaw, _actionYaw, _actionTurnRate * dt);
         transform.rotation = Quaternion.Euler(0f, yaw, 0f);
 
         Vector3 before = transform.position;
         bool groundedBefore = IsGrounded;
+        // The step offset climbs curbs on the ground; in the air it let a 1 m jump mount a 1.4 m wall
+        // (the controller climbs anything within its step offset of its bottom). "In the air" is the
+        // jump and the fall, not a frame without ground under the feet: half-way up a curb the ground
+        // check can miss it for a moment, and cutting the step offset there left the body hanging on the
+        // curb's edge until it fell. A body resting on an edge with nothing under its center is in the
+        // air too: with a step offset it climbed back onto the corner it was sliding off. A lowered body
+        // never steps up (ShrinkCollider)
+        bool standingTall = Controller.height >= _originalColliderHeight - 0.01f;
+        PlayerState state = StateMachine.CurrentState;
+        bool airborne = state == JumpState || state == FallState || edgeSlide != Vector3.zero;
+        Controller.stepOffset = !airborne && standingTall ? StepHeight : 0f;
         Controller.Move(displacement);
         // What the body really did (CharacterController.velocity would also count a teleport since
         // its last move as speed). Horizontally: moved by the states (w = 0), the real motion, walls
@@ -407,6 +445,30 @@ public class PlayerMovement : MonoBehaviour, IDamageModifier
     /// <summary>Downward speed (m/s) that keeps a grounded controller pressed onto the ground.</summary>
     private const float GroundStickSpeed = 2f;
 
+    /// <summary>Speed (m/s) at which a body resting on an edge with its center over a drop slides off it.</summary>
+    private const float EdgeSlideSpeed = 2f;
+
+    /// <summary>
+    /// Direction to slide off an edge, or zero. The capsule's rounded bottom can rest on a corner (a
+    /// jump that reached a top's edge): the ground check counts it as ground, but the center hangs over
+    /// a drop deeper than a step and the animated legs went into the obstacle below the corner. The
+    /// body slides off it, over the drop, and falls (a step down is supported: TryStepDown handles it).
+    /// </summary>
+    private Vector3 EdgeSlide()
+    {
+        Vector3 feet = new Vector3(transform.position.x, FeetY, transform.position.z);
+        if (Physics.Raycast(feet + Vector3.up * 0.1f, Vector3.down, StepHeight + 0.15f, stepLayer, QueryTriggerInteraction.Ignore))
+            return Vector3.zero; // supported under the center
+        // The capsule's own radius: the body rests on a corner with its rounded bottom, and a thinner
+        // probe missed the corner a body 0.30 m from the face was sitting on (it never slid off)
+        float r = Controller.radius;
+        if (!Physics.SphereCast(feet + Vector3.up * (r + 0.1f), r, Vector3.down, out RaycastHit hit, 0.15f, stepLayer, QueryTriggerInteraction.Ignore))
+            return Vector3.zero; // touching nothing: already falling
+        Vector3 away = feet - hit.point;
+        away.y = 0f;
+        return away.sqrMagnitude > 1e-6f ? away.normalized : Vector3.zero;
+    }
+
     /// <summary>Time constant (s) of the smoothing of the velocity measured under motion matching.</summary>
     private const float MeasuredVelocitySmoothing = 0.05f;
 
@@ -420,6 +482,8 @@ public class PlayerMovement : MonoBehaviour, IDamageModifier
     {
         _rootDelta = Vector3.zero;
         _rootRotation = Quaternion.identity;
+        _actionDelta = Vector3.zero;
+        _actionMotion = false;
     }
 
     /// <summary>
@@ -432,7 +496,34 @@ public class PlayerMovement : MonoBehaviour, IDamageModifier
         _rootRotation = deltaRotation * _rootRotation;
     }
 
-    /// <summary>Places the body (spawn, checkpoint, tests): no velocity, physics in sync.</summary>
+    /// <summary>
+    /// An attack's own step this frame (the Animator Controller's root motion, OnAnimatorMove through
+    /// PlayerAnimator): the motor moves the body by it, scaled by ActionRootMotionScale, with the
+    /// controller's collisions (P30, P37).
+    /// </summary>
+    public void QueueActionRootMotion(Vector3 deltaPosition)
+    {
+        _actionDelta += deltaPosition;
+        _actionMotion = true;
+    }
+
+    /// <summary>
+    /// Turns the body toward <paramref name="direction"/> at <paramref name="degreesPerSecond"/>, applied by
+    /// the motor every frame until StopTurning: attacks face their target, hit reactions the hit.
+    /// </summary>
+    public void TurnToward(Vector3 direction, float degreesPerSecond)
+    {
+        direction.y = 0f;
+        if (direction.sqrMagnitude < 0.0001f) return;
+        _actionYaw = Quaternion.LookRotation(direction, Vector3.up).eulerAngles.y;
+        _actionTurnRate = degreesPerSecond;
+        _hasActionTurn = true;
+    }
+
+    /// <summary>Ends a TurnToward.</summary>
+    public void StopTurning() => _hasActionTurn = false;
+
+    /// <summary>Places the body (spawn, checkpoint, tests) at rest: no velocity, the locomotion in its idle, physics in sync.</summary>
     public void Teleport(Vector3 position, Quaternion rotation)
     {
         Velocity = Vector3.zero;
@@ -441,7 +532,8 @@ public class PlayerMovement : MonoBehaviour, IDamageModifier
         _lastMotorPosition = position;
         _turnSmoothVelocity = 0f;
         _hasTurnTarget = false;
-        Locomotion?.ResetMotion();
+        _hasActionTurn = false;
+        Locomotion?.StopInPlace();
     }
 
     /// <summary>
@@ -455,12 +547,146 @@ public class PlayerMovement : MonoBehaviour, IDamageModifier
         PlayerState s = StateMachine.CurrentState;
         bool active = (s == IdleState || s == RunState) && !IsRootMotionDriven;
         bool moving = active && s == RunState && HasMoveInput;
+        if (!moving) IsAgainstWall = false;
         float speed = IsWalking ? WalkSpeed : IsBackpedaling ? BackpedalSpeed : IsSprint ? SprintSpeed : BaseSpeed;
         // Oriented movement stays oriented until the body stops: the strafe takes brake facing the
         // same way (switching to the free set mid-stop would turn the body)
         bool oriented = moving ? IsOriented : active && Locomotion.IsOriented && HorizontalSpeed > 0.3f;
-        Locomotion.Drive(active, moving ? MoveDirection : Vector3.zero, speed * RecoverySpeedScale,
-                         oriented, CameraForwardFlat());
+        Vector3 direction = moving ? AlongWalls(MoveDirection) : Vector3.zero;
+        Locomotion.Drive(active, direction, speed * RecoverySpeedScale, oriented, CameraForwardFlat());
+    }
+
+    /// <summary>
+    /// Lowest and highest point (m above the feet) and radius of the probe that finds a wall in front of
+    /// the legs. It starts above a curb (ParkourStandard.StepMaxHeight), which the auto step climbs.
+    /// </summary>
+    private const float WallProbeBottom = ParkourStandard.StepMaxHeight + 0.05f, WallProbeTop = 1.15f, WallProbeRadius = 0.2f;
+
+    /// <summary>A wall this close (m from the body's center) is in reach of the legs: a running stride reaches ~0.5 m ahead.</summary>
+    private const float WallProbeReach = 0.6f;
+
+    /// <summary>Share of the input along the wall below which pushing into it stops instead of running along it.</summary>
+    private const float WallSlideMin = 0.5f;
+
+    private bool _stoppedAtWall;
+
+    /// <summary>The move input pushes into a wall in reach of the legs (the locomotion runs along it or stops).</summary>
+    public bool IsAgainstWall { get; private set; }
+
+    /// <summary>
+    /// A wall in front of the body within <paramref name="reach"/> (m from its center) along
+    /// <paramref name="direction"/>, between <paramref name="above"/> and WallProbeTop above the feet,
+    /// not a slope and facing the movement. <paramref name="normal"/> is its horizontal normal.
+    /// </summary>
+    public bool TryFindWall(Vector3 direction, float reach, float above, out RaycastHit hit, out Vector3 normal)
+    {
+        normal = Vector3.zero;
+        hit = default;
+        if (direction.sqrMagnitude < 0.0001f) return false;
+        Vector3 feet = new Vector3(transform.position.x, FeetY, transform.position.z);
+        Vector3 bottom = feet + Vector3.up * (above + WallProbeRadius), top = feet + Vector3.up * (WallProbeTop - WallProbeRadius);
+        if (!Physics.CapsuleCast(bottom, top, WallProbeRadius, direction.normalized, out hit, reach - WallProbeRadius, stepLayer, QueryTriggerInteraction.Ignore) ||
+            hit.normal.y > 0.5f)
+            return false;
+        normal = new Vector3(hit.normal.x, 0f, hit.normal.z).normalized;
+        return Vector3.Dot(direction, normal) < 0f;
+    }
+
+    /// <summary>Height (m above the feet) of the top of the wall found at <paramref name="hit"/> (TryFindWall).</summary>
+    public float WallTopAboveFeet(RaycastHit hit, Vector3 normal)
+    {
+        Vector3 origin = hit.point - normal * 0.05f;
+        origin.y = FeetY + 3f;
+        return Physics.Raycast(origin, Vector3.down, out RaycastHit top, 3.5f, stepLayer, QueryTriggerInteraction.Ignore)
+            ? top.point.y - FeetY : 3f;
+    }
+
+    /// <summary>Seconds ahead the air limiter looks, and the gap (m) at which the body comes to rest beside a wall.</summary>
+    private const float AirWallLookahead = 0.25f, AirWallRest = 0.05f;
+
+    /// <summary>
+    /// In the air: the velocity into a wall that the jump does not clear slows down so the body comes
+    /// to rest beside it. A jump at a block that no vault, mantle or ledge fits hit its face, or its
+    /// controller rode up the top's corner and stood on it with the legs inside the obstacle. A wall
+    /// the jump clears (ClearsWall: over it and landing on its top, not its corner) is left alone, and
+    /// so is the approach to a ledge: the body still comes within the hands' reach (LedgeReachAir).
+    /// </summary>
+    public void LimitAirIntoWalls()
+    {
+        Vector3 v = Velocity;
+        Vector3 h = new Vector3(v.x, 0f, v.z);
+        float speed = h.magnitude;
+        if (speed < 0.1f ||
+            !TryFindWall(h, WallProbeReach + speed * AirWallLookahead, 0f, out RaycastHit hit, out Vector3 normal))
+            return;
+        float into = -Vector3.Dot(h, normal);
+        float gap = Mathf.Max(0f, hit.distance + WallProbeRadius - Controller.radius - Controller.skinWidth - AirWallRest);
+        if (ClearsWall(v.y, into, gap, WallTopAboveFeet(hit, normal))) return;
+        float maxInto = gap / AirWallLookahead;
+        if (into > maxInto)
+        {
+            h += normal * (into - maxInto);
+            Velocity = new Vector3(h.x, v.y, h.z);
+        }
+    }
+
+    /// <summary>How far (m) past a top's edge the body's center must come down for a jump to land on it (less is its corner).</summary>
+    private const float MinLandingOverTop = 0.15f;
+
+    /// <summary>
+    /// The flight (rising <paramref name="vy"/>, moving <paramref name="into"/> toward a face <paramref name="gap"/> m
+    /// away) clears a top <paramref name="top"/> m above the feet: the feet are above it when the body reaches
+    /// the face, and when they come back down to it the center is well over it (not on its corner).
+    /// </summary>
+    private bool ClearsWall(float vy, float into, float gap, float top)
+    {
+        if (into < 0.1f) return true; // not really moving into it
+        float g = -Physics.gravity.y;
+        // When the feet rise above the top (with a margin; 0 if they already are), and when they come
+        // back down to it
+        float hUp = top + AirWallRest;
+        float up = 0f;
+        if (hUp > 0f)
+        {
+            float disc = vy * vy - 2f * g * hUp;
+            if (disc < 0f) return false; // the feet never get above it
+            up = (vy - Mathf.Sqrt(disc)) / g;
+        }
+        float discDown = vy * vy - 2f * g * top;
+        if (discDown < 0f) return false;
+        float down = (vy + Mathf.Sqrt(discDown)) / g;
+        float overTop = into * down - (gap + Controller.radius + Controller.skinWidth + AirWallRest);
+        return up <= gap / into && overTop >= MinLandingOverTop;
+    }
+
+    /// <summary>
+    /// The locomotion's direction next to a wall. The controller (0.35 m radius) stops the body, but a
+    /// stride reaches further and the legs went 4–10 cm into the wall while the mocap kept running in
+    /// place. Pushing into a wall at an angle runs along it; head-on, the body stops at it, and once it
+    /// touches it the locomotion goes straight to its idle instead of playing a braking take there.
+    /// </summary>
+    private Vector3 AlongWalls(Vector3 direction)
+    {
+        if (!TryFindWall(direction, WallProbeReach, WallProbeBottom, out RaycastHit hit, out Vector3 normal))
+        {
+            _stoppedAtWall = false;
+            IsAgainstWall = false;
+            return direction;
+        }
+
+        IsAgainstWall = true;
+        float into = Vector3.Dot(direction, normal);
+        Vector3 along = direction - normal * into;
+        if (along.magnitude >= WallSlideMin)
+        {
+            _stoppedAtWall = false;
+            return along.normalized;
+        }
+
+        bool touching = hit.distance + WallProbeRadius < Controller.radius + Controller.skinWidth + 0.05f;
+        if (touching && !_stoppedAtWall && HorizontalSpeed > 0.5f) Locomotion.StopInPlace();
+        _stoppedAtWall |= touching;
+        return Vector3.zero;
     }
 
     // ─── Input Entry Point (called by Player.cs from FixedUpdate) ────────────────
@@ -523,6 +749,24 @@ public class PlayerMovement : MonoBehaviour, IDamageModifier
     private void HandleDamageReceived(int amount, Vector3 source)
     {
         CancelSprint();
+        if (amount > 0 && ReactsToHit())
+        {
+            HurtState.Prepare(amount, source);
+            StateMachine.ChangeState(HurtState);
+        }
+    }
+
+    /// <summary>
+    /// A hit interrupts what the body does on the ground: standing, moving, attacking, the end of a dodge
+    /// (its invulnerability already spent) or another reaction; and the guard, if the hit came from
+    /// behind. In the air, crouched, sliding or during a parkour action the action goes on.
+    /// </summary>
+    private bool ReactsToHit()
+    {
+        PlayerState s = StateMachine?.CurrentState;
+        if (s == null || IsRootMotionDriven || !IsGrounded || (_healthSystem != null && _healthSystem.IsDead)) return false;
+        if (s == BlockState) return !BlockState.LastHitBlocked;
+        return s == IdleState || s == RunState || s == LightAttackState || s == HeavyAttackState || s == DodgeState || s == HurtState;
     }
 
     // ─── IDamageModifier ─────────────────────────────────────────────────────────
@@ -637,6 +881,36 @@ public class PlayerMovement : MonoBehaviour, IDamageModifier
             ? hit.distance : maxDistance;
     }
 
+    /// <summary>Height (m above the feet) and radius of the probe that finds a bar or a low ceiling a standing body would hit.</summary>
+    private const float OverheadProbeHeight = 1.35f, OverheadProbeRadius = 0.2f;
+
+    /// <summary>
+    /// A bar or a low ceiling ahead along <paramref name="direction"/> within <paramref name="maxDistance"/>
+    /// that a standing body would hit but a sliding one passes under (free space at slide height up to
+    /// and under it): a slide obstacle. <paramref name="distance"/> is how far its front is (m from the center).
+    /// </summary>
+    public bool TryFindSlideObstacle(Vector3 direction, float maxDistance, out float distance)
+    {
+        distance = 0f;
+        if (direction.sqrMagnitude < 0.0001f) return false;
+        direction.y = 0f;
+        direction.Normalize();
+        Vector3 origin = new Vector3(transform.position.x, FeetY + OverheadProbeHeight, transform.position.z);
+        if (!Physics.SphereCast(origin, OverheadProbeRadius, direction, out RaycastHit hit, maxDistance, ceilingLayer, QueryTriggerInteraction.Ignore) ||
+            hit.normal.y < -0.5f)
+            return false;
+        distance = hit.distance + OverheadProbeRadius;
+        // Under it there must be room to slide: at least through its front part
+        return SlideClearance(direction, distance + 0.5f) >= distance + 0.5f;
+    }
+
+    /// <summary>
+    /// Distance (m) a slide entered at <paramref name="speed"/> covers before its momentum is spent
+    /// (friction with the input held; under a ceiling it goes on at SlideMinSpeed).
+    /// </summary>
+    public float SlideReach(float speed) =>
+        Mathf.Max(0f, speed * speed - SlideMinSpeed * SlideMinSpeed) / (2f * SlideFriction);
+
     /// <summary>True if the ground under the feet is flat enough to slide on.</summary>
     public bool HasSlideSurface()
     {
@@ -668,6 +942,7 @@ public class PlayerMovement : MonoBehaviour, IDamageModifier
         transform.rotation = rotation;
         _turnSmoothVelocity = 0f;
         _hasTurnTarget = false;
+        _hasActionTurn = false;
     }
 
     // ─── Root Motion (parkour) ───────────────────────────────────────────────────
@@ -702,6 +977,22 @@ public class PlayerMovement : MonoBehaviour, IDamageModifier
         }
         float yaw = (deltaRotation * transform.rotation).eulerAngles.y;
         transform.rotation = Quaternion.Euler(0f, yaw, 0f);
+    }
+
+    /// <summary>
+    /// Places the body where an action's warper computed it for this frame (the vault, P36): like
+    /// ApplyRootMotion, the controller is off and the transform is written, and the motion feeds
+    /// RootMotionVelocity so the run continues at the speed the body really carried.
+    /// </summary>
+    public void SetRootMotionPose(Vector3 position, Quaternion rotation)
+    {
+        if (!IsRootMotionDriven) return;
+        if (Time.deltaTime > 0f)
+        {
+            Vector3 d = position - transform.position;
+            RootMotionVelocity = Vector3.Lerp(RootMotionVelocity, new Vector3(d.x, 0f, d.z) / Time.deltaTime, 0.3f);
+        }
+        transform.SetPositionAndRotation(position, rotation);
     }
 
     /// <summary>Gives the body back to the controller at its current pose.</summary>
@@ -818,6 +1109,7 @@ public class PlayerMovement : MonoBehaviour, IDamageModifier
         HeavyAttackState  = new PlayerHeavyAttackState(this, StateMachine);
         BlockState        = new PlayerBlockState(this, StateMachine);
         DodgeState        = new PlayerDodgeState(this, StateMachine);
+        HurtState         = new PlayerHurtState(this, StateMachine);
     }
 
     /// <summary>
@@ -907,6 +1199,7 @@ public class PlayerMovement : MonoBehaviour, IDamageModifier
                current != BlockState      &&
                current != DodgeState      &&
                current != LightAttackState&&
-               current != HeavyAttackState;
+               current != HeavyAttackState&&
+               current != HurtState;
     }
 }

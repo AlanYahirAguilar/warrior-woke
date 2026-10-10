@@ -52,16 +52,16 @@ public class EnvironmentChecker : MonoBehaviour
         return !Physics.CheckCapsule(bottom, top, ParkourStandard.StandCheckRadius, landingLayer, QueryTriggerInteraction.Ignore);
     }
 
+    /// <summary>Measurement tolerance (m) of the obstacle heights against the standard's limits.</summary>
+    private const float HeightTolerance = 0.01f;
+
     /// <summary>
     /// Looks for a vaultable obstacle in <paramref name="direction"/> (GDD §5.4): a front face within
     /// reach at knee height, a top between ParkourStandard.VaultMinHeight and VaultMaxHeight above the
-    /// feet, a depth up to VaultMaxDepth and free ground behind it. The vault direction is perpendicular to the face
-    /// (the body lines up with the obstacle), the hand point lies on the top surface on the left-hand
-    /// side, and the landing is as far as the clip naturally lands, or closer if that spot is blocked.
-    /// Allocation-free.
+    /// feet and a depth up to VaultMaxDepth. The vault direction is perpendicular to the face (the body
+    /// lines up with the obstacle). Which clip crosses it, where the hands go and where the feet land
+    /// depend on the clip and are decided by VaultPlanner (with TryFindLanding). Allocation-free.
     /// </summary>
-    /// <summary>Measurement tolerance (m) of the obstacle heights against the standard's limits.</summary>
-    private const float HeightTolerance = 0.01f;
 
     public bool TryFindVault(Vector3 direction, float feetY, out VaultInfo info) =>
         TryFindVault(direction, feetY, ParkourStandard.VaultReach, out info);
@@ -102,40 +102,32 @@ public class EnvironmentChecker : MonoBehaviour
         if (!Physics.Raycast(backOrigin, -dir, out RaycastHit back, ParkourStandard.VaultMaxDepth + 0.05f, obstacleLayer, QueryTriggerInteraction.Ignore))
             return false;
 
-        // 4. Landing: where the clip lands at run speed, or closer if that spot is not free ground
-        bool landed = false;
-        RaycastHit land = default;
-        for (float d = ParkourTimings.VaultClipLandDistance; d >= ParkourStandard.VaultMinLanding - 0.001f; d -= 0.5f)
-        {
-            Vector3 landOrigin = back.point + dir * Mathf.Max(d, ParkourStandard.VaultMinLanding);
-            landOrigin.y = top.point.y + 0.5f;
-            if (!Physics.Raycast(landOrigin, Vector3.down, out land, top.point.y - feetY + 2.5f, landingLayer, QueryTriggerInteraction.Ignore))
-                continue;
-            if (land.point.y > top.point.y - 0.2f || land.normal.y < 0.7f) continue; // on top of something tall: not a vault
-            if (!HasStandingRoom(land.point)) continue;
-            landed = true;
-            break;
-        }
-        if (!landed) return false;
+        info.Direction  = dir;
+        info.TopY       = top.point.y;
+        info.FrontPoint = new Vector3(front.point.x, top.point.y, front.point.z);
+        info.Depth      = Vector3.Dot(back.point - front.point, dir);
+        return true;
+    }
 
-        // Left hand on the top surface, just past the front edge (the clip plants it left of the body line)
-        Vector3 left = Vector3.Cross(dir, Vector3.up);
-        Vector3 edgePoint = new Vector3(front.point.x, top.point.y, front.point.z);
-        Vector3 hand = edgePoint + dir * ParkourTimings.VaultHandInset + left * ParkourTimings.VaultHandLateral;
-        if (!Physics.Raycast(hand + Vector3.up * 0.3f, Vector3.down, out RaycastHit handTop, 0.45f, obstacleLayer, QueryTriggerInteraction.Ignore))
-            hand = edgePoint + dir * ParkourTimings.VaultHandInset; // narrow obstacle: plant it on the body line
-        else
-            hand.y = handTop.point.y;
+    /// <summary>Lowest landing (m below the take-off feet) a vault accepts: a deeper drop is a fall, not a vault.</summary>
+    public const float VaultMaxLandingDrop = 0.6f;
 
-        info.Direction    = dir;
-        info.LandingPoint = land.point;
-        info.TopY         = top.point.y;
-        info.FrontPoint   = edgePoint;
-        info.Depth        = Vector3.Dot(back.point - front.point, dir);
-        info.HandPoint    = hand;
-        Vector3 toHand = hand - transform.position;
-        toHand.y = 0f;
-        info.HandDistance = toHand.magnitude;
+    /// <summary>
+    /// The ground where a vault's feet would land around <paramref name="point"/> (horizontal), behind an
+    /// obstacle whose top is at <paramref name="topY"/>: free ground (not on top of something tall), flat
+    /// enough, no deeper than VaultMaxLandingDrop below nor higher than a step above the take-off feet,
+    /// and with room for a standing body. Allocation-free.
+    /// </summary>
+    public bool TryFindLanding(Vector3 point, float topY, float feetY, out Vector3 ground)
+    {
+        ground = default;
+        Vector3 origin = new Vector3(point.x, topY + 0.5f, point.z);
+        if (!Physics.Raycast(origin, Vector3.down, out RaycastHit land, topY - feetY + VaultMaxLandingDrop + 0.6f, landingLayer, QueryTriggerInteraction.Ignore))
+            return false;
+        if (land.point.y > topY - 0.2f || land.normal.y < 0.7f) return false;
+        if (land.point.y < feetY - VaultMaxLandingDrop || land.point.y > feetY + ParkourStandard.StepMaxHeight) return false;
+        if (!HasStandingRoom(land.point)) return false;
+        ground = land.point;
         return true;
     }
 

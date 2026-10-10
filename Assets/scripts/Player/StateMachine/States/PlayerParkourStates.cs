@@ -5,57 +5,66 @@ using UnityEngine;
 // ────────────────────────────────────────────────────────────────────────────────
 
 /// <summary>
-/// Vault over a low obstacle with Space (GDD §5.4), keeping the momentum.
-/// Adapted from Dynamic Parkour System's VaultObstacle (MIT, Èric Canela), but driven by the
-/// VaultFence clip's root motion (decision P22): PlayerAnimator warps it with MatchTarget so the
-/// left hand lands on the measured hand point and the feet on the measured landing point, and pins
-/// the hand with IK while it rests on the obstacle. The clip plays faster or slower with the approach
-/// speed and starts later when the obstacle is closer than the clip expects, so the take-off, the
-/// contact and the landing match the real obstacle.
+/// Vault over an obstacle with Space (GDD §5.4), keeping the momentum (decision P36, docs/arquitectura.md
+/// §5.17). The motion is a measured mocap vault of the Kinematica Demo (VaultCatalog) chosen by
+/// VaultPlanner for this obstacle, approach speed, distance and stride, and warped onto the real
+/// geometry by this state, every frame, from the clip's own root path and heading (measured on Ch45 in
+/// the catalog; PlayerAnimator reports the clip time):
+///  - run-up: the remaining distance error to the hand's plant point is closed over the run-up, so the
+///    stride adjusts instead of the body sliding, and the clip plays at the approach's pace;
+///  - over the obstacle: the body rises (or lowers) by the plan's lift and travels the extra depth spread
+///    over the airborne window; the airborne window plays at the rate that keeps the clip's gravity;
+///  - landing: the feet come down on the measured ground behind it, and the run continues from the
+///    clip's escape moment with the speed the body really carries.
+/// The CharacterController is off during the vault (the body passes over the obstacle, which was
+/// validated before starting) and the hands and feet keep their contacts with IK (PlayerContactIK).
+/// Replaces the Dynamic Parkour System "Vault1" clip and its MatchTarget phases (P22).
 /// </summary>
 public class PlayerVaultState : PlayerState
 {
     /// <summary>Duration used only when no animation reports progress.</summary>
-    public const float FallbackDuration = 0.8f;
+    public const float FallbackDuration = 1.2f;
+
+    private VaultPlan _plan = new VaultPlan();
+    private VaultPlan _scratch = new VaultPlan(); // evaluations never touch the running plan
+    private float _prevClipTime, _startRootY, _vaultYaw, _entryYawOffset;
+    private static bool _warnedNoCatalog;
 
     public PlayerVaultState(PlayerMovement player, PlayerStateMachine stateMachine) : base(player, stateMachine) { }
+
+    /// <summary>The vault being played (valid between Enter and Exit; the last one afterwards).</summary>
+    public VaultPlan Plan => _plan;
+
+    /// <summary>Why the last evaluation found no vault, with what it measured (for tests and tuning).</summary>
+    public string LastReason => _scratch.Reason;
+
+    /// <summary>The last evaluation, accepted or not (its measurements: VaultPlan.MeasuredHeight, …).</summary>
+    public VaultPlan LastEvaluation => _scratch.Reason.Length > 0 ? _scratch : _plan;
 
     /// <summary>Horizontal speed when the vault started (m/s).</summary>
     public float ApproachSpeed   { get; private set; }
 
-    /// <summary>Playback speed of the clip: the approach speed relative to the clip's own speed.</summary>
-    public float SpeedMultiplier { get; private set; } = 1f;
+    /// <summary>Clip time (s) of the playing vault, as PlayerAnimator reports it.</summary>
+    public float ClipTime        { get; private set; }
 
-    /// <summary>Normalized time the clip starts at (later when the obstacle is close).</summary>
-    public float StartOffset     { get; private set; }
-
-    /// <summary>Feet height when the vault started.</summary>
-    public float StartFeetY      { get; private set; }
-
-    /// <summary>
-    /// Extra take-off height (m) for obstacles taller than the clip's fence: the body rises this much
-    /// more before the lead leg reaches the obstacle.
-    /// </summary>
-    public float TakeoffRaise => Mathf.Max(0f, player.PendingVault.TopY - StartFeetY - ParkourTimings.VaultClipFenceHeight);
-
-    /// <summary>Wrist goal for the planted left hand (on the obstacle's top surface).</summary>
-    public Vector3 HandTarget => player.PendingVault.HandPoint + Vector3.up * ParkourTimings.WristAboveSurface;
+    /// <summary>Playback rate of the vault clip this frame (PlayerAnimator writes it to the Animator).</summary>
+    public float PlaybackRate    { get; private set; } = 1f;
 
     /// <summary>Rotation facing the obstacle (perpendicular to its face).</summary>
-    public Quaternion FacingRotation => Quaternion.LookRotation(player.PendingVault.Direction, Vector3.up);
+    public Quaternion FacingRotation => Quaternion.LookRotation(_plan.Direction, Vector3.up);
 
-    /// <summary>Result of evaluating a vault: no valid vault, ready now, or ahead and approaching its take-off point.</summary>
+    /// <summary>Result of evaluating a vault: no valid vault, ready now, or ahead and approaching its entry point.</summary>
     public enum Approach { None, Ready, Approaching }
 
-    /// <summary>Vault that can start now (stored in PlayerMovement.PendingVault).</summary>
+    /// <summary>Vault that can start now (its plan becomes Plan).</summary>
     public static bool TryStart(PlayerMovement player) => Evaluate(player) == Approach.Ready;
 
     /// <summary>
-    /// Evaluates the geometry ahead for a vault, by context: the obstacle (height, depth, landing,
-    /// angle), the speed and the distance. Running, Space looks farther ahead (ParkourStandard
-    /// .VaultSpotReach): an obstacle beyond the ideal take-off distance is "Approaching" and the run
-    /// keeps the intention until the body reaches it, so the clip always meets the obstacle at its
-    /// own take-off instead of starting late. A standing or walking vault starts from where it is.
+    /// Evaluates the geometry ahead for a vault, by context: the obstacle (height, depth, landing), the
+    /// speed, the distance and the stride (VaultPlanner). Running, Space looks farther ahead
+    /// (ParkourStandard.VaultSpotReach): an obstacle beyond the clip's run-up is "Approaching" and the
+    /// run keeps the intention until the body reaches it. No clip fits → None: the obstacle is not
+    /// vaulted (the caller tries the mantle, the ledge or the jump).
     /// </summary>
     public static Approach Evaluate(PlayerMovement player) => Evaluate(player, player.HorizontalSpeed);
 
@@ -65,80 +74,121 @@ public class PlayerVaultState : PlayerState
     /// </summary>
     public static Approach Evaluate(PlayerMovement player, float approachSpeed)
     {
-        Vector3 dir = player.HasMoveInput ? player.MoveDirection : player.transform.forward;
-        bool fast = IsRunning(approachSpeed);
-        float reach = fast ? ParkourStandard.VaultSpotReach(approachSpeed) : ParkourStandard.VaultReach;
-        if (!player.EnvChecker.TryFindVault(dir, player.FeetY, reach, out VaultInfo info))
-            return Approach.None;
-
-        if (fast)
+        PlayerVaultState state = player.VaultState;
+        if (player.VaultCatalog == null)
         {
-            Vector3 toFace = info.FrontPoint - player.transform.position;
-            float distance = Vector3.Dot(new Vector3(toFace.x, 0f, toFace.z), info.Direction);
-            if (distance > ParkourStandard.VaultTakeoffDistance + approachSpeed * Time.fixedDeltaTime)
-                return Approach.Approaching;
+            if (!_warnedNoCatalog) Debug.LogWarning("[PlayerVaultState] Sin VaultCatalog en PlayerMovement: el vault está desactivado. Corre 'Construir Catálogo de Vaults'.");
+            _warnedNoCatalog = true;
+            state._scratch.Reason = "sin catálogo";
+            return Approach.None;
+        }
+        Vector3 dir = player.HasMoveInput ? player.MoveDirection : player.transform.forward;
+        if (!player.EnvChecker.TryFindVault(dir, player.FeetY, ParkourStandard.VaultSpotReach(approachSpeed), out VaultInfo info))
+        {
+            state._scratch.Reason = "sin obstáculo";
+            return Approach.None;
         }
 
-        // A taller obstacle needs the take-off warp. Running, the momentum carries the body up in time;
-        // from a standstill or a walk too close to it, the lead leg would already be at the obstacle
-        // when the clip starts and cut through it, so Space jumps instead (~0.91 m of room needed).
-        float raise = info.TopY - player.FeetY - ParkourTimings.VaultClipFenceHeight;
-        bool slow = !IsRunning(approachSpeed);
-        if (slow && raise > MinTakeoffRaise &&
-            CloseStartOffset(info.HandDistance) > ParkourTimings.VaultTakeoff - ParkourTimings.VaultTakeoffWindow)
-            return Approach.None;
+        float phase = player.ParkourAnimation != null ? player.ParkourAnimation.FootPhase : 0f;
+        VaultPlanner.Result result = VaultPlanner.Evaluate(player.VaultCatalog, player, info, approachSpeed, phase, state._scratch);
+        if (result != VaultPlanner.Result.Ready)
+            return result == VaultPlanner.Result.Approaching ? Approach.Approaching : Approach.None;
 
-        player.PendingVault = info;
+        (state._plan, state._scratch) = (state._scratch, state._plan);
+        state._scratch.Reason = "";
         return Approach.Ready;
     }
 
     /// <summary>
-    /// Slowest playback of the clip: below this approach speed (≈ 2.6 m/s, between the walk and the
-    /// run of P33) the vault is a standing one. At the run (3.4 m/s) the clip, whose run-in moves at
-    /// 5.45 m/s, plays at ~0.62 and the body keeps its speed through the vault.
+    /// Running approach (above the walk, ≈ 2.2 m/s): Space looks ahead for the vault and the mantle and
+    /// waits for their entry point instead of starting where it is.
     /// </summary>
-    private const float MinPlaybackSpeed = 0.6f;
+    public static bool IsRunning(float speed) => speed >= RunningSpeed;
 
-    /// <summary>Running approach: the vault, the mantle and Space look ahead and wait for the take-off point.</summary>
-    public static bool IsRunning(float speed) => speed >= ParkourTimings.VaultClipSpeed * MinPlaybackSpeed;
-
-    /// <summary>Smallest extra take-off (m) that is worth a warp phase.</summary>
-    private const float MinTakeoffRaise = 0.02f;
-
-    /// <summary>Start offset that skips the run-up the body no longer needs when it is close to the obstacle.</summary>
-    private static float CloseStartOffset(float handDistance)
-    {
-        float closeness = 1f - Mathf.Clamp01(handDistance / ParkourTimings.VaultClipHandReach);
-        return Mathf.Min(ParkourTimings.VaultHandContact * closeness, ParkourTimings.VaultMaxStartOffset);
-    }
+    /// <summary>Between the walk (1.3 m/s) and the run (3.4 m/s) of P33.</summary>
+    private const float RunningSpeed = 2.2f;
 
     public override void Enter()
     {
         base.Enter();
-        ApproachSpeed   = player.HorizontalSpeed;
-        StartFeetY      = player.FeetY;
-        SpeedMultiplier = Mathf.Clamp(ApproachSpeed / ParkourTimings.VaultClipRunSpeed, MinPlaybackSpeed, 1.5f);
+        ApproachSpeed  = player.HorizontalSpeed;
+        ClipTime       = _plan.EntryTime;
+        _prevClipTime  = _plan.EntryTime;
+        PlaybackRate   = _plan.ApproachRate;
+        _startRootY    = player.transform.position.y;
+        _vaultYaw      = Quaternion.LookRotation(_plan.Direction, Vector3.up).eulerAngles.y;
+        // What the body's heading differs from the clip's at the entry (an approach at an angle), faded
+        // out over the run-up
+        _entryYawOffset = Mathf.DeltaAngle(_vaultYaw + _plan.Variant.HeadingAt(_plan.EntryTime), player.transform.eulerAngles.y);
+        player.BeginRootMotion();
+    }
 
-        // Closer than the clip's run-up: skip the first frames instead of sliding backward. A taller
-        // obstacle always keeps the take-off window, or the warp would lift the body in a visible pop
-        // (TryStart already refused it from a standstill when too close)
-        StartOffset = CloseStartOffset(player.PendingVault.HandDistance);
-        if (TakeoffRaise > MinTakeoffRaise)
+    /// <summary>Seconds over which the body's heading at the entry blends into the clip's.</summary>
+    private const float EntryAlignTime = 0.3f;
+
+    /// <summary>Seconds before the escape over which the actor's residual heading is straightened along the vault.</summary>
+    private const float ExitAlignTime = 0.2f;
+
+    /// <summary>
+    /// Moves the body for this frame (PlayerAnimator calls it from OnAnimatorMove with the vault clip's
+    /// time). The motion is the clip's own root path and heading, measured on Ch45 (VaultCatalog), in
+    /// the vault frame: the Animator's root delta is not used, because it is expressed along the root's
+    /// heading, which turns with the body (sideways in a lazy vault). On top of it: the stretch over the
+    /// airborne window, the approach correction toward the hand's plant point, the lift and the landing
+    /// height. Also sets the playback rate for the next frame.
+    /// </summary>
+    public void Warp(float clipTime)
+    {
+        VaultPlan p = _plan;
+        VaultVariant v = p.Variant;
+        if (v == null) return;
+        float t0 = _prevClipTime, t1 = Mathf.Max(clipTime, t0);
+        Transform tr = player.transform;
+        Vector3 f = p.Direction, right = Vector3.Cross(Vector3.up, f);
+
+        // The clip's root path between the two clip times, in the vault frame, plus the stretch
+        Vector2 d = v.PathAt(t1) - v.PathAt(t0);
+        Vector3 pos = tr.position + right * d.x + f * d.y;
+        pos += f * (p.Stretch * (VaultWarpProfile.Stretch(v, t1) - VaultWarpProfile.Stretch(v, t0)));
+
+        // Run-up: the hand must meet its plant point on the top. The predicted miss is closed over the
+        // run-up still to play (the stride lengthens or shortens a little; nothing teleports)
+        if (t1 < v.Plant)
         {
-            // The cross-fade comes first and MatchTarget cannot run during it: leave room for both
-            float fade = ParkourTimings.VaultCrossFade * SpeedMultiplier / ParkourTimings.VaultClipLength;
-            StartOffset = Mathf.Min(StartOffset, Mathf.Max(0f, ParkourTimings.VaultTakeoff - ParkourTimings.VaultTakeoffWindow - fade));
+            Vector2 now = v.PathAt(t1), atPlant = v.PathAt(v.Plant);
+            float sNow = VaultWarpProfile.Stretch(v, t1), sPlant = VaultWarpProfile.Stretch(v, v.Plant);
+            Vector3 predicted = pos + right * (atPlant.x - now.x + v.HandOffset.x)
+                                    + f * (atPlant.y - now.y + v.HandOffset.z + p.Stretch * (sPlant - sNow));
+            Vector3 miss = p.PlantPoint - predicted;
+            miss.y = 0f;
+            pos += miss * Mathf.Clamp01((t1 - t0) / Mathf.Max(1e-3f, v.Plant - t0));
         }
 
-        player.BeginRootMotion();
+        // Height: the lift over the obstacle, and the landing ground (lower or higher than the start)
+        pos.y = _startRootY + p.Lift * VaultWarpProfile.Lift(v, t1) + (p.LandFeetY - p.StartFeetY) * VaultWarpProfile.Ground(v, t1);
+
+        // Facing: the clip root's heading over the vault direction (the pose turns as captured), the
+        // entry's difference faded out over the run-up, and the actor's residual heading straightened
+        // before the escape, so the run continues along the vault
+        float entryFade = 1f - VaultWarpProfile.Smooth(p.EntryTime, Mathf.Min(p.EntryTime + EntryAlignTime, v.Plant), t1);
+        float exitFade = 1f - VaultWarpProfile.Smooth(Mathf.Min(v.Land, v.Escape - ExitAlignTime), v.Escape, t1);
+        float yaw = _vaultYaw + v.HeadingAt(t1) * exitFade + _entryYawOffset * entryFade;
+        player.SetRootMotionPose(pos, Quaternion.Euler(0f, yaw, 0f));
+
+        _prevClipTime = t1;
+        ClipTime = t1;
+        // The run-up and the run-out at the approach's pace; the airborne window at the rate that keeps
+        // the clip's gravity after the lift, back to the run's pace by the landing (some clips hand over
+        // to the locomotion on their landing frame: the run must already carry the approach's speed)
+        float air = VaultWarpProfile.Smooth(v.Takeoff - 0.1f, v.Takeoff, t1) * (1f - VaultWarpProfile.Smooth(v.Land - 0.1f, v.Land, t1));
+        PlaybackRate = Mathf.Lerp(p.ApproachRate, p.AirRate, air);
     }
 
     public override void LogicUpdate()
     {
         base.LogicUpdate();
-        float progress = player.ParkourProgress;
-        bool done = progress >= 0f
-            ? progress >= ParkourTimings.VaultExit
+        bool done = player.ParkourAnimation != null && _plan.Variant != null
+            ? ClipTime >= _plan.Variant.Escape
             : Time.time - startTime >= FallbackDuration;
 
         if (done)
@@ -151,7 +201,7 @@ public class PlayerVaultState : PlayerState
         if (player.ParkourAnimation == null)
         {
             // No animation drove the body: put it on the landing point
-            player.transform.position = player.PendingVault.LandingPoint + Vector3.up * player.StandingHalfHeight;
+            player.transform.position = _plan.LandingPoint + Vector3.up * player.StandingHalfHeight;
         }
         player.EndRootMotion();
 
@@ -373,7 +423,7 @@ public class PlayerMantleState : PlayerState
             LedgeInfo top = player.CurrentLedge;
             Vector3 left = Vector3.Cross(-top.Normal, Vector3.up);
             return top.EdgeAt(player.transform.position) + left * ParkourTimings.HandLateral
-                 - top.Normal * ParkourTimings.VaultHandInset + Vector3.up * ParkourTimings.WristAboveSurface;
+                 - top.Normal * ParkourTimings.MantleHandInset + Vector3.up * ParkourTimings.WristAboveSurface;
         }
     }
 

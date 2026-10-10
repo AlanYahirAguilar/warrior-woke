@@ -651,6 +651,25 @@ namespace MxM
 
         //===========================================================================================
         /**
+        *  @brief Warrior Woke patch: the future counterpart of ForcePastTrajectoryByVelocity. After
+        *  ResetMotion the predicted future starts at rest and the generator's spring takes ~0.5 s to
+        *  reach the input's speed, so motion matching taking over from an action at a run picked a
+        *  start from standing; this seeds the prediction with the body's velocity and facing.
+        *
+        *********************************************************************************************/
+        public void ForceFutureTrajectoryByVelocity(Vector3 a_velocity, float a_facingAngle)
+        {
+            p_trajectoryGenerateJobHandle.Complete();
+            m_extractedThisFrame = false;
+            for (int i = 0; i < p_trajPositions.Length; ++i)
+            {
+                p_trajPositions[i] = a_velocity * (i / p_sampleRate);
+                p_trajFacingAngles[i] = a_facingAngle;
+            }
+        }
+
+        //===========================================================================================
+        /**
         *  @brief IMxMTrajectory implemented function which returns the transform of the game object
         *  
         *  @return Transform - the transform component of the game object

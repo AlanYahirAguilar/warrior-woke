@@ -8,7 +8,8 @@ using UnityEngine;
 /// Rising part of a grounded jump. Detects ledges on the way up and hands over to
 /// PlayerFallState at the apex (or lands directly if it touches ground while not rising).
 /// The take-off keeps the ground speed (sprint extends jumps, GDD §5.2); in the air the input only
-/// steers the momentum (PlayerMovement.AccelerateAir), it does not replace it.
+/// steers the momentum (PlayerMovement.AccelerateAir), it does not replace it, and the body never
+/// flies into a wall it does not clear (PlayerMovement.LimitAirIntoWalls).
 /// </summary>
 public class PlayerJumpState : PlayerState
 {
@@ -44,6 +45,7 @@ public class PlayerJumpState : PlayerState
         base.PhysicsUpdate();
         float speed = player.IsSprint ? player.SprintSpeed : player.BaseSpeed;
         player.AccelerateAir(player.MoveDirection * speed);
+        player.LimitAirIntoWalls();
     }
 }
 
@@ -55,6 +57,7 @@ public class PlayerJumpState : PlayerState
 /// Airborne without rising: after a jump's apex, after leaving an edge without jumping or after
 /// letting go of a ledge. Keeps the momentum it arrived with, can grab ledges, and on touching the
 /// ground registers the landing (its weight depends on the drop height) before going to Run or Idle.
+/// It never flies into a wall it does not clear (PlayerMovement.LimitAirIntoWalls).
 /// The future fatal-fall check (GDD §5.12, F15) belongs here.
 /// </summary>
 public class PlayerFallState : PlayerState
@@ -84,5 +87,6 @@ public class PlayerFallState : PlayerState
         base.PhysicsUpdate();
         float speed = player.IsSprint ? player.SprintSpeed : player.BaseSpeed;
         player.AccelerateAir(player.MoveDirection * speed);
+        player.LimitAirIntoWalls();
     }
 }

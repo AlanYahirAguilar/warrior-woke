@@ -23,6 +23,13 @@
 > `ParkourPlayModeTest` da 338–341/341 entre corridas (MxM no es determinista entre escenarios; las
 > tolerancias que dependen del ritmo del mocap están en `arquitectura.md` T27). Los números de las
 > fichas que hablan de 5 y 7 m/s son del sistema anterior y quedan como historial.
+>
+> **2026-10-09 (Fase 3):** el **vault** es un clip de mocap elegido de un catálogo por obstáculo, velocidad
+> y distancia, y warpeado sobre la geometría (P36); el **slide** espera a la barra si C se pulsa antes; el
+> **combate desarmado** tiene la cadena jab → cross → gancho, la patada de mocap, objetivo, golpe por
+> contacto, hit stop, reacción al daño y una esquiva más corta, probado sobre un muñeco de
+> entrenamiento (P37). `ParkourPlayModeTest` pasó a 531 comprobaciones: 529/531 con el código final
+> (los fallos son intermitentes y cambian entre corridas; F32).
 
 ---
 
@@ -37,9 +44,9 @@
 | F05 | Ledge grab / climb / drop / salto de cornisa | — | ⚠️ Fuera del GDD (se conserva, P2; ampliado en P28) |
 | F07 | Slide | — | ⚠️ Fuera del GDD (se conserva, P2; tecla C) |
 | F08 | Esquivar | §5.5 | ✅ |
-| F09 | Ataque ligero | §5.6 | ✅ |
-| F10 | Ataque fuerte | §5.7 | 🟡 sin retroceso, animación placeholder |
-| F11 | Combo | §5.9 | 🟡 |
+| F09 | Ataque ligero | §5.6 | ✅ jab → cross → gancho (P37) |
+| F10 | Ataque fuerte | §5.7 | ✅ patada de mocap; el retroceso lo prueba el muñeco (enemigos pendientes, P4) |
+| F11 | Combo | §5.9 | ✅ |
 | F12 | Bloqueo | §5.8 | ✅ |
 | F13 | Vida, daño e i-frames | §5.11 | 🟡 |
 | F14 | Regeneración de vida | §5.11 | ⬜ |
@@ -51,7 +58,7 @@
 | F20 | Guardado | §26 | ⬜ |
 | F21 | Cámara al hombro | §15 | 🟡 orbital con ratón; sin shake ni encuadre de combate |
 | F22 | Input | §14 | 🟡 lectura directa, sin gamepad |
-| F23 | Animación | Pilar 2 | 🟡 clips provisionales |
+| F23 | Animación | Pilar 2 | 🟡 quedan clips provisionales (braced hang, guardia acelerada) |
 | F24 | Spawning y object pooling | (técnico) | ✅ |
 | F26 | Menú, pausa, flujo de escenas | §16–§17 | ⬜ |
 | F27 | Niveles y mundos | §9–§10 | ⬜ `Level-1` es el Parkour Test Area |
@@ -81,14 +88,14 @@ todavía falta implementar.
 | Caminar hacia atrás | No lo define | S sin sprint corre hacia atrás mirando al frente a ~2 m/s (100STYLE); con Ctrl camina en cualquier dirección a 1.3 m/s (P16, P28, P34) |
 | Salto | "Impulso vertical" sin valor | ~1 m de altura (escala humana) e inercia en el aire (P23) |
 | Aterrizaje | No lo define | Según la altura de la caída: absorbe velocidad y la recupera sin bloquear el control (P23) |
-| Parkour | Solo salto, sprint y vault (§28) | Además: ledge grab/climb (desde el suelo o en el aire) y slide (se conservan por decisión P2; slide con C corriendo con momentum, P27) y auto step / step down (movimiento base). El wall jump se eliminó |
-| Ataque fuerte | Patada (desarmado) | Animación de ataque con arma de una mano como placeholder (no hay clip de patada) |
+| Parkour | Solo salto, sprint y vault (§28) | Además: ledge grab/climb (desde el suelo o en el aire), drop y salto de cornisa, mantle y slide (se conservan o se aprobaron en P2 y P28; slide con C corriendo con momentum, P27) y auto step / step down (movimiento base). El wall jump se eliminó |
+| Ataque fuerte | Patada (desarmado) | Patada frontal de mocap CMU (P37) |
 | Recoger arma ✔ P1 | E | No existe (E no hace nada todavía) |
 | Pausa | ESC | No existe |
-| Combo | J → J → K, reinicio a los 0.5 s | Hasta 3 ligeros y cierre con pesado dentro de la ventana de 0.25–0.5 s |
+| Combo | J → J → K, reinicio a los 0.5 s | Jab → cross → gancho (hasta 3 ligeros) y K remata desde cualquiera de ellos; más de 0.5 s entre pulsaciones reinicia la cadena (P37) |
 | Regeneración | Sí | No |
 | Enemigos ✔ P4 | Arquero, guerrero ligero, guerrero pesado; 3D; zona asignada | Un `Enemy` genérico sin tipos del GDD; 2.5D; patrulla en X |
-| Cámara ✔ P5 | Control libre con ratón, shake, encuadre de combate | Sigue el `forward` del jugador; sin ratón ni shake |
+| Cámara ✔ P5 | Control libre con ratón, shake, encuadre de combate | Orbital con ratón (P5); sin shake ni encuadre de combate |
 | Arte | Realista, Japón Sengoku | Placeholder `LowPolyCity` (cartoon, "cyber") |
 
 ## 3. Fichas de features
@@ -187,53 +194,44 @@ Dependencias · Consideraciones técnicas · Falta**.
 
 ### F04 — Vault ✅
 - **Objetivo:** pasar obstáculos bajos manteniendo el impulso, con Espacio (GDD §5.4).
-- **Archivos:** `PlayerParkourStates.cs` (`PlayerVaultState`), `EnvironmentChecker.cs`
-  (`TryFindVault`), `VaultInfo.cs`, `ParkourTimings.cs`, `PlayerAnimator.cs` (root motion y
-  `MatchTarget`), `PlayerContactIK.cs` (mano y pies), `PlayerGroundedStates.cs` (`Idle` y `Run`).
-- **Cómo funciona:** en `Idle` o `Run`, Espacio llama `PlayerVaultState.TryStart`: si
-  `TryFindVault` encuentra delante un obstáculo en layer Obstacle de 0.45–1.2 m de alto y hasta
-  1.5 m de fondo, con suelo libre detrás, entra a `Vault` (si no, prueba la cornisa y si no, salta).
-  El cuerpo pasa a kinemático y **lo lleva el root motion del clip** (P22), warpeado con
-  `MatchTarget` en tres fases: despegue más alto si el obstáculo supera los 0.8 m que el clip libra
-  solo, la mano izquierda sobre el punto medido de la cima (al 30 % del clip) y los pies sobre el
-  punto de aterrizaje (al 78 %). El cuerpo gira hasta quedar perpendicular a la cara del obstáculo.
-  El clip se reproduce a la velocidad de la aproximación (×0.8–1.5) y empieza más tarde si el
-  obstáculo está más cerca de lo que espera. La mano se queda apoyada con IK mientras la curva
-  `LHandCurve` lo indica, y un pie que pasa sobre el obstáculo nunca baja de su cima. Al 82 % del
-  clip sale a `Run` o `Idle` con la velocidad de la aproximación (o la de sprint).
-- **Animación:** *Vault1* (VaultFence) del Dynamic Parkour System, con root motion.
-- **Contexto (P28):** lento frente a un bloque con sitio arriba, Espacio hace mantle en lugar de
-  vault (F35); corriendo, vault. Un obstáculo más alto que el vault pero dentro del rango del mantle
-  se sube con mantle a cualquier velocidad.
-- **Probado** (secciones 02–04, obstáculos estándar): vault bajo (0.6 m), medio (1.0 m), alto
-  (1.2 m) y medio de 1.4 m de fondo; corriendo, esprintando, 1.2 m a un lado, en ángulo de 20° y
-  desde parado. La mano queda a ≤ 2.1 cm de su punto en todos los casos, los pies pasan 12–58 cm
-  sobre la cima, el cuerpo se alinea perpendicular a la cara (0°), aterriza con los pies en el suelo
-  y sale a 5 m/s (7 m/s esprintando). **Consistencia:** el mismo tipo da el mismo resultado desde
-  todas las posiciones corriendo (aterrizaje con ≤ 10 cm de diferencia). Un obstáculo de 1.6 m
-  provoca un salto.
-- **Aproximación y velocidad (2026-10-02, P27):** corriendo, Espacio mira más adelante y el vault
-  arranca en el punto de despegue del clip (1.2 m de la cara), aunque se pulse antes; caminando o
-  parado arranca donde está el cuerpo. El clip se reproduce a la velocidad de su propia carrera
-  (5.45 m/s), así que entra y sale a la velocidad de la aproximación (5.00 → 4.99 m/s, 7.0 → 7.2 m/s;
-  antes aceleraba un 24 %), y al terminar el cuerpo recibe la velocidad real del root motion. Sin
-  teleport: la mayor velocidad entre muestras es 12.9 m/s esprintando (antes un pop de hasta 22 m/s
-  en el despegue). Fuera de alcance (2 m, parado), Espacio salta.
-- **Vault de obstáculos altos desde parado (2026-10-02):** un obstáculo de más de 0.8 m necesita la
-  fase de despegue. Corriendo, el impulso sube el cuerpo a tiempo; desde parado o caminando
-  (< 3.5 m/s, la velocidad mínima del clip) y a menos de ~0.91 m de la cara, la pierna delantera
-  ya estaba en el obstáculo al empezar el clip y lo atravesaba 14 cm. Ahora en ese caso Espacio
-  salta en lugar de hacer el vault (desde 0.91–1.1 m sí hace el vault y libra la cima 13 cm).
-- **Cómo se implementó:** el 2026-09-30 se adaptó `VaultObstacle` del DPS (P15, P17), con el
-  cuerpo interpolado por código y el clip acelerado a 0.6 s. El 2026-10-01 se pasó a root motion
-  con `MatchTarget` (P22). Ver el detalle en §5.
-- **Consideraciones:** durante el vault el `CharacterController` está apagado (antes el cuerpo era
-  kinemático), así que no choca con nada; la cara, la cima, el fondo y el aterrizaje se comprueban
-  antes de empezar.
-- **Con las velocidades de P33 (2026-10-08):** "corriendo" empieza en 2.6 m/s (el clip se reproduce
-  como mínimo a ×0.6 de su carrera de 5.45 m/s), así que a 3.4 m/s Espacio espera el punto de despegue
-  y el cuerpo entra y sale a la velocidad que traía. Las alturas se comparan con 1 cm de tolerancia (el
-  vault alto mide justo el máximo del estándar).
+- **Archivos:** `PlayerParkourStates.cs` (`PlayerVaultState`), `Parkour/VaultPlanner.cs`,
+  `Parkour/VaultCatalog.cs`, `Assets/Data/Parkour/VaultCatalog.asset`, `EnvironmentChecker.cs`
+  (`TryFindVault`, `TryFindLanding`), `VaultInfo.cs`, `PlayerAnimator.cs`, `PlayerContactIK.cs`,
+  `PlayerGroundedStates.cs` (`Idle` y `Run`), `Editor/VaultCatalogBuilder.cs`.
+- **Cómo funciona (desde el 2026-10-09, P36):** Espacio en `Idle` o `Run` busca delante un obstáculo
+  de 0.45–1.1 m de alto y hasta 1.4 m de fondo (a ~1.8 m parado; corriendo, más lejos). El planificador
+  elige, entre los 14 vaults de mocap del catálogo (7 del Kinematica Demo y sus espejos), el que cubre
+  esa altura y ese fondo con un warp acotado, acepta la velocidad de la aproximación, cabe en la
+  distancia (ni lejos ni tan cerca que la pierna choque) y lleva el mismo pie adelantado que el cuerpo.
+  Si ninguno encaja, Espacio hace mantle, cornisa o salto: nunca un vault forzado. Corriendo, si el
+  obstáculo está más lejos que el punto de entrada del clip, la carrera guarda la intención hasta 0.8 s y
+  el vault empieza ahí. El warper lleva el cuerpo por la trayectoria medida del clip: ajusta la zancada
+  de la carrera de entrada para que la mano caiga en su punto, sube o baja el cuerpo lo justo sobre la
+  cima, reparte el fondo extra en el vuelo, baja los pies al suelo medido detrás y sale con la velocidad
+  que trae. Las palmas se apoyan con IK en sus puntos (cada una se suelta cuando el brazo de Ch45 ya no
+  alcanza) y los pies nunca entran en la cima. Detalle: `arquitectura.md` §5.17.
+- **Animaciones:** vaults de mocap del Kinematica Demo (Unity Companion License, `ThirdParty/Kinematica`):
+  rápidos de una mano (caminando, corriendo, esprintando), lentos con las manos y la cadera sobre la cima
+  (parado o caminando, corriendo) y dos dives; cada uno con su espejo.
+- **Probado (2026-10-09, secciones 02–04 y obstáculos temporales):** medio desde parado, caminando,
+  corriendo, con Espacio anticipado (3.2 m) y tardío (1.4 m: el dive que despega cerca), a un lado y en
+  ángulo; bajo y alto; profundo esprintando. La mano queda a 0–6 cm de su punto; ni pies, rodillas,
+  cadera ni manos entran en el obstáculo; despega a la distancia de su clip (0.56 m parado, 1.56 m
+  corriendo); sin teleport; aterriza con los pies en el suelo, alineado con el obstáculo, y sale a la
+  velocidad que traía, sin acelerón, siguiendo la carrera. Cada tipo da el mismo resultado desde todas
+  las posiciones corriendo. **Sin vault, por diseño:** alto desde parado, medio pegado (0.5 m, sin
+  carrera), desde parado a 3 m (más de dos pasos), 1.2 m de alto, medio de 0.6 m de fondo caminando y con
+  un muro detrás (aterrizaje bloqueado); en todos nada atraviesa el obstáculo. Storyboards del juego real
+  en `Logs/PlayModeVaults/`.
+- **Cómo se implementó:** el 2026-09-30 se adaptó `VaultObstacle` del DPS (P15, P17); el 2026-10-01
+  pasó a root motion con `MatchTarget` (P22); el 2026-10-02 se agregó la aproximación al punto de
+  despegue (P27); el 2026-10-08/09 se reemplazó por el catálogo de mocap y el warper propio (P36): el clip
+  del DPS volaba en cámara lenta (~4.2 m/s²), aterrizaba a ~2.6 m y era uno solo para todo (detalle en §5).
+- **Consideraciones:** durante el vault el `CharacterController` está apagado; la cara, la cima, el fondo
+  y el aterrizaje se comprueban antes de empezar. Cada vault conserva la gravedad de su clip: el lento
+  desde parado "vuela" a ~3.6 m/s² porque la cadera se desliza sobre la cima (no es un salto), los de
+  carrera a 6–10 m/s². Un obstáculo más alto o más profundo que lo que cubre el catálogo para esa marcha
+  no se vaultea (`MediumVault` estándar de 0.3 m de fondo, aprobado el 2026-10-08).
 
 
 ### F05 — Ledge grab / climb ⚠️ Fuera del GDD
@@ -273,6 +271,12 @@ Dependencias · Consideraciones técnicas · Falta**.
   el obstáculo y sigue hasta el despegue del vault, y el cuerpo encogido no usa step offset (el barrido
   de subida del `CharacterController` chocaba con la barra). C se pulsa a ≤ 1 m del obstáculo
   (`ParkourStandard.SlideEntryDistance`).
+- **Anticipación (2026-10-08, Fase 3):** C pulsado antes de una barra que el slide todavía no alcanzaría
+  (su alcance es la distancia que recorre antes de agotar la inercia) queda como intención hasta 0.8 s,
+  como Espacio para el vault, y el slide empieza donde lo lleva bajo la barra. Sin altura libre (techo a
+  0.6 m) C no desliza: agacha. Probado: C 3.5 m antes de la barra esprintando empieza en el acto y pasa
+  bajo ella; C 3.0 m antes corriendo espera hasta 1.72 m y pasa; bajo un techo de 0.6 m se agacha y
+  nada del cuerpo entra bajo él.
 - **Cómo funcionaba (contextual desde el 2026-10-02, P27):** C en `Run` si hay momentum (≥ 3.9 m/s),
   suelo plano y espacio libre a la altura del slide. El collider baja a la mitad **conservando su
   base en el suelo**. El cuerpo conserva la velocidad que traía (máximo 7.5 m/s) y la pierde con
@@ -301,47 +305,62 @@ Dependencias · Consideraciones técnicas · Falta**.
   una animación de daño (GDD §5.5).
 - **Archivos:** `PlayerCombatStates.cs` (`PlayerDodgeState`), `HealthSystem.ActivateIFrames`.
 - **Cómo funciona:** Q desde `Idle` o `Run` (solo en el suelo y si `CanDodge`: pasó 1 s desde la
-  última esquiva). La dirección es el input de movimiento relativo a la cámara en ese momento (sin
-  input, hacia el frente) y no cambia durante la esquiva. Dash a 12 u/s por 0.5 s con
-  `ActivateIFrames(0.2)`. El cuerpo no gira mientras esquiva, así que `LocalDirection` elige el roll
-  (adelante, atrás, izquierda, derecha) en el blend tree 2D `Dodge`. Luego va a `Run` o `Idle`.
-- **Consideraciones:** no se puede esquivar desde un ataque porque los estados de ataque no tienen
-  esa transición. Cuando existan animaciones de daño (F29), habrá que bloquearla también ahí.
+  última esquiva), o desde la recuperación de un ataque. La dirección es el input de movimiento relativo
+  a la cámara en ese momento (sin input, hacia el frente) y no cambia durante la esquiva. Desde el
+  2026-10-09 (P37) es un roll de ~2.6 m que empieza rápido y frena hasta detenerse en 0.5 s
+  (`v = v0 · (1 − (t/T)²)`), en lugar de un dash de 6 m a 12 m/s constantes; los muros lo detienen.
+  `ActivateIFrames(0.2)`. El cuerpo no gira, así que `LocalDirection` elige el roll (adelante, atrás,
+  izquierda, derecha) en el blend tree 2D `Dodge`. Pasada la invulnerabilidad (0.3 s), J o K responden
+  con un ataque ("evitar un ataque y responder inmediatamente", GDD §5.5). Luego va a `Run` o `Idle`.
+- **Probado:** Q + S retrocede 2.1 m (dirección local (0, −1)); después de la esquiva, J entra al ataque.
+- **Consideraciones:** no se puede esquivar durante el golpe de un ataque ni durante una reacción al
+  daño (no tienen esa transición).
 
 ### F09 — Ataque ligero ✅
-- **Objetivo:** golpe (J), daño 10 desarmado, hasta 3 encadenados, ~0.25 s (GDD §5.6).
-- **Archivos:** `PlayerCombatStates.cs` (`PlayerLightAttackState`), `Core/Combat/Hitbox.cs`,
-  `Core/Combat/WeaponHolder.cs` (opcional).
-- **Cómo funciona:** J. Al empezar, el personaje gira hacia el input (si hay) y avanza a 3 m/s
-  durante 0.12 s (impulso); luego se planta. `Hitbox.Activate()` pega a los 0.1 s, cuando el puño
-  se extiende en la animación, a los `IDamageable` dentro de la esfera (radio 0.6, centrada 0.6 m
-  al frente del torso, layer Enemy). Daño desarmado 10 (`WeaponHolder`). Dura 0.25 s y luego queda
-  una ventana hasta 0.5 s para encadenar. **Las pulsaciones de J o K durante el golpe se guardan
-  (buffer)** y se usan al abrir la ventana.
-- **Consideraciones:** los i-frames del enemigo (0.2 s) son menores que la cadencia de golpes
-  (≥ 0.25 s), así que cada golpe del combo hace daño. Probado: un segundo J pulsado a los 0.07 s se
-  encadena.
-- **Animación:** alterna PunchRight (golpes 1 y 3) y PunchLeft (golpe 2), acelerados a 0.5 s, con
-  cross-fade de 0.05 s.
-- **Cómo se implementó:** impulso, giro, sincronización del golpe y buffer el 2026-09-30 (P18).
+- **Objetivo:** golpe (J), daño 10 desarmado, hasta 3 encadenados, ~0.25 s entre ataques (GDD §5.6).
+- **Archivos:** `PlayerCombatStates.cs` (`PlayerAttackState`, `PlayerLightAttackState`),
+  `CombatTimings.cs`, `ICombatAnimation.cs`, `PlayerAnimator.cs`, `PlayerMovement.cs` (motor),
+  `Core/Combat/Hitbox.cs`, `Core/Combat/WeaponHolder.cs`.
+- **Cómo funciona (desde el 2026-10-09, P37):** J encadena **jab → cross → gancho** (Quaternius, Quaternius
+  y mocap CMU). Cada golpe sigue las fases medidas de su clip (`CombatTimings`): anticipación, golpe y
+  recuperación. Al empezar, el cuerpo gira hacia el objetivo más cercano a ±60° del input (o del frente)
+  y, si está a un paso, se acerca hasta que el puño llegue extendido a él; sin objetivo no se lanza. El
+  daño lo hace el **hueso del puño** que barre cada frame (contacto real, una vez por objetivo), y al
+  conectar el atacante se congela 0.06 s (hit stop). Las pulsaciones durante un golpe quedan en cola
+  y el siguiente empieza al abrir la cadena (cada ~0.25 s); más de 0.5 s entre pulsaciones reinicia la
+  cadena en el jab. Moverse, esquivar o bloquear interrumpen solo la recuperación. Detalle:
+  `arquitectura.md` §5.4.
+- **Probado (S12, muñeco de entrenamiento):** J, J, J da jab, cross y gancho, los tres conectan con 10 de
+  daño, primer impacto a ~0.18 s e impactos cada ~0.3 s; el atacante se congela al conectar; el muñeco se
+  inclina ~3° y se recupera; el cuerpo nunca entra en el muñeco y los puños no lo atraviesan; sin
+  teleport ni suelas hundidas; después del gancho vuelve a la locomoción. Girado 45°, el golpe se orienta
+  al muñeco (1–2° de error); desde 1.6 m el jab da un paso y conecta; desde 3.5 m no conecta ni se lanza
+  (0.02 m); con W mantenido el jab conecta y la carrera lo interrumpe en la recuperación (0.55 s); con
+  más de 0.5 s entre pulsaciones vuelve al jab.
+- **Animación:** `LightAttack1` (Punch_Jab, ×1.15), `LightAttack2` (Punch_Cross, ×1.25), `LightAttack3`
+  (Punch_Hook de CMU, ×1.35, entra en el 15 % del clip y con Foot IK).
+- **Cómo se implementó:** impulso, giro, sincronización del golpe y buffer el 2026-09-30 (P18); fases
+  medidas, cadena de tres golpes distintos, objetivo, golpe por contacto y hit stop el 2026-10-09 (P37).
 
-### F10 — Ataque fuerte 🟡
+### F10 — Ataque fuerte ✅
 - **Objetivo:** patada (K), daño 20 desarmado, 0.8 s, retroceso, vulnerable si falla (GDD §5.7).
-- **Archivos:** `PlayerCombatStates.cs` (`PlayerHeavyAttackState`).
-- **Cómo funciona:** K. Gira hacia el input, avanza a 4 m/s durante 0.15 s y se planta; activa la
-  hitbox a los 0.3 s (pico del golpe en la animación) con daño 20 desarmado (`WeaponHolder`) y dura
-  0.8 s sin cancelación; al terminar pasa a `Run` si hay input o a `Idle`. Animación:
-  MeleeAttack_OneHanded acelerada a 0.8 s, **placeholder** porque no hay clip de patada (T17).
-- **Problemas:** el knockback (`WeaponHolder.GetKnockback`) no se aplica.
-- **Falta:** retroceso y animación de patada.
+- **Archivos:** `PlayerCombatStates.cs` (`PlayerHeavyAttackState`), `CombatTimings.cs`,
+  `Core/Combat/TrainingDummy.cs`.
+- **Cómo funciona:** K. Una **patada frontal de mocap CMU** (sujeto 135): peso atrás, rodilla arriba,
+  patada y bajada a la guardia, con un paso adelante de 0.37 m hasta el impacto que es root motion (lo
+  aplica el motor, escalado si el objetivo está cerca). Impacta a los 0.47 s con el **pie** y hace 20; se
+  puede mover a los 0.77 s si conectó, pero si falla no se interrumpe hasta los 0.88 s (queda expuesto).
+  El retroceso lo hace quien recibe el golpe: el muñeco retrocede 0.35 m con 20 o más de daño.
+- **Probado:** como remate del combo conecta con 20 y el muñeco retrocede 0.36 m y vuelve; el pie no
+  entra en el muñeco más de 13 cm (el muñeco cede al impacto); desde 2.0 m avanza y conecta; fallada,
+  con W mantenido, dura 0.90 s sin cancelarse.
+- **Falta:** el retroceso de enemigos reales (no existen, P4) y la patada con arma (F16).
 
-### F11 — Combo 🟡
-- **Objetivo:** J → J → K, reinicio si pasan más de 0.5 s (GDD §5.9).
-- **Cómo funciona hoy:** `LightAttack` puede volver a entrar hasta 3 veces (`_chainCount`) o pasar
-  a `HeavyAttack` con J o K pulsados durante el golpe (buffer) o dentro de la ventana de 0.25 s a
-  0.5 s. Permite J → K, J → J → K y J → J → J → K. El GDD define exactamente J → J → K. Probado:
-  J, J, K produce dos golpes ligeros y el fuerte, con 1.4 m de avance en total.
-- **Falta:** definir si se restringe a J → J → K y que con arma use las animaciones del arma.
+### F11 — Combo ✅
+- **Objetivo:** J → J → K, reinicio si pasan más de 0.5 s entre inputs (GDD §5.9).
+- **Cómo funciona:** K en la ventana de cualquier golpe de la cadena (también pulsado durante el golpe:
+  queda en cola) cierra con la patada. Probado: J, J, K da jab, cross y patada (10, 10 y 20). Con arma
+  (F16) el combo usará las animaciones del arma.
 
 ### F12 — Bloqueo ✅
 - **Objetivo:** mantener L, −70 % de daño **solo frontal**, reduce la movilidad (GDD §5.8).
@@ -352,7 +371,10 @@ Dependencias · Consideraciones técnicas · Falta**.
   `PlayerBlockState.ModifyIncomingDamage`): si la fuente está a ±60° del frente, recibe el 30 %
   (redondeado); por la espalda o los lados, el daño completo. J mientras bloquea contraataca.
   Animación: transición Ch45 a guardia → BlockingLoop → transición Ch45 de vuelta.
-- **Cómo se implementó:** 2026-09-30 (resuelve T4) con el diseño de `arquitectura.md` §7.
+- **Cómo se implementó:** 2026-09-30 (resuelve T4) con el diseño de `arquitectura.md` §7. Desde el
+  2026-10-09 (P37) un golpe por la espalda, que no se bloquea, rompe la guardia con la reacción al daño
+  (F13); el frontal la mantiene.
+- **Probado:** golpe frontal de 20 quita 6 y la guardia aguanta; por la espalda quita 20 y reacciona.
 - **Consideraciones:** "reduce la movilidad" se interpreta como inmóvil, igual que antes. No se ha
   probado contra enemigos porque ninguno hace daño todavía (T2).
 
@@ -364,9 +386,14 @@ Dependencias · Consideraciones técnicas · Falta**.
   aplica clamp y dispara `OnDamageReceived`, `OnHealthChanged` y `OnDeath`. Los i-frames se miden con
   `Time.time`, sin corrutinas. `ActivateIFrames(d)` desplaza la marca de tiempo sin acortar unos
   i-frames que ya estén activos. `Heal` no revive; `InitializeHealth` sí.
-- **Consideraciones:** está en el Player.prefab (i-frames 0.5 s, GDD) y en el Enemy.prefab
-  (0.2 s, por debajo de la cadencia del combo). **Nadie escucha `OnDeath` del jugador**, así que
-  morir no tiene efecto. No hay HUD ni barra de vida (GDD §16, P7).
+- **Reacción al daño (2026-10-09, P37):** un golpe en el suelo interrumpe lo que hace el jugador
+  (`PlayerHurtState`): gira hacia el golpe, retrocede ~0.25 m y reproduce `Hit_Chest` (o `Hit_Head` con
+  20 o más, Quaternius). No puede moverse, atacar ni esquivar hasta que termina (GDD §5.5). En el aire,
+  agachado, en el slide o en una acción de parkour la acción sigue. Probado: golpe de 15 → reacción,
+  empujón de ~0.3 m, Q no esquiva durante ella, vuelve a Idle; golpe de 25 → reacción a la cabeza.
+- **Consideraciones:** está en el Player.prefab (i-frames 0.5 s, GDD), en el Enemy.prefab (0.2 s) y en
+  el muñeco de entrenamiento (0.1 s), por debajo de la cadencia del combo. **Nadie escucha `OnDeath` del
+  jugador**, así que morir no tiene efecto. No hay HUD ni barra de vida (GDD §16, P7).
 - **Falta:** regeneración (F14), muerte y reaparición (F19), feedback (F29).
 
 ### F14 — Regeneración de vida ⬜
@@ -462,7 +489,7 @@ Dependencias · Consideraciones técnicas · Falta**.
   el motor (desde el 2026-10-08, en Idle y Run, con el root motion de motion matching mezclado
   encima, P29); el parkour usa root motion warpeado con `MatchTarget` (P22). `PlayerContactIK`
 
-  apoya manos y pies sobre las superficies medidas. 20 estados y 5 parámetros, con IK Pass.
+  apoya manos y pies sobre las superficies medidas. 40 estados (14 de vault) y 7 parámetros, con IK Pass.
 - **Cómo se implementó (2026-09-30):**
   - El personaje se veía sin textura porque Unity no usa las texturas embebidas en un FBX hasta
     extraerlas. Se extrajeron y el material del FBX ahora tiene Base Map y Normal Map.
@@ -478,8 +505,15 @@ Dependencias · Consideraciones técnicas · Falta**.
   visible del collider; la curva `LHandCurve` vacía; el modelo 11 cm sobre el suelo; el salto con la
   pose 0.58 m sobre el collider. Se corrigió con la política de root motion por clip, `MatchTarget`,
   `PlayerContactIK` y la colocación medida del modelo (detalle en §5).
-- **Falta:** clip propio de patada y una caminata hacia atrás real (T17); hit y muerte (con
-  F19/F29); calibrar Run/Sprint contra la zancada (T16); confirmar la licencia de `LowPoly` (T15).
+- **Fase 3 (2026-10-08/09):** el vault usa mocap de Kinematica elegido por obstáculo y velocidad (P36)
+  y el combate clips medidos: jab y cross de Quaternius, gancho y patada de mocap CMU (con su propio
+  esqueleto por sujeto y un giro que apunta el golpe al frente), reacciones al daño de Quaternius (P37).
+  Salvaguardas nuevas sobre la pose final: piernas fuera de la cara del bloque en el mantle, cabeza,
+  hombros, rodillas y dedos fuera de un muro, y manos fuera de un obstáculo (`arquitectura.md` §5.10).
+  Revisión visual: hojas de poses de cada clip (`Logs/CombatClips`, `Logs/VaultProbe`) y storyboards del
+  juego (`Logs/PlayModeVaults`, `Logs/PlayModeCombat`).
+- **Falta:** muerte (con F19/F29); free hang y agarre a la carrera (T17); confirmar la licencia de
+  `LowPoly` (T15); Animation Rigging para el apoyo de pies (P31, pospuesta).
 
 ### F31 — Auto step y step down ✅
 - **Objetivo:** que los escalones y bordillos bajos no detengan la carrera ni conviertan cada
@@ -544,6 +578,12 @@ Dependencias · Consideraciones técnicas · Falta**.
   poco espacio y slide → vault; agarre → subida → correr sin teleport. También combate, esquiva,
   bloqueo y cero errores en consola. Resultado del 2026-10-02: **301/301** en dos corridas seguidas. Cada fallo imprime el estado, la posición y la suela; el del vault indica
   además el pie, el momento del clip y la posición de la mano.
+- **Resultado de la Fase 3 (2026-10-09):** 531 comprobaciones (los vaults de cada clip del catálogo, los
+  casos sin vault y el combate sobre el muñeco de S12). Las corridas completas de los últimos ajustes
+  dieron 526 y 530/531, y la del código final **529/531**: los fallos cambian de una corrida a otra y
+  salen de casos que dependen del ritmo del mocap
+  (subir los bordillos, la rodilla contra un obstáculo sin vault, el slide anticipado, atrás → adelante;
+  MxM no es determinista entre escenarios, T27).
 - **Consideraciones:** no prueba la cámara con ratón (no existe), enemigos ni la calidad visual de
   las poses; eso se revisa jugando (sección 10). El fallo intermitente de un pie hundido en escalones
   (T24) se resolvió en P27.
@@ -558,9 +598,10 @@ Dependencias · Consideraciones técnicas · Falta**.
   prefabs se generan desde él. `ParkourObstacle` mide la geometría, dice en el Inspector si cumple el
   estándar y dibuja los puntos de inicio, mano/agarre y aterrizaje. Catálogo completo, medidas y
   convención del pivote: `arquitectura.md` §5.13.
-- **Catálogo:** Step 0.25 · LowVault 0.6 · MediumVault 1.0 · HighVault 1.2 · Barrier 1.5 (no
-  transitable) · Ledge 2.2 · ClimbWall 3.0 · Slide (paso libre 1.2) · JumpGap (hueco de 2 m) ·
-  Combined.
+- **Catálogo:** Step 0.25 · LowVault 0.6 · MediumVault 1.0 (fondo 0.3) · HighVault 1.1 · Mantle 1.3 ·
+  Barrier 1.7 (no transitable) · Ledge 2.2 · ClimbWall 3.0 · Slide (paso libre 1.2) · JumpGap (hueco de
+  2 m) · Combined. (2026-10-08, P36: el vault alto bajó de 1.2 a 1.1 m y el medio pasó a 0.3 m de fondo,
+  lo que cubren los vaults de mocap a todas las marchas.)
 - **Cómo se implementó (2026-10-02, P25):** se auditaron las dimensiones del personaje y de los
   obstáculos que ya pasaban las pruebas, se eligieron alturas dentro de los rangos con margen y se
   movieron a `ParkourStandard` los valores que estaban repartidos (campos serializados de
@@ -568,7 +609,7 @@ Dependencias · Consideraciones técnicas · Falta**.
   `PlayerLedgeGrabState`; `StepHeight`). El Parkour Test Area se reconstruyó solo con los prefabs.
 - **Consideraciones:** los prefabs no se editan a mano (se regeneran). La detección sigue midiendo
   la geometría real, así que un obstáculo fuera del estándar puede funcionar igual, pero sin la
-  garantía de que caiga dentro de los rangos. Entre 1.2 y 1.9 m no hay acción (banda de la barrera).
+  garantía de que caiga dentro de los rangos. Entre 1.5 y 1.9 m no hay acción (banda de la barrera).
 
 ### F34 — Marchas: caminar, strafe, retroceso rápido, agacharse ⚠️ Fuera del GDD (P28)
 - **Objetivo:** moverse a distintas velocidades y en cualquier dirección sin tener que girar el
@@ -607,6 +648,11 @@ Dependencias · Consideraciones técnicas · Falta**.
 - **Probado:** bloques de 0.9, 1.3 y 1.5 m desde parado y 1.3 m corriendo con Espacio anticipado (y al
   final del recorrido combinado): la mano de apoyo queda en la cima (0 cm), los pies nunca dentro del
   bloque, de pie arriba, sin teleport (máximo 8 m/s), con la pose mirando hacia donde sube.
+- **Fase 3 (2026-10-08/09):** las rodillas y los dedos del pie que sube ya no entran en la cara del bloque
+  (salvaguarda sobre la pose final); la palma de apoyo se fija con IK en su punto de la cima desde que se
+  apoya (antes se deslizaba hacia la cima mientras terminaba el warp, y a veces seguía en el borde a mitad
+  del apoyo); y el cuerpo empieza a moverse cuando motion matching ya no se ve (su deriva del idle dejaba
+  la mano hasta 10 cm corta).
 
 ### F24 — Spawning y object pooling ✅
 - **Archivos:** `Core/Spawning/{ObjectPoolManager,Spawner,ReturnToPoolDelay}.cs`,
@@ -850,6 +896,7 @@ problema, la causa, la solución y el estado (formato del GDD §29 para bugs).
 | 2026-10-05 | (ver `git log`) | Axel | Retroceso y strafe de 100STYLE (P34): 8 tomas Neutral (CC BY 4.0) convertidas de BVH a FBX con Blender, importadas como Humanoid con mapeo explícito y probadas sobre Ch45; la sonda pasa a `MocapRetargetProbe` y prueba las dos fuentes. Retarget limpio, pero Neutral solo cubre velocidades bajas (detalle abajo). El jugador todavía no lo usa. |
 | 2026-10-05 | (ver `git log`) | Axel | Retroceso y strafe rápidos: búsqueda de otra fuente de mocap (ninguna libre y compatible pasa de ~2 m/s); se agregan las 8 tomas **Rushed** de 100STYLE (atrás ~2.0, de lado ~2.2 m/s) y el convertidor acepta cualquier estilo. Retarget limpio con Foot IK. |
 | 2026-10-08 | (ver `git log`) | Axel | Motion matching, fase 2 (P29, P30, P33): el Player pasa de Rigidbody a **`CharacterController`** y camina, corre y esprinta con MxM mezclado sobre el Animator Controller (`PlayerMxMLocomotion`, motor en `PlayerMovement.LateUpdate`); velocidades del mocap; dos parches más en MxM (T26); parkour y prueba reajustados a las velocidades nuevas (detalle abajo). `ParkourPlayModeTest` 338–341/341 entre corridas (T27). |
+| 2026-10-08/09 | (ver `git log`) | Axel | Fase 3, vault y combate (P36, P37): el vault es un clip de mocap de Kinematica elegido de un catálogo medido (`VaultCatalogBuilder`, `VaultPlanner`) y warpeado por código propio (`arquitectura.md` §5.17); el slide espera a la barra; el combate desarmado sigue fases medidas (`CombatTimings`): jab → cross → gancho y patada de mocap CMU, objetivo, golpe por contacto, hit stop, reacción al daño y esquiva más corta, probado sobre el muñeco de entrenamiento (§5.4). Correcciones encontradas al probar: las acciones ya no reciben el root motion de MxM mientras se desvanece, la palma del mantle se fija al apoyarse, salvaguardas de rodillas, dedos y manos contra muros, step offset 0 solo en el aire o sobre una arista sin apoyo. Detalle en F04, F09–F12, F23 y F32. `ParkourPlayModeTest`: 531 comprobaciones, 529/531 con el código final (fallos intermitentes distintos en cada corrida, F32). |
 | 2026-10-07 | (ver `git log`) | Axel | Motion matching, fase 1 (P29): MxM 2.3.3 embebido con un parche para Unity 6.6 (T26), base de datos horneada desde código (`MxMLocomotionBuilder`: 24 118 poses de Kinematica y 100STYLE, el estilo de strafe separado por tag) y prueba en Play Mode (`MxMLocomotionProbe`). 50/57: velocidades, respuesta, giros de 180°, retroceso y patinaje cumplen; quedan suelas hundidas en giros de 90° y strafe, frenado lento y strafe derecho lento (T27). La base va por Git LFS. El jugador todavía no la usa (detalle abajo). |
 | 2026-10-02 | (sin commit) | Axel | Reconstrucción del movimiento (P28), fases 2–10: animaciones CC0 de Quaternius, herramienta de medición de clips, locomoción direccional con marchas (caminar, strafe, retroceso a 3.5 m/s, agacharse), slide con bucle real, mantle, drop y salto de cornisa, roll de aterrizaje, laboratorio S11 y limpieza (detalle abajo). 341/341 en Play Mode. |
 | 2026-10-02 | (sin commit) | Axel | Reconstrucción del movimiento (P28): auditoría, investigación de repositorios y licencias, arquitectura D aprobada; fase 1: cámara orbital con ratón (P5) y giro limitado por la aceleración lateral (media vuelta que frena y pivota). 304/304 en Play Mode. |
